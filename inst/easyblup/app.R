@@ -261,6 +261,14 @@ ui <- page_fillable(
           p.style.right = 'auto'; p.style.bottom = 'auto';
         }
         function pointerDown(e){
+          // If the actual click is on the button itself, don't start drag — let the click toggle the panel.
+          try {
+            var t = e.target;
+            if (t && (t.id === 'aiFabToggle' || (t.closest && t.closest('#aiFabToggle')))) {
+              return; // allow default click flow
+            }
+          } catch(_) {}
+
           e.preventDefault();
           e.stopPropagation();
           var rect = box.getBoundingClientRect();
