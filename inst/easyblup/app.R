@@ -664,8 +664,12 @@ server <- function(input, output, session) {
   output$right_renumf90_ui <- renderUI({
     div(class = "panel-section",
       h4("RENUMF90: Pedigree & Inbreeding", class = "section-title"),
-      checkboxInput("opt_ped_search_complete", "OPTION ped_search complete", value = TRUE),
-      numericInput("opt_ped_depth", "PED_DEPTH", value = 3, min = 0, step = 1, width = "140px"),
+      checkboxInput("opt_ped_search_complete", "OPTION ped_search complete", value = FALSE),
+      checkboxInput("opt_use_ped_depth", "Use PED_DEPTH", value = FALSE),
+      conditionalPanel(
+        condition = "input.opt_use_ped_depth == true",
+        numericInput("opt_ped_depth", "PED_DEPTH", value = 0, min = 0, step = 1, width = "140px")
+      ),
       selectInput("opt_inbreeding_method", "OPTION inbreeding_method",
                  choices = c(
                    "1: Meuwissen and Luo (1992)" = "1",
@@ -1309,8 +1313,11 @@ server <- function(input, output, session) {
         param_text <- paste0(param_text, "FILE\n", pedigree_filename, "\nFILE_POS\n1 2 3 # Progeny Sire Dam\n")
         
         # RENUMF90 pedigree/inbreeding controls (omit INBREEDING/UPG_TYPE per workflow)
-        if (!is.null(input$opt_ped_depth) && !is.na(input$opt_ped_depth)) {
-          param_text <- paste0(param_text, "PED_DEPTH\n", input$opt_ped_depth, "\n")
+        # Include PED_DEPTH only when enabled and not using complete search
+        if (!isTRUE(input$opt_ped_search_complete)) {
+          if (isTRUE(input$opt_use_ped_depth) && !is.null(input$opt_ped_depth) && !is.na(input$opt_ped_depth)) {
+            param_text <- paste0(param_text, "PED_DEPTH\n", input$opt_ped_depth, "\n")
+          }
         }
         # INBREEDING and UPG_TYPE are handled by renumf90 automatically after run
     }
@@ -1360,8 +1367,10 @@ server <- function(input, output, session) {
     if (!is.null(input$opt_em_reml_rounds) && !is.na(input$opt_em_reml_rounds)) options <- c(options, paste("OPTION EM-REML", input$opt_em_reml_rounds))
     if (isTRUE(input$opt_em_reml_pure)) options <- c(options, "OPTION EM-REML pure")
     if (isTRUE(input$opt_em_reml_ai_conv)) options <- c(options, "OPTION EM-REML AI conv")
-    if (input$opt_use_yams) options <- c(options, "OPTION use_yams")
-    if (input$opt_tuned_g2) options <- c(options, "OPTION tunedG2")
+  # Only include use_yams/tunedG2 if genotype file is present
+  has_geno <- !is.null(input$geno_file) && nrow(input$geno_file) > 0
+  if (has_geno && input$opt_use_yams) options <- c(options, "OPTION use_yams")
+  if (has_geno && input$opt_tuned_g2) options <- c(options, "OPTION tunedG2")
     if (!is.null(input$opt_maxrounds_val) && !is.na(input$opt_maxrounds_val)) options <- c(options, paste("OPTION maxrounds", input$opt_maxrounds_val))
     if (!is.null(input$opt_solv_method) && nzchar(input$opt_solv_method)) options <- c(options, paste("OPTION solv_method", tolower(input$opt_solv_method)))
     if (!is.null(input$opt_r_factor) && !is.na(input$opt_r_factor)) options <- c(options, paste("OPTION r_factor", input$opt_r_factor))
@@ -1387,7 +1396,10 @@ server <- function(input, output, session) {
       if (length(pos_cols) > 0) options <- c(options, paste("OPTION hetres_pos", paste(pos_cols, collapse = " ")))
     }
     if (!is.null(input$opt_hetres_pol_preset) && nzchar(input$opt_hetres_pol_preset)) {
-      options <- c(options, paste("OPTION hetres_pol", input$opt_hetres_pol_preset))
+      # Only include hetres_pol if user changed from default ("0.1 0.01")
+      if (input$opt_hetres_pol_preset != "0.1 0.01") {
+        options <- c(options, paste("OPTION hetres_pol", input$opt_hetres_pol_preset))
+      }
     }
     
     # Genomic / ssGBLUP
@@ -1485,6 +1497,13 @@ server <- function(input, output, session) {
     session$sendCustomMessage("update_textarea", list(content = values$current_param))
     showNotification("Parameter file reset to default", type = "message", duration = 2)
   })
+
+  # When enabling PED_DEPTH, initialize value to 0
+  observeEvent(input$opt_use_ped_depth, {
+    if (isTRUE(input$opt_use_ped_depth)) {
+      updateNumericInput(session, "opt_ped_depth", value = 0)
+    }
+  }, ignoreInit = TRUE)
   
   # Handle download button click
   observeEvent(input$download_param, {
