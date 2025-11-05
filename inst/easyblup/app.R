@@ -252,7 +252,13 @@ ui <- page_fillable(
               e.preventDefault(); e.stopPropagation();
               var p = document.getElementById('aiPanel');
               if (!p) return;
-              if (p.style.display !== 'block') { p.style.display = 'block'; }
+              if (p.style.display === 'block') {
+                // Toggle off if already open
+                p.style.display = 'none';
+                return;
+              }
+              // Toggle on: open panel and show settings
+              p.style.display = 'block';
               alignPanelToFab();
               setTimeout(function(){
                 try {
