@@ -1316,7 +1316,23 @@ server <- function(input, output, session) {
     }
     
     # Options
-    param_text <- paste0(param_text, "(CO)VARIANCES\n", if (input$opt_mat) "1 0.01\n0.01 1\n" else "1\n", "\n")
+    # (CO)VARIANCES: output n x n matrix (like RESIDUAL_VARIANCE)
+    n_traits <- length(values$traits)
+    if (n_traits > 0) {
+      cov_lines <- c()
+      for (i in 1:n_traits) {
+        row_vals <- rep("1", n_traits)
+        if (n_traits > 1) {
+          for (j in 1:n_traits) {
+            if (i != j) row_vals[j] <- "0.01"
+          }
+        }
+        cov_lines <- c(cov_lines, paste(row_vals, collapse = " "))
+      }
+      param_text <- paste0(param_text, "(CO)VARIANCES\n", paste(cov_lines, collapse = "\n"), "\n\n")
+    } else {
+      param_text <- paste0(param_text, "(CO)VARIANCES\n1\n\n")
+    }
     
     if (input$opt_pe) param_text <- paste0(param_text, "(CO)VARIANCES_PE\n0.001\n")
     if (input$opt_mpe) param_text <- paste0(param_text, "(CO)VARIANCES_MPE\n0.003\n")
