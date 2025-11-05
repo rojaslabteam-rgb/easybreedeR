@@ -244,7 +244,10 @@ ui <- page_fillable(
           else { p.style.display = 'block'; alignPanelToFab(); setTimeout(loadAiSettings, 20); }
         });
 
-        var startX=0, startY=0, origLeft=0, origTop=0, dragging=false, moved=false;
+  var startX=0, startY=0, origLeft=0, origTop=0, dragging=false, moved=false;
+  // On some Windows touchpads/mice there is tiny jitter during click; use a larger threshold
+  // to avoid treating normal clicks as drags which suppresses the toggle click.
+  var dragThreshold = 8; // pixels (was 2)
         function alignPanelToFab(){
           var p = document.getElementById('aiPanel');
           if (!p || p.style.display !== 'block') return;
@@ -274,7 +277,7 @@ ui <- page_fillable(
           if (!dragging) return;
           e.preventDefault();
           var dx = e.clientX - startX; var dy = e.clientY - startY;
-          if (Math.abs(dx) + Math.abs(dy) > 2) moved = true;
+          if (Math.abs(dx) + Math.abs(dy) > dragThreshold) moved = true;
           var nx = origLeft + dx; var ny = origTop + dy;
           var vw = window.innerWidth, vh = window.innerHeight, bw = box.offsetWidth, bh = box.offsetHeight;
           nx = Math.max(8, Math.min(nx, vw - bw - 8));
@@ -289,9 +292,11 @@ ui <- page_fillable(
           dragging = false; box.classList.remove('dragging');
           try { box.releasePointerCapture && box.releasePointerCapture(e.pointerId); } catch(_){ }
           document.removeEventListener('pointermove', pointerMove);
-          if (moved) { 
-            window.__aiFabSuppressClick = true; 
-            setTimeout(function(){ window.__aiFabSuppressClick = false; }, 150); 
+          // Only suppress the immediate click if a genuine drag happened (beyond threshold)
+          if (moved) {
+            window.__aiFabSuppressClick = true;
+            // Keep suppression window short to avoid swallowing real clicks on slower browsers
+            setTimeout(function(){ window.__aiFabSuppressClick = false; }, 80);
           }
         }
         box.addEventListener('pointerdown', pointerDown, { passive: false });
