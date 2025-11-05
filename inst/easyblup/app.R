@@ -236,13 +236,41 @@ ui <- page_fillable(
         if (!box || box.__fabInit) return; box.__fabInit = true;
 
         // Toggle panel on click (suppressed after drag)
-        $(document).off('click.aiFab').on('click.aiFab', '#aiFabToggle', function(){
-          if (window.__aiFabSuppressClick) { window.__aiFabSuppressClick = false; return; }
-          var p = document.getElementById('aiPanel');
-          if (!p) return;
-          if (p.style.display === 'block') { p.style.display = 'none'; }
-          else { p.style.display = 'block'; alignPanelToFab(); setTimeout(loadAiSettings, 20); }
-        });
+          // Detect Windows platform to customize interaction
+          var isWindows = false;
+          try {
+            var ua = (navigator.userAgent||'').toLowerCase();
+            var plat = (navigator.platform||'').toLowerCase();
+            isWindows = ua.indexOf('windows') !== -1 || plat.indexOf('win') === 0;
+          } catch(_) {}
+
+          if (isWindows) {
+            // On Windows: single-click is reserved for drag (no toggle), double-click opens settings panel directly
+            $(document).off('click.aiFab');
+            $(document).off('dblclick.aiFabWin').on('dblclick.aiFabWin', '#aiFabToggle', function(e){
+              e.preventDefault(); e.stopPropagation();
+              var p = document.getElementById('aiPanel');
+              if (!p) return;
+              if (p.style.display !== 'block') { p.style.display = 'block'; }
+              alignPanelToFab();
+              setTimeout(function(){
+                try {
+                  var s = document.getElementById('aiSettings');
+                  if (s) s.style.display = 'block';
+                  if (typeof loadAiSettings === 'function') loadAiSettings();
+                } catch(_){ }
+              }, 20);
+            });
+          } else {
+            // Default (macOS/Linux): single-click toggles panel
+            $(document).off('click.aiFab').on('click.aiFab', '#aiFabToggle', function(){
+              if (window.__aiFabSuppressClick) { window.__aiFabSuppressClick = false; return; }
+              var p = document.getElementById('aiPanel');
+              if (!p) return;
+              if (p.style.display === 'block') { p.style.display = 'none'; }
+              else { p.style.display = 'block'; alignPanelToFab(); setTimeout(loadAiSettings, 20); }
+            });
+          }
 
   var startX=0, startY=0, origLeft=0, origTop=0, dragging=false, moved=false;
   // On some Windows touchpads/mice there is tiny jitter during click; use a larger threshold
