@@ -1261,7 +1261,11 @@ server <- function(input, output, session) {
         n_traits <- length(values$traits)
         effect_cols <- format_effect_cols(eff, n_traits)
         if (nzchar(effect_cols)) {
-          param_text <- paste0(param_text, "EFFECT\n", effect_cols, " ", effect_type, " alpha # ", eff, " fixed effect\n")
+          param_text <- paste0(param_text, "EFFECT\n", effect_cols, " ", effect_type)
+          if (effect_type == "cross") {
+            param_text <- paste0(param_text, " alpha")
+          }
+          param_text <- paste0(param_text, " # ", eff, " fixed effect\n")
         }
       }
     }
