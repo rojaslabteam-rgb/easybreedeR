@@ -245,9 +245,10 @@ ui <- page_fillable(
           } catch(_) {}
 
           if (isWindows) {
-            // On Windows: single-click is reserved for drag (no toggle), double-click opens settings panel directly
+            // On Windows: single-click reserved for drag; RIGHT-CLICK opens settings panel directly
             $(document).off('click.aiFab');
-            $(document).off('dblclick.aiFabWin').on('dblclick.aiFabWin', '#aiFabToggle', function(e){
+            $(document).off('dblclick.aiFabWin');
+            $(document).off('contextmenu.aiFabWin').on('contextmenu.aiFabWin', '#aiFabToggle, #aiFabBox', function(e){
               e.preventDefault(); e.stopPropagation();
               var p = document.getElementById('aiPanel');
               if (!p) return;
@@ -294,6 +295,9 @@ ui <- page_fillable(
             var t = e.target;
             isOnButton = !!(t && (t.id === 'aiFabToggle' || (t.closest && t.closest('#aiFabToggle'))));
           } catch(_) { isOnButton = false; }
+
+          // Only left button initiates drag; allow right click to open settings on Windows
+          if (e.button !== 0) { return; }
 
           // For clicks starting on the button, don't immediately prevent default so the click can fire
           // if there is no drag. For drags starting elsewhere, prevent default to avoid text selection.
