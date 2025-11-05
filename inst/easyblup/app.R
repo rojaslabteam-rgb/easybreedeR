@@ -261,16 +261,18 @@ ui <- page_fillable(
           p.style.right = 'auto'; p.style.bottom = 'auto';
         }
         function pointerDown(e){
-          // If the actual click is on the button itself, don't start drag — let the click toggle the panel.
+          var isOnButton = false;
           try {
             var t = e.target;
-            if (t && (t.id === 'aiFabToggle' || (t.closest && t.closest('#aiFabToggle')))) {
-              return; // allow default click flow
-            }
-          } catch(_) {}
+            isOnButton = !!(t && (t.id === 'aiFabToggle' || (t.closest && t.closest('#aiFabToggle'))));
+          } catch(_) { isOnButton = false; }
 
-          e.preventDefault();
-          e.stopPropagation();
+          // For clicks starting on the button, don't immediately prevent default so the click can fire
+          // if there is no drag. For drags starting elsewhere, prevent default to avoid text selection.
+          if (!isOnButton) {
+            e.preventDefault();
+            e.stopPropagation();
+          }
           var rect = box.getBoundingClientRect();
           startX = e.clientX; startY = e.clientY;
           box.style.left = rect.left + 'px'; box.style.top = rect.top + 'px';
