@@ -1244,7 +1244,7 @@ server <- function(input, output, session) {
       basename(input$pheno_file$name), "\n",
       "SKIP_HEADER\n1\nTRAITS # Specify trait columns\n",
       if (length(values$traits) > 0) get_col_num(values$traits) else "# Add trait column numbers here",
-      "\n\nFIELDS_PASSED TO OUTPUT\n\nWEIGHT(S)\n\nRESIDUAL_VARIANCE\n",
+      "\nFIELDS_PASSED TO OUTPUT\n\nWEIGHT(S)\n\nRESIDUAL_VARIANCE\n",
       generate_covariance_matrix(length(values$traits)), "\n"
     )
     
@@ -1514,7 +1514,7 @@ server <- function(input, output, session) {
         p("This parameter file will be used for BLUPF90 analysis."),
         footer = tagList(
           modalButton("Cancel"),
-          actionButton("confirm_download", "Confirm Download", class = "btn btn-success")
+          actionButton("confirm_download", "Confirm Download", class = "btn-primary")
         )
       )
     )
