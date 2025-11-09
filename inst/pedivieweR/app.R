@@ -1865,6 +1865,22 @@ output$app_subtitle_ui <- renderUI({
       
       n_rows <- nrow(ped_data())
       
+      # Auto-select individual with deepest ancestors
+      deepest_info <- find_deepest_ancestor_individual(ped_data())
+      
+      if (!is.null(deepest_info)) {
+        # Set the individual with deepest ancestors as selected
+        selected_individual(deepest_info$id)
+        
+        # Show notification
+        showNotification(
+          paste0("🎯 Auto-selected individual with deepest pedigree: ", 
+                 deepest_info$id, " (", deepest_info$depth, " generations)"),
+          type = "message",
+          duration = 8
+        )
+      }
+      
       # For large datasets, stay on data tab to avoid rendering freeze
       if (n_rows > 5000) {
         showNotification(
@@ -2947,6 +2963,89 @@ output$app_subtitle_ui <- renderUI({
     }
     
     unique(ancestors)
+  }
+  
+  # Function to calculate ancestor depth for each individual (with cycle detection)
+  get_ancestor_depth <- function(ped, individual_id, visited = character(0), max_iterations = 100) {
+    if (is.null(individual_id) || is.na(individual_id) || individual_id == "") return(0)
+    
+    # Prevent infinite recursion (cycle detection)
+    if (individual_id %in% visited) return(0)
+    if (length(visited) > max_iterations) return(length(visited))
+    
+    individual <- ped %>% filter(ID == individual_id)
+    if (nrow(individual) == 0) return(0)
+    
+    # If both parents are NA, this is a founder (depth 0)
+    if ((is.na(individual$Sire) || individual$Sire == "") && 
+        (is.na(individual$Dam) || individual$Dam == "")) return(0)
+    
+    # Add current individual to visited set
+    new_visited <- c(visited, individual_id)
+    
+    max_parent_depth <- 0
+    
+    # Get depth from sire
+    if (!is.na(individual$Sire) && individual$Sire != "") {
+      sire_depth <- get_ancestor_depth(ped, individual$Sire, new_visited, max_iterations)
+      max_parent_depth <- max(max_parent_depth, sire_depth)
+    }
+    
+    # Get depth from dam
+    if (!is.na(individual$Dam) && individual$Dam != "") {
+      dam_depth <- get_ancestor_depth(ped, individual$Dam, new_visited, max_iterations)
+      max_parent_depth <- max(max_parent_depth, dam_depth)
+    }
+    
+    return(max_parent_depth + 1)
+  }
+  
+  # Function to find individual with deepest ancestors
+  find_deepest_ancestor_individual <- function(ped) {
+    if (is.null(ped) || nrow(ped) == 0) return(NULL)
+    
+    tryCatch({
+      # For large datasets, sample to avoid performance issues
+      if (nrow(ped) > 1000) {
+        # Sample 200 non-founders for depth calculation (reduced for performance)
+        non_founders <- ped %>% filter(!is.na(Sire) | !is.na(Dam))
+        if (nrow(non_founders) == 0) return(NULL)
+        
+        if (nrow(non_founders) > 200) {
+          sample_ids <- sample(non_founders$ID, 200)
+        } else {
+          sample_ids <- non_founders$ID
+        }
+      } else {
+        # For small datasets, check all non-founders
+        non_founders <- ped %>% filter(!is.na(Sire) | !is.na(Dam))
+        if (nrow(non_founders) == 0) return(NULL)
+        sample_ids <- non_founders$ID
+      }
+      
+      # Calculate depth for sampled individuals with error handling
+      depths <- numeric(length(sample_ids))
+      for (i in seq_along(sample_ids)) {
+        depths[i] <- tryCatch({
+          get_ancestor_depth(ped, sample_ids[i])
+        }, error = function(e) {
+          0
+        })
+      }
+      
+      # Find individual with maximum depth
+      if (all(depths == 0)) return(NULL)
+      
+      max_depth <- max(depths, na.rm = TRUE)
+      if (is.na(max_depth) || max_depth == 0) return(NULL)
+      
+      deepest_id <- sample_ids[which.max(depths)]
+      
+      return(list(id = deepest_id, depth = max_depth))
+    }, error = function(e) {
+      warning("Error in find_deepest_ancestor_individual: ", e$message)
+      return(NULL)
+    })
   }
   
   # Function to get all relatives (ancestors + descendants) within specified generations
