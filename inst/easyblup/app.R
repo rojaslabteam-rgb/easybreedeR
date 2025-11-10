@@ -9,11 +9,14 @@
 library(shiny)
 library(bslib)
 
+# Declare stub globals to silence R CMD check when loaded before modules
+utils::globalVariables(c("aiAssistantUI", "aiAssistantServer", "language_code"))
+
 # Declare externally provided helpers to silence lintr visibility warnings
 utils::globalVariables(c("resolve_suite_lang", "map_suite_lang_for_app"))
 
-# Source shared language helpers
-try(source(normalizePath(file.path("..", "Language.R"), winslash = "/", mustWork = FALSE), local = TRUE), silent = TRUE)
+# Source shared language helpers (export into global env so get_label is visible)
+try(source(normalizePath(file.path("..", "Language.R"), winslash = "/", mustWork = FALSE), local = FALSE), silent = TRUE)
 
 # Capture shared get_label before defining local alias
 shared_get_label <- if (exists("get_label", mode = "function")) get_label else NULL
@@ -66,7 +69,25 @@ load_app_rules <- function(app_name) {
     if (file.exists(p)) { ai_modules_path <- p; break }
   }
   if (!is.null(ai_modules_path)) {
-    try(source(ai_modules_path, local = TRUE), silent = TRUE)
+    # Load assistant module into global env so aiAssistantUI/Server are visible to exists()
+    try(source(ai_modules_path, local = FALSE), silent = TRUE)
+    # If language_code is still missing but TRANSLATIONS loaded, define a light fallback
+    if (!exists("language_code", mode = "function")) {
+      language_code <- function(name) {
+        if (is.null(name)) return("en")
+        nm <- tolower(trimws(as.character(name)))
+        if (grepl("zh", nm)) return("zh")
+        if (grepl("portugu", nm) || grepl("pt", nm)) return("pt")
+        "en"
+      }
+    }
+    # Provide lightweight fallbacks for UI/server to avoid "no visible global" errors during static checks
+    if (!exists("aiAssistantUI", mode = "function")) {
+      aiAssistantUI <- function(id) { shiny::div(id = shiny::NS(id, "ai_placeholder"), "AI module not loaded") }
+    }
+    if (!exists("aiAssistantServer", mode = "function")) {
+      aiAssistantServer <- function(id, ...) { shiny::moduleServer(id, function(input, output, session) { }) }
+    }
   }
 
 # ====== UI Definition ======
@@ -235,49 +256,26 @@ ui <- page_fillable(
         var box = document.getElementById('aiFabBox');
         if (!box || box.__fabInit) return; box.__fabInit = true;
 
-        // Toggle panel on click (suppressed after drag)
-          // Detect Windows platform to customize interaction
-          var isWindows = false;
-          try {
-            var ua = (navigator.userAgent||'').toLowerCase();
-            var plat = (navigator.platform||'').toLowerCase();
-            isWindows = ua.indexOf('windows') !== -1 || plat.indexOf('win') === 0;
-          } catch(_) {}
-
-          if (isWindows) {
-            // On Windows: single-click reserved for drag; RIGHT-CLICK opens settings panel directly
-            $(document).off('click.aiFab');
-            $(document).off('dblclick.aiFabWin');
-            $(document).off('contextmenu.aiFabWin').on('contextmenu.aiFabWin', '#aiFabToggle, #aiFabBox', function(e){
-              e.preventDefault(); e.stopPropagation();
-              var p = document.getElementById('aiPanel');
-              if (!p) return;
-              if (p.style.display === 'block') {
-                // Toggle off if already open
-                p.style.display = 'none';
-                return;
-              }
-              // Toggle on: open panel and show settings
-              p.style.display = 'block';
-              alignPanelToFab();
-              setTimeout(function(){
-                try {
-                  var s = document.getElementById('aiSettings');
-                  if (s) s.style.display = 'block';
-                  if (typeof loadAiSettings === 'function') loadAiSettings();
-                } catch(_){ }
-              }, 20);
-            });
-          } else {
-            // Default (macOS/Linux): single-click toggles panel
-            $(document).off('click.aiFab').on('click.aiFab', '#aiFabToggle', function(){
-              if (window.__aiFabSuppressClick) { window.__aiFabSuppressClick = false; return; }
-              var p = document.getElementById('aiPanel');
-              if (!p) return;
-              if (p.style.display === 'block') { p.style.display = 'none'; }
-              else { p.style.display = 'block'; alignPanelToFab(); setTimeout(loadAiSettings, 20); }
-            });
-          }
+        // Unified behavior: RIGHT-CLICK opens (or closes) the AI assistant panel + settings on ALL platforms.
+        // Left click is reserved purely for dragging (handled below). This makes UX consistent.
+        $(document).off('click.aiFab');      // remove any prior left-click toggles
+        $(document).off('dblclick.aiFabWin');
+        $(document).off('contextmenu.aiFabUnified').on('contextmenu.aiFabUnified', '#aiFabToggle, #aiFabBox', function(e){
+          e.preventDefault(); e.stopPropagation();
+          var p = document.getElementById('aiPanel');
+          if (!p) return;
+          if (p.style.display === 'block') { p.style.display = 'none'; return; }
+          p.style.display = 'block';
+          alignPanelToFab();
+          // Always show settings when opened via right-click
+          setTimeout(function(){
+            try {
+              var s = document.getElementById('aiSettings');
+              if (s) s.style.display = 'block';
+              if (typeof loadAiSettings === 'function') loadAiSettings();
+            } catch(_){ }
+          }, 20);
+        });
 
   var startX=0, startY=0, origLeft=0, origTop=0, dragging=false, moved=false;
   // On some Windows touchpads/mice there is tiny jitter during click; use a larger threshold
@@ -756,7 +754,7 @@ server <- function(input, output, session) {
         # Chat wrapper (default visible area) — styled by ai_assistant.css to match provided mock
         div(id = "aiChatWrapper", class = "ai-chat-wrapper",
           # render the assistant module UI here so it's visible when settings hidden
-          aiAssistantUI("ai_blup")
+          get("aiAssistantUI")("ai_blup")
         )
           )
       ),
@@ -1612,9 +1610,9 @@ server <- function(input, output, session) {
     })
 
     rules <- load_app_rules("easyblupf90")
-    aiAssistantServer("ai_blup", blup_ai_data, blup_apply, app_context = reactive(list(
+    get("aiAssistantServer")("ai_blup", blup_ai_data, blup_apply, app_context = reactive(list(
       app_name = "easyblupf90",
-      locale = tryCatch(language_code(lang()), error = function(e) "zh"),
+      locale = tryCatch({ if (exists("language_code", mode = "function")) get("language_code")(lang()) else "zh" }, error = function(e) "zh"),
       rules = rules
     )), ai_settings = ai_settings)
   }
