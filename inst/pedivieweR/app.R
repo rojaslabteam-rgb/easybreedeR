@@ -2689,7 +2689,7 @@ output$app_subtitle_ui <- renderUI({
   # Highlighted individuals for export (subset of visualized network)
   highlighted_individuals <- reactiveVal(character(0))
   
-  # Info display for Selected Animal Export (based on selected individual + search depth)
+  # Info display for Selected Animal Export (match visualization exactly)
   output$selected_node_info <- renderUI({
     ped <- ped_data()
     target_id <- selected_individual()
@@ -2701,13 +2701,37 @@ output$app_subtitle_ui <- renderUI({
     depth <- input$search_depth %||% 1
     if (is.na(depth) || depth < 0) depth <- 1
 
-    ancestors <- get_ancestors(ped, target_id, max_depth = depth)
-    descendants <- get_descendants(ped, target_id, max_depth = depth)
-    selected_ids <- unique(c(target_id, ancestors, descendants))
+    # Prefer using current visualization network to ensure counts match
+    net <- network_data()
+    if (!is.null(net) && !is.null(net$nodes) && nrow(net$nodes) > 0) {
+      # Count nodes currently visualized
+      related_ids <- net$nodes$id
+      # Derive ancestors/descendants sets to present breakdown (computed with same depth)
+      ancestors <- get_ancestors(ped, target_id, max_depth = depth)
+      descendants <- get_descendants(ped, target_id, max_depth = depth)
+      # Intersect with visualized nodes to avoid mismatch
+      n_ancestors <- length(intersect(related_ids, ancestors))
+      n_descendants <- length(intersect(related_ids, descendants))
+      total_export <- length(unique(related_ids))
+    } else {
+      # Fallback to recompute when network not yet built
+      ancestors <- get_ancestors(ped, target_id, max_depth = depth)
+      descendants <- get_descendants(ped, target_id, max_depth = depth)
+      selected_ids <- unique(c(target_id, ancestors, descendants))
+      n_ancestors <- length(ancestors)
+      n_descendants <- length(descendants)
+      total_export <- length(selected_ids)
+    }
 
-    div(style = "color: #B89D5D; font-weight: bold; margin-bottom: 10px; padding: 8px; background: #f8f8f8; border-radius: 4px;",
-        paste0("🎯 Selected: ", target_id, " | Depth: ", depth,
-               " | Export count: ", length(selected_ids)))
+    div(style = "color: #B89D5D; font-weight: bold; margin-bottom: 10px; padding: 8px; background: linear-gradient(135deg, #FFF9F0 0%, #FFF5E6 100%); border-left: 4px solid #B89D5D; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);",
+        div(style = "font-size: 1.1em; margin-bottom: 6px;",
+            paste0("🎯 Selected Individual: ", target_id)),
+        div(style = "font-size: 0.95em; color: #666;",
+            paste0("📊 Search Depth: ", depth, " generation", ifelse(depth > 1, "s", ""))),
+        div(style = "font-size: 0.95em; color: #666; margin-top: 4px;",
+            paste0("📈 Export Summary: ", total_export, " individual", ifelse(total_export > 1, "s", ""),
+                   " (", n_ancestors, " ancestor", ifelse(n_ancestors != 1, "s", ""),
+                   " + 1 selected + ", n_descendants, " descendant", ifelse(n_descendants != 1, "s", ""), ")")))
   })
   
   # Whether a selected individual exists (controls export button visibility)
@@ -2820,7 +2844,7 @@ output$app_subtitle_ui <- renderUI({
         depth <- input$search_depth %||% 1
         if (is.na(depth) || depth < 0) depth <- 1
 
-        # Compute relatives within depth
+        # Compute relatives within depth with generation tracking
         ancestors <- get_ancestors(ped, target_id, max_depth = depth)
         descendants <- get_descendants(ped, target_id, max_depth = depth)
         selected_ids <- unique(c(target_id, ancestors, descendants))
@@ -2834,18 +2858,85 @@ output$app_subtitle_ui <- renderUI({
           return()
         }
 
-        # Relationship relative to selected individual
+        # Calculate generation level for each individual relative to target
+        # Helper function to calculate generation level
+        calc_generation <- function(id) {
+          if (id == target_id) return(0)
+          if (id %in% ancestors) {
+            # For ancestors, calculate upward generations
+            gen <- 0
+            current <- target_id
+            visited <- character(0)
+            
+            # Trace back through parents
+            while (gen < depth && !id %in% visited) {
+              ind <- ped %>% filter(ID == current)
+              if (nrow(ind) == 0) break
+              
+              visited <- c(visited, current)
+              gen <- gen + 1
+              
+              # Check if id is parent
+              if (!is.na(ind$Sire[1]) && ind$Sire[1] == id) return(-gen)
+              if (!is.na(ind$Dam[1]) && ind$Dam[1] == id) return(-gen)
+              
+              # Continue with one parent (prefer sire)
+              if (!is.na(ind$Sire[1]) && ind$Sire[1] != "") {
+                current <- ind$Sire[1]
+              } else if (!is.na(ind$Dam[1]) && ind$Dam[1] != "") {
+                current <- ind$Dam[1]
+              } else {
+                break
+              }
+            }
+            return(-gen)  # Negative for ancestors
+          } else if (id %in% descendants) {
+            # For descendants, calculate downward generations
+            gen <- 0
+            current <- id
+            visited <- character(0)
+            
+            # Trace back to target
+            while (gen < depth && current != target_id && !current %in% visited) {
+              ind <- ped %>% filter(ID == current)
+              if (nrow(ind) == 0) break
+              
+              visited <- c(visited, current)
+              gen <- gen + 1
+              
+              # Check parents
+              if (!is.na(ind$Sire[1]) && ind$Sire[1] == target_id) return(gen)
+              if (!is.na(ind$Dam[1]) && ind$Dam[1] == target_id) return(gen)
+              
+              # Continue with one parent
+              if (!is.na(ind$Sire[1]) && ind$Sire[1] != "") {
+                current <- ind$Sire[1]
+              } else if (!is.na(ind$Dam[1]) && ind$Dam[1] != "") {
+                current <- ind$Dam[1]
+              } else {
+                break
+              }
+            }
+            return(gen)  # Positive for descendants
+          }
+          return(NA)  # Should not reach here
+        }
+
+        # Enhanced relationship classification with generation info
         export_data <- export_data %>%
           mutate(
+            Generation = sapply(ID, calc_generation),
             Relationship = dplyr::case_when(
               ID == target_id ~ "Selected Individual",
-              ID %in% ancestors ~ "Ancestor",
-              ID %in% descendants ~ "Descendant",
+              ID %in% ancestors & Generation == -1 ~ "Parent",
+              ID %in% ancestors & Generation == -2 ~ "Grandparent",
+              ID %in% ancestors & Generation < -2 ~ paste0("Ancestor (G", abs(Generation), ")"),
+              ID %in% descendants & Generation == 1 ~ "Offspring",
+              ID %in% descendants & Generation == 2 ~ "Grandoffspring",
+              ID %in% descendants & Generation > 2 ~ paste0("Descendant (G", Generation, ")"),
               TRUE ~ "Relative"
             )
           )
-
-        # RelationCode removed per user request
 
         # Add F values if available
         if (!is.null(f_values()) && nrow(f_values()) > 0) {
@@ -2855,13 +2946,17 @@ output$app_subtitle_ui <- renderUI({
           export_data$F <- NA
         }
         
-        # Select and arrange columns: ID, Sex, F, Relationship
+        # Select and arrange columns with complete pedigree info
         final_data <- export_data %>%
-          dplyr::select(ID, Sex, F, Relationship) %>%
+          dplyr::select(ID, Sire, Dam, Sex, F, Generation, Relationship) %>%
           mutate(
+            Sire = ifelse(is.na(Sire) | Sire == "", "Unknown", as.character(Sire)),
+            Dam = ifelse(is.na(Dam) | Dam == "", "Unknown", as.character(Dam)),
             Sex = ifelse(is.na(Sex), "Unknown", as.character(Sex)),
-            F = ifelse(is.na(F), "", round(F, 4))
-          )
+            F = ifelse(is.na(F), "", round(F, 4)),
+            Generation = ifelse(is.na(Generation), "", Generation)
+          ) %>%
+          arrange(Generation, ID)  # Sort by generation, then ID
         
         write.csv(final_data, file, row.names = FALSE)
       }, error = function(e) {

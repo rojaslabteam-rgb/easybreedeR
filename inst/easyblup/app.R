@@ -1344,7 +1344,7 @@ server <- function(input, output, session) {
         pe_lines <- c()
         for (i in 1:n_traits) {
           row_vals <- rep("0.001", n_traits)
-          row_vals[i] <- "0.001"
+          row_vals[i] <- "1"
           pe_lines <- c(pe_lines, paste(row_vals, collapse = " "))
         }
         param_text <- paste0(param_text, "(CO)VARIANCES_PE\n", paste(pe_lines, collapse = "\n"), "\n")
@@ -1357,7 +1357,7 @@ server <- function(input, output, session) {
         mpe_lines <- c()
         for (i in 1:n_traits) {
           row_vals <- rep("0.001", n_traits)
-          row_vals[i] <- "0.003"
+          row_vals[i] <- "1"
           mpe_lines <- c(mpe_lines, paste(row_vals, collapse = " "))
         }
         param_text <- paste0(param_text, "(CO)VARIANCES_MPE\n", paste(mpe_lines, collapse = "\n"), "\n")
