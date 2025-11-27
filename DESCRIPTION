@@ -1,0 +1,33 @@
+Package: easybreedeR
+Type: Package
+Title: An R/Shiny Suite for Breeding Data Analysis and Workflow Management
+Version: 0.4.0
+Author: Huangyi Tang
+Maintainer: Huangyi Tang <tang749@purdue.edu>
+Description: A comprehensive R/Shiny application suite for breeding data analysis,
+    including BLUP/REML parameter generation, pedigree visualization, data preview,
+    and visual workflow management with AI-assisted features.
+License: GPL-3
+Encoding: UTF-8
+LazyData: true
+Depends: 
+    R (>= 4.1.0),
+Imports:
+    shiny (>= 1.7.0)
+Suggests:
+    bslib (>= 0.4.0),
+    DT (>= 0.20),
+    jsonlite (>= 1.8.0),
+    shinyFiles,
+    fs,
+    pedigreeTools,
+    visNetwork,
+    igraph,
+    readxl,
+    reticulate,
+    openai,
+    curl,
+    testthat (>= 3.0.0)
+RoxygenNote: 7.3.3
+Roxygen: list(markdown = TRUE)
+Config/testthat/edition: 3
