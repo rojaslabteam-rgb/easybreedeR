@@ -9,12 +9,15 @@ suppressPackageStartupMessages({
   library(DT)
   library(jsonlite)
   library(uuid)
+  library(htmltools)
   
   # Optional deps (do NOT install at runtime to avoid blocking on load)
   HAS_SHINYFILES <- requireNamespace("shinyFiles", quietly = TRUE)
   HAS_FS <- requireNamespace("fs", quietly = TRUE)
+  HAS_BASE64ENC <- requireNamespace("base64enc", quietly = TRUE)
   if (HAS_SHINYFILES) library(shinyFiles)
   if (HAS_FS) library(fs)
+  if (HAS_BASE64ENC) library(base64enc)
 })
 
 # Source shared language helpers
@@ -103,7 +106,7 @@ if (is.null(.rcw_workspace)) {
 # Scan workspace for folders and R files
 scan_workspace <- function(workspace_paths = c(.rcw_workspace, .rcw_external_folders)) {
   structure <- list(
-    folders = list(),
+    folders = character(0),
     files = list()
   )
   
@@ -115,9 +118,9 @@ scan_workspace <- function(workspace_paths = c(.rcw_workspace, .rcw_external_fol
       next
     }
     
-    # Get all R files recursively
-    all_files <- list.files(workspace_path, pattern = "\\.R$", 
-                            recursive = TRUE, full.names = TRUE)
+    # Get all R files recursively (both .R and .r)
+    all_files <- list.files(workspace_path, pattern = "\\.(R|r)$", 
+                            recursive = TRUE, full.names = TRUE, ignore.case = TRUE)
     
     for (file_path in all_files) {
       # Normalize paths for cross-platform compatibility
@@ -142,9 +145,9 @@ scan_workspace <- function(workspace_paths = c(.rcw_workspace, .rcw_external_fol
       
       structure$files[[length(structure$files) + 1]] <- file_info
       
-      # Track folders
+      # Track folders as character vector to keep unique() safe
       if (!folder %in% structure$folders) {
-        structure$folders[[length(structure$folders) + 1]] <- folder
+        structure$folders <- c(structure$folders, folder)
       }
     }
 
@@ -156,7 +159,7 @@ scan_workspace <- function(workspace_paths = c(.rcw_workspace, .rcw_external_fol
       rel_dir <- gsub(paste0("^", gsub("([.*+?^${}()|\\[\\]\\\\])", "\\\\\\1", workspace_norm), "/?"), "", dir_path_norm)
       folder_label <- if (identical(rel_dir, "") || rel_dir == ".") "root" else paste0("root", "/", rel_dir)
       if (!folder_label %in% structure$folders) {
-        structure$folders[[length(structure$folders) + 1]] <- folder_label
+        structure$folders <- c(structure$folders, folder_label)
       }
     }
   }
@@ -185,27 +188,102 @@ write_r_file <- function(file_path, content) {
   writeLines(content, file_path)
 }
 
-# Execute R code and capture output
-execute_r_code <- function(code, env = new.env()) {
+# Execute R code and capture output (with echo support like RStudio console)
+execute_r_code <- function(code, env = parent.frame(), echo = TRUE) {
   output <- list(
     success = TRUE,
     result = NULL,
     output = "",
-    error = NULL
+    error = NULL,
+    plots = list()
   )
   
-  # Capture output
-  output_text <- capture.output({
-    result <- tryCatch({
-      eval(parse(text = code), envir = env)
-    }, error = function(e) {
-      output$success <<- FALSE
-      output$error <<- e$message
-      NULL
-    })
-    })
-  output$output <- paste(output_text, collapse = "\n")
-  output$result <- result
+  # Create temporary file for source()
+  temp_file <- tempfile(fileext = ".R")
+  writeLines(code, temp_file)
+  on.exit(unlink(temp_file), add = TRUE)
+  
+  # Capture plots
+  plot_files <- list()
+  plot_counter <- 0
+  
+  # Capture all output including echo
+  output_lines <- character(0)
+  
+  tryCatch({
+    # Use source with echo=TRUE to show code lines
+    if (echo) {
+      # Capture both code and output
+      output_text <- capture.output({
+        result <- source(temp_file, local = env, echo = TRUE, print.eval = TRUE)
+      }, type = "output")
+      # Ensure output_text is atomic character vector
+      if (is.character(output_text)) {
+        output_lines <- c(output_lines, as.character(output_text))
+      } else {
+        output_lines <- c(output_lines, as.character(output_text))
+      }
+    } else {
+      output_text <- capture.output({
+        result <- source(temp_file, local = env, echo = FALSE)
+      }, type = "output")
+      # Ensure output_text is atomic character vector
+      if (is.character(output_text)) {
+        output_lines <- c(output_lines, as.character(output_text))
+      } else {
+        output_lines <- c(output_lines, as.character(output_text))
+      }
+    }
+    
+    # Check for plots - save current plot if exists
+    # Note: This approach captures the last plot from the graphics device
+    # For better plot capture, users should explicitly save plots in their code
+    if (length(dev.list()) > 0) {
+      # Get the current device (excluding null device)
+      active_devs <- dev.list()
+      if (length(active_devs) > 0) {
+        # Use the first active device
+        current_dev <- active_devs[1]
+        plot_counter <- plot_counter + 1
+        plot_file <- tempfile(fileext = ".png")
+        tryCatch({
+          # Switch to the device and save it
+          dev.set(current_dev)
+          # Create a new PNG device and copy the plot
+          png(filename = plot_file, width = 800, height = 600, res = 100)
+          # Replay the plot if we can get it
+          if (exists("recordPlot", envir = .GlobalEnv) || 
+              requireNamespace("grDevices", quietly = TRUE)) {
+            # Try to get the plot record
+            plot_record <- tryCatch(recordPlot(), error = function(e) NULL)
+            if (!is.null(plot_record)) {
+              replayPlot(plot_record)
+            }
+          }
+          dev.off()
+          plot_files[[plot_counter]] <- plot_file
+        }, error = function(e) {
+          # If recording fails, just note that a plot was created
+          # The plot might still be visible in the device
+          tryCatch(dev.off(), error = function(e2) {})
+        })
+      }
+    }
+    
+    # Ensure output_lines is atomic before pasting
+    output_lines <- as.character(output_lines)
+    output$output <- paste(output_lines, collapse = "\n")
+    output$result <- result
+    output$plots <- plot_files
+    
+  }, error = function(e) {
+    output$success <<- FALSE
+    output$error <<- e$message
+    # Ensure all components are atomic before pasting
+    error_line <- as.character(paste0("Error: ", e$message))
+    output_lines <- as.character(output_lines)
+    output$output <<- paste(c(output_lines, error_line), collapse = "\n")
+  })
   
   return(output)
 }
@@ -214,16 +292,35 @@ execute_r_code <- function(code, env = new.env()) {
 build_node_hierarchy <- function(nodes, edges) {
   if (length(nodes) == 0) return(list())
   
+  # Ensure nodes is a list
+  if (!is.list(nodes)) {
+    return(list())
+  }
+  
   all_node_ids <- names(nodes)
+  if (is.null(all_node_ids) || length(all_node_ids) == 0) {
+    return(list())
+  }
   
   # Build adjacency list maintaining edge order
   adj_list <- setNames(lapply(all_node_ids, function(id) character(0)), all_node_ids)
   in_degree <- setNames(rep(0, length(all_node_ids)), all_node_ids)
   
   # Preserve the order of edges as they appear in the canvas
-  for (edge in edges) {
-    adj_list[[edge$source]] <- c(adj_list[[edge$source]], edge$target)
-    in_degree[[edge$target]] <- in_degree[[edge$target]] + 1
+  # Ensure edges is a list and handle NULL/empty cases
+  if (!is.null(edges) && length(edges) > 0 && is.list(edges)) {
+    for (i in seq_along(edges)) {
+      edge <- edges[[i]]
+      # Check if edge is a list (not atomic vector)
+      if (is.list(edge) && !is.null(edge$source) && !is.null(edge$target)) {
+        source_id <- edge$source
+        target_id <- edge$target
+        if (source_id %in% all_node_ids && target_id %in% all_node_ids) {
+          adj_list[[source_id]] <- c(adj_list[[source_id]], target_id)
+          in_degree[[target_id]] <- in_degree[[target_id]] + 1
+        }
+      }
+    }
   }
   
   # Find root nodes (no incoming edges)
@@ -247,9 +344,16 @@ build_node_hierarchy <- function(nodes, edges) {
     if (node_id %in% visited) return()
     visited <<- c(visited, node_id)
     
+    # Ensure node is a list before accessing
+    node <- nodes[[node_id]]
+    if (!is.list(node)) {
+      # If node is not a list, create a basic structure
+      node <- list(filePath = "", fileName = node_id)
+    }
+    
     sorted_nodes <<- c(sorted_nodes, list(list(
       id = node_id,
-      node = nodes[[node_id]],
+      node = node,
       level = level
     )))
     
@@ -269,9 +373,15 @@ build_node_hierarchy <- function(nodes, edges) {
   # Add any unvisited nodes (isolated nodes)
   for (node_id in all_node_ids) {
     if (!(node_id %in% visited)) {
+      # Ensure node is a list before accessing
+      node <- nodes[[node_id]]
+      if (!is.list(node)) {
+        # If node is not a list, create a basic structure
+        node <- list(filePath = "", fileName = node_id)
+      }
       sorted_nodes <- c(sorted_nodes, list(list(
         id = node_id,
-        node = nodes[[node_id]],
+        node = node,
         level = 1
       )))
     }
@@ -280,40 +390,124 @@ build_node_hierarchy <- function(nodes, edges) {
   return(sorted_nodes)
 }
 
-# Generate R Markdown from sorted hierarchy
-generate_rmd_from_hierarchy <- function(sorted_nodes, workspace_files) {
-  rmd_lines <- c(
-    "---",
-    "title: \"RCW Pipeline Workflow\"",
-    paste0("date: \"", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\""),
-    "output: html_document",
-    "---",
-    "",
-    "```{r setup, include=FALSE}",
-    "knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)",
-    "```",
-    "",
-    "# RCW Workflow Export",
-    "",
-    "This document was automatically generated from the RCW canvas workflow.",
-    "Nodes are ordered according to the pipeline execution flow.",
-    ""
-  )
+# Generate R Markdown from sorted hierarchy with connection order markers
+generate_rmd_from_hierarchy <- function(sorted_nodes, workspace_files, edges = NULL, include_metadata = TRUE) {
+  rmd_lines <- c()
+  
+  if (include_metadata) {
+    rmd_lines <- c(
+      "---",
+      "title: \"RCW Pipeline Workflow\"",
+      paste0("date: \"", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\""),
+      "output: html_document",
+      "---",
+      "",
+      "```{r setup, include=FALSE}",
+      "knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)",
+      "```",
+      "",
+      "# RCW Workflow Export",
+      "",
+      "This document was automatically generated from the RCW canvas workflow.",
+      "Nodes are ordered according to the pipeline execution flow.",
+      ""
+    )
+  }
+  
   if (length(sorted_nodes) == 0) {
     return(paste(c(rmd_lines, "", "_No nodes in workflow_", ""), collapse = "\n"))
   }
   
-  # Add each node in topological order
-  for (node_info in sorted_nodes) {
+  # Build connection map for metadata
+  node_connections <- list()
+  for (i in seq_along(sorted_nodes)) {
+    node_info <- sorted_nodes[[i]]
+    node_id <- node_info$id
+    node_connections[[node_id]] <- list(
+      index = i,
+      level = node_info$level,
+      fileName = node_info$node$fileName
+    )
+  }
+  
+  # Add RCW metadata comment at the beginning (after YAML if included)
+  if (include_metadata) {
+    rmd_lines <- c(rmd_lines, 
+      "",
+      "<!-- RCW_METADATA_START",
+      paste0("RCW_VERSION: 1.0"),
+      paste0("NODE_COUNT: ", length(sorted_nodes)),
+      "NODES:",
+      sep = "\n"
+    )
+    
+    for (node_info in sorted_nodes) {
+      node_id <- node_info$id
+      node <- node_info$node
+      rmd_lines <- c(rmd_lines, 
+        paste0("  - id: ", node_id),
+        paste0("    fileName: ", node$fileName),
+        paste0("    filePath: ", node$filePath),
+        paste0("    level: ", node_info$level),
+        paste0("    index: ", which(sapply(sorted_nodes, function(x) x$id == node_id)))
+      )
+    }
+    
+    # Add connections/edges information
+    if (!is.null(edges) && length(edges) > 0 && is.list(edges)) {
+      rmd_lines <- c(rmd_lines, "CONNECTIONS:")
+      valid_edges <- 0
+      for (edge in edges) {
+        if (is.list(edge) && !is.null(edge$source) && !is.null(edge$target)) {
+          rmd_lines <- c(rmd_lines, 
+            paste0("  - source: ", edge$source),
+            paste0("    target: ", edge$target)
+          )
+          valid_edges <- valid_edges + 1
+        }
+      }
+      # Add connection count for debugging
+      rmd_lines <- c(rmd_lines, paste0("CONNECTION_COUNT: ", valid_edges))
+    } else {
+      rmd_lines <- c(rmd_lines, "CONNECTIONS:", "CONNECTION_COUNT: 0")
+    }
+    
+    rmd_lines <- c(rmd_lines, "RCW_METADATA_END -->", "")
+  }
+  
+  # Add each node in topological order with connection markers
+  for (i in seq_along(sorted_nodes)) {
+    node_info <- sorted_nodes[[i]]
     level <- node_info$level
     node <- node_info$node
+    node_id <- node_info$id
+    
+    # Add connection order marker as comment
+    rmd_lines <- c(rmd_lines, 
+      paste0("<!-- RCW_NODE_START id:", node_id, " level:", level, " index:", i, " -->"),
+      ""
+    )
     
     # Create heading (level + 1 to start from ##)
     heading <- paste0(paste(rep("#", level + 1), collapse = ""), " ", node$fileName)
-    rmd_lines <- c(rmd_lines, "", heading, "")
+    rmd_lines <- c(rmd_lines, heading, "")
     
-    # Find file content
-    matching_file <- Find(function(f) f$rel_path == node$filePath, workspace_files)
+    # Find file content - match by absolute path or filename
+    matching_file <- NULL
+    for (f in workspace_files) {
+      # Try to match by absolute path first
+      if (normalizePath(f$path, winslash = "/", mustWork = FALSE) == 
+          normalizePath(node$filePath, winslash = "/", mustWork = FALSE)) {
+        matching_file <- f
+        break
+      }
+      # Fallback: match by filename
+      if (basename(f$path) == node$fileName) {
+        matching_file <- f
+        break
+      }
+    }
+    
     if (!is.null(matching_file)) {
       code_content <- tryCatch({
         read_r_file(matching_file$path)
@@ -327,6 +521,13 @@ generate_rmd_from_hierarchy <- function(sorted_nodes, workspace_files) {
     } else {
       rmd_lines <- c(rmd_lines, "_File not found in workspace_", "")
     }
+    
+    # Add connection order marker end
+    rmd_lines <- c(rmd_lines, 
+      "",
+      paste0("<!-- RCW_NODE_END id:", node_id, " -->"),
+      ""
+    )
   }
   
   return(paste(rmd_lines, collapse = "\n"))
@@ -356,32 +557,161 @@ ui <- page_fillable(
     tags$script(src = "https://cdnjs.cloudflare.com/ajax/libs/dom-to-image/0.11.0/dom-to-image.min.js"),
     
     tags$style(HTML("
-    html, body { height: 100%; margin: 0; padding: 0; }
-    .title-bar {
+    html, body { 
+      height: 100%; margin: 0; padding: 0; 
+      background: #1e1e1e; color: #d4d4d4;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    }
+    
+    /* Top Navigation Bar */
+    .top-header {
+      height: 48px; background: #2d2d30;
+      border-bottom: 1px solid #3e3e42;
+      display: flex; align-items: center;
+      padding: 0 16px; flex-shrink: 0;
+      z-index: 1000;
+    }
+    .header-left {
+      display: flex; align-items: center; gap: 12px;
+      flex: 1;
+    }
+    .header-logo {
+      width: 32px; height: 32px;
       background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%);
-      padding: 15px 20px; text-align: center;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-      border-bottom: 3px solid #CFB991;
-      flex-shrink: 0;
+      border-radius: 4px; display: flex;
+      align-items: center; justify-content: center;
+      color: #000; font-weight: 700; font-size: 18px;
     }
-    .title-bar h1 {
-      margin: 0; color: #000; font-weight: 700;
-      font-size: clamp(1.5rem, 3vw, 2.5rem);
+    .header-title {
+      font-size: 14px; font-weight: 600; color: #cccccc;
     }
-    .title-bar p { margin: 5px 0 0 0; font-size: 1rem; color: #000; opacity: .9; }
-    .three-panel-container {
-      display: flex; height: calc(100vh - 72px);
+    .header-right {
+      display: flex; align-items: center; gap: 12px;
+    }
+    .webr-status {
+      display: flex; align-items: center; gap: 6px;
+      padding: 4px 12px; border-radius: 4px;
+      font-size: 12px; font-weight: 500;
+    }
+    .webr-status.loading { background: #3e3e42; color: #ffa500; }
+    .webr-status.ready { background: #1e4d1e; color: #4caf50; }
+    .webr-status.error { background: #4d1e1e; color: #f44336; }
+    .webr-status-dot {
+      width: 8px; height: 8px; border-radius: 50%;
+      background: currentColor; animation: pulse 2s infinite;
+    }
+    .webr-status.ready .webr-status-dot { animation: none; }
+    
+    /* Main Container */
+    .main-container {
+      display: flex; height: calc(100vh - 48px);
       overflow: hidden; position: relative;
     }
-    .left-panel, .right-panel {
-      width: 320px; background: #FEFEFE;
-      overflow-y: auto; overflow-x: hidden;
-      padding: 20px; flex-shrink: 0;
-      transition: all .3s ease;
+    
+    /* Left Sidebar - Explorer */
+    .left-sidebar {
+      width: 256px; background: #252526;
+      border-right: 1px solid #3e3e42;
+      display: flex; flex-direction: column;
+      position: relative;
     }
-    .left-panel { border-right: 2px solid #CFB991; }
-    .right-panel { border-left: 2px solid #CFB991; }
-    .left-panel.hidden, .right-panel.hidden { width: 0; padding: 0; overflow: hidden; }
+    .left-sidebar.hidden {
+      width: 0; border-right: none; overflow: hidden;
+    }
+    .sidebar-toggle-btn {
+      position: fixed; top: 50%; transform: translateY(-50%);
+      width: 20px; height: 40px; background: #3e3e42;
+      border: 1px solid #3e3e42; border-radius: 0 4px 4px 0;
+      cursor: pointer; z-index: 1000; display: flex;
+      align-items: center; justify-content: center;
+      color: #cccccc; font-size: 12px;
+      transition: all 0.2s;
+    }
+    .sidebar-toggle-btn:hover {
+      background: #4e4e52; color: #ffffff;
+    }
+    #toggleLeftSidebarBtn {
+      left: 0; border-radius: 0 4px 4px 0;
+    }
+    #toggleRightSidebarBtn {
+      right: 0; border-radius: 4px 0 0 4px;
+    }
+    .file-tree-item.dragging {
+      opacity: 0.5;
+    }
+    .folder-drop-hover {
+      background: rgba(206, 184, 136, 0.2) !important;
+      border: 2px dashed #CEB888 !important;
+    }
+    #toggleLeftSidebarBtn:not(.visible),
+    #toggleRightSidebarBtn:not(.visible) {
+      display: none;
+    }
+    .sidebar-header {
+      height: 35px; padding: 0 12px;
+      display: flex; align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid #3e3e42;
+      font-size: 11px; font-weight: 600;
+      text-transform: uppercase; color: #cccccc;
+      letter-spacing: 0.5px;
+    }
+    .sidebar-content {
+      flex: 1; overflow-y: auto; overflow-x: hidden;
+      padding: 8px;
+    }
+    .sidebar-footer {
+      border-top: 1px solid #3e3e42;
+      padding: 8px;
+    }
+    
+    /* Center Canvas */
+    .center-canvas {
+      flex: 1; overflow: hidden;
+      background: #1e1e1e; position: relative;
+    }
+    
+    /* Right Sidebar */
+    .right-sidebar {
+      width: 320px; background: #252526;
+      border-left: 1px solid #3e3e42;
+      display: flex; flex-direction: column;
+      flex-shrink: 0; transition: width 0.3s ease;
+    }
+    .right-sidebar.hidden { 
+      width: 0; border-left: none; overflow: hidden;
+    }
+    .right-sidebar {
+      position: relative;
+    }
+    .right-sidebar-tabs {
+      display: flex; border-bottom: 1px solid #3e3e42;
+      background: #2d2d30;
+    }
+    .right-sidebar-tab {
+      flex: 1; padding: 10px 16px;
+      background: transparent; border: none;
+      color: #cccccc; font-size: 12px;
+      font-weight: 500; cursor: pointer;
+      border-bottom: 2px solid transparent;
+      transition: all 0.2s;
+    }
+    .right-sidebar-tab:hover {
+      background: #2d2d30; color: #ffffff;
+    }
+    .right-sidebar-tab.active {
+      color: #CEB888; border-bottom-color: #CEB888;
+      background: #252526;
+    }
+    .right-sidebar-content {
+      flex: 1; overflow-y: auto; padding: 16px;
+    }
+    .right-sidebar-content .tab-pane {
+      display: none;
+    }
+    .right-sidebar-content .tab-pane.active {
+      display: block;
+    }
 
     .center-panel {
       flex: 1; overflow: hidden;
@@ -415,25 +745,35 @@ ui <- page_fillable(
       margin: 0 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid #CEB888;
     }
 
-    /* Folder/File Tree */
+    /* Folder/File Tree - Dark Theme */
     .file-tree {
       margin: 0; padding: 0; list-style: none;
     }
     .file-tree-item {
-      padding: 8px 10px; margin: 4px 0;
-      background: #fff; border: 1px solid #e0e0e0;
-      border-radius: 4px; cursor: pointer;
-      transition: all 0.2s;
+      padding: 4px 8px; margin: 2px 0;
+      background: transparent; border: none;
+      border-radius: 3px; cursor: pointer;
+      transition: all 0.15s;
       user-select: none;
+      color: #cccccc; font-size: 13px;
+      display: flex; align-items: center;
     }
     .file-tree-item:hover {
-      background: #FFF9F0; border-color: #CEB888;
+      background: #2a2d2e;
     }
     .file-tree-item.folder {
-      background: #f8f9fa; font-weight: 600;
-      border-left: 4px solid #CEB888;
+      font-weight: 500; color: #cccccc;
       display: flex; align-items: center;
       justify-content: space-between;
+    }
+    .file-tree-item.file {
+      padding-left: 24px; color: #cccccc;
+    }
+    .file-tree-item.file:hover {
+      background: #37373d;
+    }
+    .file-tree-item.file.selected {
+      background: #094771; color: #ffffff;
     }
     .folder-header {
       display: flex; align-items: center; flex: 1;
@@ -516,32 +856,37 @@ ui <- page_fillable(
       color: #c62828;
     }
 
-    /* Canvas */
+    /* Canvas - Dark Theme */
     #canvas {
       width: 100%; height: 100%;
-      background: #FAFAFA;
+      background: #1e1e1e;
+      background-image: 
+        linear-gradient(rgba(255,255,255,0.02) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(255,255,255,0.02) 1px, transparent 1px);
+      background-size: 20px 20px;
       position: relative;
       overflow: hidden;
     }
 
-    /* Canvas nodes */
+    /* Canvas nodes - Dark Theme */
     .canvas-node {
       position: absolute;
       width: 200px; min-height: 100px;
-      background: linear-gradient(135deg, #FFFFFF 0%, #F8F9FA 100%);
-      border: 3px solid #CEB888; border-radius: 10px;
+      background: #2d2d30;
+      border: 2px solid #3e3e42; border-radius: 6px;
       padding: 12px; cursor: move;
-      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
       z-index: 100;
+      color: #d4d4d4;
     }
     .canvas-node:hover {
-      border-color: #B89D5D;
-      box-shadow: 0 6px 16px rgba(0,0,0,0.25);
+      border-color: #CEB888;
+      box-shadow: 0 4px 12px rgba(206,184,136,0.3);
     }
     .canvas-node.selected {
-      border-color: #B89D5D;
-      background: linear-gradient(135deg, #FFF9F0 0%, #FFF5E6 100%);
-      box-shadow: 0 6px 20px rgba(184,157,93,0.5);
+      border-color: #CEB888;
+      background: #37373d;
+      box-shadow: 0 4px 16px rgba(206,184,136,0.4);
     }
     
     /* Connection selection style */
@@ -713,26 +1058,167 @@ ui <- page_fillable(
     #rmd_preview::-webkit-scrollbar-thumb:hover {
       background: #B89D5D;
     }
+    
+    /* Code Editor Modal */
+    .modal { z-index: 10000; }
+    .modal-content {
+      border: 2px solid #CEB888;
+      border-radius: 8px;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+    }
+    .modal-header {
+      background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%);
+      border-bottom: 2px solid #CFB991;
+      color: #000;
+    }
+    .modal-title { font-weight: 700; }
+    .code-editor-area {
+      width: 100%; min-height: 400px;
+      font-family: 'Courier New', monospace;
+      font-size: 13px; padding: 12px;
+      border: 2px solid #CFB991; border-radius: 4px;
+      background: #f8f9fa;
+      resize: vertical;
+    }
+    
+    /* Log Panel - In Right Sidebar Tab */
+    .log-content {
+      font-family: 'Courier New', monospace; font-size: 12px;
+      white-space: pre-wrap; word-wrap: break-word;
+      line-height: 1.6;
+    }
+    .log-content .log-line { margin: 2px 0; }
+    .log-content .log-error { color: #f48771; font-weight: 600; }
+    .log-content .log-success { color: #89d185; }
+    .log-content .log-code { color: #569cd6; }
+    .log-content .log-output { color: #d4d4d4; }
+    
+    
+    /* Node Status Icons */
+    .node-status {
+      position: absolute; top: 5px; right: 5px;
+      width: 20px; height: 20px; border-radius: 50%;
+      display: none; z-index: 101;
+    }
+    .node-status.running {
+      display: block; background: #ffa500; animation: pulse 1s infinite;
+    }
+    .node-status.success {
+      display: block; background: #4caf50;
+    }
+    .node-status.error {
+      display: block; background: #f44336;
+    }
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.5; }
+    }
+    
+    /* Action Buttons */
+    .action-buttons {
+      position: fixed; top: 10px; right: 20px; z-index: 1100;
+      display: flex; gap: 8px;
+    }
+    
+    /* Node Output Area */
+    .node-output {
+      margin-top: 8px; padding: 0;
+      background: #f8f9fa; border-radius: 4px;
+      font-size: 11px;
+    }
+    .node-output-header {
+      padding: 6px 8px;
+      background: #e9ecef;
+      border-radius: 4px 4px 0 0;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 10px;
+      font-weight: 600;
+      color: #495057;
+      user-select: none;
+    }
+    .node-output-header:hover {
+      background: #dee2e6;
+    }
+    .node-output-toggle {
+      font-size: 10px;
+      color: #6c757d;
+    }
+    .node-output-content {
+      padding: 8px;
+      max-height: 150px;
+      overflow-y: auto;
+      display: none;
+    }
+    .node-output-content.expanded {
+      display: block;
+    }
+    .node-plot {
+      margin-top: 8px; max-width: 100%;
+      border: 1px solid #ddd; border-radius: 4px;
+    }
   ")),
       # Additional node-shape styles
       tags$style(HTML("\
         /* Node shape modifiers applied to .canvas-node */\
-        .canvas-node.node-shape-rounded { border-radius: 12px !important; }\
-        .canvas-node.node-shape-rectangle { border-radius: 3px !important; }\
+        .canvas-node.node-shape-rectangle { border-radius: 3px !important; width: 200px !important; min-height: 100px !important; }\
+        .canvas-node.node-shape-rounded { border-radius: 12px !important; width: 200px !important; min-height: 100px !important; }\
         .canvas-node.node-shape-circle { border-radius: 50% !important; width: 120px !important; height: 120px !important; display: flex !important; align-items: center !important; justify-content: center !important; padding: 12px !important; }\
         .canvas-node.node-shape-circle .node-title { white-space: normal; text-align: center; }\
         .canvas-node.node-shape-circle .node-info { display: none !important; }\
-        /* Square and Diamond shapes for per-node appearance */\
-        .canvas-node.node-shape-square { border-radius: 6px !important; width: 160px !important; height: 64px !important; display: flex !important; align-items: center !important; justify-content: center !important; padding: 8px !important; }\
-  .canvas-node.node-shape-diamond { width: 110px !important; height: 110px !important; /* use clip-path to form a diamond without rotating the element so anchors align */ clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); display: flex !important; align-items: center !important; justify-content: center !important; position: relative !important; }\
-  /* Draw a matching diamond outline using a pseudo-element so the border follows the clip-path */\
-  .canvas-node.node-shape-diamond::before { content: ''; position: absolute; left: 0; top: 0; right: 0; bottom: 0; box-sizing: border-box; pointer-events: none; clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); border: 3px solid #CEB888; border-radius: 0; z-index: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }\
-  /* Ensure inner content sits above the outline */\
-  .canvas-node.node-shape-diamond > * { position: relative; z-index: 1; }\
-  .canvas-node.node-shape-diamond .node-title, .canvas-node.node-shape-diamond .node-info { transform: none; text-align: center; }\
-  /* Hover/selected states for diamond outline */\
-  .canvas-node.node-shape-diamond:hover::before { border-color: #B89D5D; box-shadow: 0 6px 16px rgba(0,0,0,0.25); }\
-  .canvas-node.selected.node-shape-diamond::before { border-color: #B89D5D; box-shadow: 0 6px 20px rgba(184,157,93,0.5); }\
+        .canvas-node.node-shape-diamond { width: 110px !important; height: 110px !important; clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); display: flex !important; align-items: center !important; justify-content: center !important; position: relative !important; }\
+        .canvas-node.node-shape-diamond::before { content: ''; position: absolute; left: 0; top: 0; right: 0; bottom: 0; box-sizing: border-box; pointer-events: none; clip-path: polygon(50% 0%, 100% 50%, 50% 100%, 0% 50%); border: 3px solid #CEB888; border-radius: 0; z-index: 0; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }\
+        .canvas-node.node-shape-diamond > * { position: relative; z-index: 1; }\
+        .canvas-node.node-shape-diamond .node-title, .canvas-node.node-shape-diamond .node-info { transform: none; text-align: center; }\
+        .canvas-node.node-shape-diamond:hover::before { border-color: #B89D5D; box-shadow: 0 6px 16px rgba(0,0,0,0.25); }\
+        .canvas-node.selected.node-shape-diamond::before { border-color: #B89D5D; box-shadow: 0 6px 20px rgba(184,157,93,0.5); }\
+        .canvas-node.node-shape-parallelogram { transform: skew(-20deg); width: 200px !important; min-height: 100px !important; position: relative !important; }\
+        .canvas-node.node-shape-parallelogram > * { transform: skew(20deg); }\
+        .canvas-node.node-shape-cylinder { border-radius: 50px 50px 0 0 !important; width: 200px !important; min-height: 100px !important; position: relative !important; }\
+        .canvas-node.node-shape-cylinder::after { content: ''; position: absolute; bottom: -10px; left: 0; right: 0; height: 20px; background: inherit; border-radius: 0 0 50px 50px; border: 3px solid #CEB888; border-top: none; }\
+        \
+        /* Shape selector buttons */\
+        .shape-selector { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-top: 12px; }\
+        .shape-btn { width: 100%; height: 60px; border: 2px solid #3e3e42; border-radius: 6px; background: #1e1e1e; cursor: pointer; display: flex; align-items: center; justify-content: center; transition: all 0.2s; position: relative; }\
+        .shape-btn:hover { border-color: #CEB888; background: #2d2d30; }\
+        .shape-btn.selected { border-color: #CEB888; background: #CEB888; box-shadow: 0 0 0 2px rgba(206,184,136,0.3); }\
+        .shape-preview { width: 40px; height: 30px; border: 2px solid #d4d4d4; background: #2d2d30; }\
+        .shape-preview.rectangle { border-radius: 2px; }\
+        .shape-preview.rounded { border-radius: 8px; }\
+        .shape-preview.circle { border-radius: 50%; width: 30px; height: 30px; }\
+        .shape-preview.diamond { transform: rotate(45deg); border-radius: 2px; width: 25px; height: 25px; }\
+        .shape-preview.parallelogram { transform: skew(-20deg); border-radius: 2px; }\
+        .shape-preview.cylinder { border-radius: 15px 15px 0 0; position: relative; }\
+        .shape-preview.cylinder::after { content: ''; position: absolute; bottom: -3px; left: -2px; right: -2px; height: 6px; background: inherit; border: 2px solid #333; border-top: none; border-radius: 0 0 15px 15px; }\
+        \
+        /* Color picker */\
+        .color-picker-section { margin-top: 16px; }\
+        .color-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin-top: 12px; }\
+        .color-swatch { width: 100%; aspect-ratio: 1; border: 2px solid #3e3e42; border-radius: 4px; cursor: pointer; transition: all 0.2s; position: relative; }\
+        .color-swatch:hover { transform: scale(1.1); border-color: #d4d4d4; z-index: 10; }\
+        .color-swatch.selected { border-color: #CEB888; border-width: 3px; box-shadow: 0 0 0 2px rgba(206,184,136,0.3); }\
+        .color-swatch::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-weight: bold; font-size: 14px; text-shadow: 0 0 2px rgba(0,0,0,0.5); display: none; }\
+        .color-swatch.selected::after { display: block; }\
+        .text-color-grid { display: grid; grid-template-columns: repeat(8, 1fr); gap: 6px; margin-top: 12px; }\
+        .text-color-swatch { width: 100%; aspect-ratio: 1; border: 2px solid #3e3e42; border-radius: 4px; cursor: pointer; transition: all 0.2s; position: relative; }\
+        .text-color-swatch:hover { transform: scale(1.1); border-color: #d4d4d4; z-index: 10; }\
+        .text-color-swatch.selected { border-color: #CEB888; border-width: 3px; box-shadow: 0 0 0 2px rgba(206,184,136,0.3); }\
+        .text-color-swatch::after { content: '✓'; position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); color: #fff; font-weight: bold; font-size: 14px; text-shadow: 0 0 2px rgba(0,0,0,0.5); display: none; }\
+        .text-color-swatch.selected::after { display: block; }\
+        .connector-style-selector { display: flex; gap: 8px; margin-top: 12px; }\
+        .connector-style-btn { width: 80px; height: 50px; border: 2px solid #3e3e42; border-radius: 4px; background: #1e1e1e; display: flex; align-items: center; justify-content: center; cursor: pointer; transition: all 0.2s; position: relative; }\
+        .connector-style-btn:hover { border-color: #CEB888; background: #2d2d30; }\
+        .connector-style-btn.selected { border-color: #CEB888; border-width: 3px; box-shadow: 0 0 0 2px rgba(206,184,136,0.3); }\
+        .sidebar-action-btn { transition: all 0.2s; }\
+        .sidebar-action-btn:hover { background: #3e3e42 !important; border-radius: 3px; }\
+        .sidebar-toggle-icon { transition: all 0.2s; }\
+        .sidebar-toggle-icon:hover { color: #CEB888 !important; }\
+        .color-input-wrapper { margin-top: 12px; display: flex; gap: 8px; align-items: center; }\
+        .color-input-wrapper input[type='color'] { width: 60px; height: 40px; border: 2px solid #ddd; border-radius: 4px; cursor: pointer; }\
+        .color-input-wrapper input[type='text'] { flex: 1; padding: 8px; border: 2px solid #ddd; border-radius: 4px; }\
+        \
       ")),
     
     # jsPlumb initialization (similar to OBX Canvas)
@@ -752,6 +1238,17 @@ ui <- page_fillable(
       // Server can instruct client to apply appearance to a specific node
       Shiny.addCustomMessageHandler('apply_node_appearance', function(msg) {
         try { applyNodeAppearance(msg.id, msg.appearance); } catch (e) { console.warn('apply appearance failed', e); }
+      });
+      // Toggle panel visibility
+      Shiny.addCustomMessageHandler('toggle_panel', function(msg) {
+        try {
+          var side = msg.side;
+          if (side === 'left') {
+            $('#leftPanel').toggleClass('hidden');
+          } else if (side === 'right') {
+            $('#rightPanel').toggleClass('hidden');
+          }
+        } catch (e) { console.warn('toggle panel failed', e); }
       });
     }
     
@@ -793,6 +1290,29 @@ ui <- page_fillable(
       });
 
       jsPlumbInstance.bind('connection', function(info) {
+        // Apply current connector type to new connection (with arrow)
+        if (window.currentConnectorType) {
+          try {
+            var connectorConfig = null;
+            if (window.currentConnectorType === 'bezier') {
+              connectorConfig = ['Bezier', { curviness: 50 }];
+            } else if (window.currentConnectorType === 'straight') {
+              connectorConfig = 'Straight';
+            } else if (window.currentConnectorType === 'flowchart') {
+              connectorConfig = ['Flowchart', { cornerRadius: 6 }];
+            }
+            
+            if (connectorConfig) {
+              info.connection.setConnector(connectorConfig);
+              // Ensure arrow overlay is added
+              try {
+                info.connection.addOverlay(['Arrow', { location: 1, width: 16, length: 16 }]);
+              } catch(e) {}
+            }
+          } catch(e) {
+            console.warn('Failed to set connector:', e);
+          }
+        }
         syncConnections();
         try { attachConnectionContextMenu(info.connection); } catch (e) { console.warn('attach menu failed', e); }
       });
@@ -899,6 +1419,7 @@ ui <- page_fillable(
 
       initFileDraggable();
       initFolderToggle();
+      initFileTreeContextMenu();
 
       // Attach context menus to any pre-existing connections (after restore, etc.)
       setTimeout(function(){
@@ -907,16 +1428,110 @@ ui <- page_fillable(
         } catch(e) { console.warn('initial attach failed', e); }
       }, 300);
     });
+    
+    // Sync connections to server
+    function syncConnections() {
+      try {
+        var connections = jsPlumbInstance.getConnections();
+        var edges = [];
+        connections.forEach(function(conn) {
+          edges.push({
+            source: conn.sourceId,
+            target: conn.targetId
+          });
+        });
+        Shiny.setInputValue('canvas_connections', edges, {priority: 'event'});
+      } catch(e) {
+        console.warn('syncConnections failed', e);
+      }
+    }
+    
+    // Attach context menu to connection
+    function attachConnectionContextMenu(connection) {
+      try {
+        var connEl = connection.canvas || (connection.getConnector && connection.getConnector().canvas);
+        if (!connEl) return;
+        
+        $(connEl).off('contextmenu.connection').on('contextmenu.connection', function(e) {
+          e.preventDefault();
+          e.stopPropagation();
+          
+          // Select this connection
+          if (window.selectedConnection) {
+            try {
+              var oldEl = window.selectedConnection.canvas || (window.selectedConnection.getConnector && window.selectedConnection.getConnector().canvas);
+              if (oldEl) $(oldEl).removeClass('connection-selected');
+            } catch(e) {}
+          }
+          window.selectedConnection = connection;
+          $(connEl).addClass('connection-selected');
+          
+          // Show context menu
+          var menu = $('#connectionContextMenu');
+          if (menu.length === 0) {
+            menu = $('<div id=\"connectionContextMenu\" class=\"context-menu\"></div>');
+            $('body').append(menu);
+          }
+          menu.html('<div class=\"context-menu-item\" data-action=\"delete-connection\">Delete Connection</div>');
+          menu.css({ left: e.pageX + 'px', top: e.pageY + 'px', display: 'block' });
+          
+          menu.find('.context-menu-item').off('click').on('click', function() {
+            var action = $(this).data('action');
+            if (action === 'delete-connection') {
+              try {
+                jsPlumbInstance.deleteConnection(connection);
+                syncConnections();
+                window.selectedConnection = null;
+              } catch(e) {
+                console.warn('Error deleting connection:', e);
+              }
+            }
+            menu.hide();
+          });
+          
+          return false;
+        });
+      } catch(e) {
+        console.warn('attachConnectionContextMenu failed', e);
+      }
+    }
 
     function initFileDraggable() {
       setTimeout(function() {
+        // Make files draggable
         $('.file-tree-item.file').draggable({
           helper: 'clone',
           revert: 'invalid',
           zIndex: 1000,
           appendTo: 'body',
-          cursorAt: { top: 20, left: 40 }
+          cursorAt: { top: 20, left: 40 },
+          start: function(e, ui) {
+            $(this).addClass('dragging');
+          },
+          stop: function(e, ui) {
+            $(this).removeClass('dragging');
+          }
         });
+        
+        // Make folders droppable for file movement
+        $('.file-tree-item.folder').droppable({
+          accept: '.file-tree-item.file',
+          hoverClass: 'folder-drop-hover',
+          tolerance: 'pointer',
+          drop: function(event, ui) {
+            var filePath = ui.draggable.data('filepath');
+            var fileName = ui.draggable.data('filename');
+            var targetFolder = $(this).data('folder-id') || 'root';
+            
+            // Move file to folder
+            Shiny.setInputValue('move_file_to_folder', {
+              filePath: filePath,
+              fileName: fileName,
+              targetFolder: targetFolder
+            }, {priority: 'event'});
+          }
+        });
+        
         // Multi-select support with Cmd/Ctrl
         $('.file-tree-item.file').off('click.select').on('click.select', function(e) {
           if (e.metaKey || e.ctrlKey) {
@@ -1065,18 +1680,16 @@ ui <- page_fillable(
       var el = $('#' + nodeId);
       if (!el.length) return;
       // remove old shape classes
-      el.removeClass('node-shape-rounded node-shape-rectangle node-shape-circle node-shape-square node-shape-diamond');
-      var shape = appearance.shape || 'square';
-      if (shape === 'diamond') {
-        el.addClass('node-shape-diamond');
-      } else if (shape === 'circle') {
-        el.addClass('node-shape-circle');
-      } else {
-        el.addClass('node-shape-square');
-      }
+      el.removeClass('node-shape-rounded node-shape-rectangle node-shape-circle node-shape-square node-shape-diamond node-shape-parallelogram node-shape-cylinder');
+      var shape = appearance.shape || 'rounded';
+      el.addClass('node-shape-' + shape);
 
       if (appearance.color) {
         el.css('background', appearance.color);
+        // For cylinder, also update the pseudo-element
+        if (shape === 'cylinder') {
+          el.css('--cylinder-color', appearance.color);
+        }
       }
 
       // Apply title color if specified
@@ -1084,10 +1697,14 @@ ui <- page_fillable(
         el.find('.node-title').css('color', appearance.titleColor);
       }
 
-      // We use clip-path for diamond, so do not rotate inner text; ensure neutral transform
-      el.find('.node-title, .node-info').css('transform', 'none');
+      // Reset transforms for shapes that need it
+      if (shape === 'parallelogram') {
+        el.find('.node-title, .node-info').css('transform', 'skew(20deg)');
+      } else {
+        el.find('.node-title, .node-info').css('transform', 'none');
+      }
 
-      // Rebuild endpoints to match the new shape (diamond uses corners)
+      // Rebuild endpoints to match the new shape
       try { setNodeEndpoints(nodeId, shape); } catch (e) { console.warn('set endpoints failed', e); }
 
       if (canvasNodes[nodeId]) {
@@ -1132,6 +1749,7 @@ ui <- page_fillable(
         var anchors = ['Top','Bottom','Left','Right'];
         anchors.forEach(function(a){ try { jsPlumbInstance.addEndpoint(id, Object.assign({ anchor: a, isSource: true, isTarget: true }, epOpts)); } catch(e){} });
       } else {
+        // Rectangle, Rounded, Parallelogram, Cylinder all use standard anchors
         var anchors = ['Top','Bottom','Left','Right'];
         anchors.forEach(function(a){ try { jsPlumbInstance.addEndpoint(id, Object.assign({ anchor: a, isSource: true, isTarget: true }, epOpts)); } catch(e){} });
       }
@@ -1174,14 +1792,22 @@ ui <- page_fillable(
     function createCanvasNode(id, filePath, fileName, x, y, firstLine, appearance) {
       var node = $('<div>')
         .attr('id', id)
-        .addClass('canvas-node node-shape-square')
+        .addClass('canvas-node node-shape-rounded')
         .css({ left: x + 'px', top: y + 'px', background: '#ffffff' })
         .html(
-          '<div class=\"node-title\">' + fileName + '</div>'
+          '<div class=\"node-status\" id=\"status-' + id + '\"></div>' +
+          '<div class=\"node-title\">' + fileName + '</div>' +
+          '<div class=\"node-output\" id=\"output-' + id + '\" style=\"display: none;\">' +
+            '<div class=\"node-output-header\" onclick=\"toggleNodeOutput(\\'' + id + '\\')\">' +
+              '<span>Output</span>' +
+              '<span class=\"node-output-toggle\" id=\"output-toggle-' + id + '\">▼</span>' +
+            '</div>' +
+            '<div class=\"node-output-content\" id=\"output-content-' + id + '\"></div>' +
+          '</div>'
         );
 
       $('#canvas').append(node);
-      var defaultAppearance = appearance || { shape: 'square', color: '#ffffff', titleColor: '#2c3e50' };
+      var defaultAppearance = appearance || { shape: 'rounded', color: '#2d2d30', titleColor: '#d4d4d4' };
       canvasNodes[id] = { filePath: filePath, fileName: fileName, x: x, y: y, firstLine: firstLine || '', appearance: defaultAppearance };
       
       // Apply appearance (including title color)
@@ -1211,6 +1837,38 @@ ui <- page_fillable(
         e.stopPropagation(); // Prevent canvas click from deselecting
         $('.canvas-node').removeClass('selected');
         $(this).addClass('selected');
+        
+        // Update style inputs
+        var nodeData = canvasNodes[id];
+        if (nodeData && nodeData.appearance) {
+          var shape = nodeData.appearance.shape || 'rounded';
+          // Update shape selector buttons
+          $('.shape-btn').removeClass('selected');
+          $('.shape-btn[data-shape=\"' + shape + '\"]').addClass('selected');
+          // Update color swatches (shape fill)
+          $('.color-swatch').removeClass('selected');
+          var color = nodeData.appearance.color || '#2d2d30';
+          $('.color-swatch[data-color=\"' + color + '\"]').addClass('selected');
+          $('#node_color_input').val(color);
+          $('#node_color_text').val(color);
+          
+          // Update text color swatches
+          $('.text-color-swatch').removeClass('selected');
+          var titleColor = nodeData.appearance.titleColor || '#d4d4d4';
+          $('.text-color-swatch[data-color=\"' + titleColor + '\"]').addClass('selected');
+          $('#node_title_color').val(titleColor);
+          $('#node_title_color_text').val(titleColor);
+        }
+        
+        // Update logs tab with node output
+        if (nodeData && nodeData.lastOutput) {
+          Shiny.setInputValue('get_node_logs', {nodeId: id}, {priority: 'event'});
+        }
+        
+        // Switch to Style tab when node is selected (but keep execution logs visible)
+        $('#rightSidebar').removeClass('hidden');
+        $('.right-sidebar-tab[data-tab=\"style\"]').click();
+        
         // Clear connection selection when node is selected
         if (window.selectedConnection) {
           try {
@@ -1251,38 +1909,6 @@ ui <- page_fillable(
         '</div>' +
         '<div class=\"context-menu-item\" data-action=\"delete\">' +
         '  Remove from Canvas' +
-        '</div>' +
-        '<div style=\"border-top: 1px solid #e0e0e0; margin: 4px 0;\"></div>' +
-        '<div class=\"context-menu-item has-submenu\">' +
-        '  Shape' +
-        '  <div class=\"context-submenu\">' +
-        '    <div class=\"context-submenu-item\" data-action=\"shape-square\">Square</div>' +
-        '    <div class=\"context-submenu-item\" data-action=\"shape-diamond\">Diamond</div>' +
-        '  </div>' +
-        '</div>' +
-        '<div class=\"context-menu-item has-submenu\">' +
-        '  Text Color' +
-        '  <div class=\"context-submenu\">' +
-        '    <div class=\"context-submenu-item\" data-action=\"title-color-red\">Red</div>' +
-        '    <div class=\"context-submenu-item\" data-action=\"title-color-green\">Green</div>' +
-        '    <div class=\"context-submenu-item\" data-action=\"title-color-blue\">Blue</div>' +
-        '    <div class=\"context-submenu-item\" data-action=\"title-color-yellow\">Yellow</div>' +
-        '    <div class=\"context-submenu-item\" data-action=\"title-color-black\">Black</div>' +
-        '    <div class=\"context-submenu-item\" data-action=\"title-color-orange\">Orange</div>' +
-        '    <div class=\"context-submenu-item\" data-action=\"title-color-purple\">Purple</div>' +
-        '  </div>' +
-        '</div>' +
-        '<div class=\"context-menu-item has-submenu\">' +
-        '  Background Color' +
-        '  <div class=\"context-submenu\">' +
-        '    <div class=\"context-submenu-item\" data-action=\"bg-color-red\">Red</div>' +
-        '    <div class=\"context-submenu-item\" data-action=\"bg-color-green\">Green</div>' +
-        '    <div class=\"context-submenu-item\" data-action=\"bg-color-blue\">Blue</div>' +
-        '    <div class=\"context-submenu-item\" data-action=\"bg-color-yellow\">Yellow</div>' +
-        '    <div class=\"context-submenu-item\" data-action=\"bg-color-white\">White</div>' +
-        '    <div class=\"context-submenu-item\" data-action=\"bg-color-orange\">Orange</div>' +
-        '    <div class=\"context-submenu-item\" data-action=\"bg-color-purple\">Purple</div>' +
-        '  </div>' +
         '</div>'
       );
       
@@ -1290,16 +1916,6 @@ ui <- page_fillable(
       
       // Handle main menu items (non-submenu)
       menu.find('.context-menu-item').off('click').on('click', function(e) {
-        var action = $(this).data('action');
-        if (action && !$(this).hasClass('has-submenu')) {
-          handleContextMenuAction(action);
-          hideContextMenu();
-        }
-        e.stopPropagation();
-      });
-      
-      // Handle submenu items
-      menu.find('.context-submenu-item').off('click').on('click', function(e) {
         var action = $(this).data('action');
         if (action) {
           handleContextMenuAction(action);
@@ -1313,1672 +1929,2846 @@ ui <- page_fillable(
       $('#contextMenu').hide();
     }
     
+    // Hide context menu when clicking outside
+    $(document).on('click', function(e) {
+      // Check if click is on a context menu item - let the menu handle it first
+      var clickedOnMenuItem = $(e.target).closest('.context-menu-item').length > 0;
+      
+      // Hide node context menu if clicking outside it
+      if (!$(e.target).closest('#contextMenu').length && !clickedOnMenuItem) {
+        hideContextMenu();
+      }
+      
+      // Hide connection context menu if clicking outside it
+      if (!$(e.target).closest('#connectionContextMenu').length && !clickedOnMenuItem) {
+        $('#connectionContextMenu').hide();
+      }
+    });
+    
+    // Also hide menus when right-clicking elsewhere (to show new menu)
+    $(document).on('contextmenu', function(e) {
+      // If right-clicking outside menus, hide existing menus
+      // (New menu will be shown by the specific contextmenu handler)
+      if (!$(e.target).closest('#contextMenu').length && 
+          !$(e.target).closest('#connectionContextMenu').length) {
+        hideContextMenu();
+        $('#connectionContextMenu').hide();
+      }
+    });
+    
     function handleContextMenuAction(action) {
       if (!currentContextNode) return;
       
       if (action === 'edit') {
-        Shiny.setInputValue('node_edit', currentContextNode, {priority: 'event'});
+        openCodeEditor(currentContextNode.id, currentContextNode.filePath, currentContextNode.fileName);
       } else if (action === 'run') {
         Shiny.setInputValue('node_run', currentContextNode, {priority: 'event'});
       } else if (action === 'delete') {
         Shiny.setInputValue('node_delete', currentContextNode, {priority: 'event'});
-      } else if (action === 'shape-square' || action === 'shape-diamond') {
-        var ap = {};
-        if (action === 'shape-square') ap.shape = 'square';
-        if (action === 'shape-diamond') ap.shape = 'diamond';
-        // Preserve existing appearance
-        if (canvasNodes[currentContextNode.id] && canvasNodes[currentContextNode.id].appearance) {
-          ap = Object.assign({}, canvasNodes[currentContextNode.id].appearance, ap);
-        }
-        try { applyNodeAppearance(currentContextNode.id, ap); } catch(e) {}
-        try { Shiny.setInputValue('node_set_appearance', { id: currentContextNode.id, shape: ap.shape }, {priority: 'event'}); } catch(e) {}
-      } else if (action.indexOf('bg-color-') === 0) {
-        // Handle background color changes
-        var bgColorMap = {
-          'bg-color-red': '#ffdddd',
-          'bg-color-green': '#ddffdd',
-          'bg-color-blue': '#dde7ff',
-          'bg-color-yellow': '#fff6cc',
-          'bg-color-white': '#ffffff',
-          'bg-color-orange': '#ffe4cc',
-          'bg-color-purple': '#e6d9f5'
-        };
-        var bgColor = bgColorMap[action] || '#ffffff';
-        
-        // Get existing appearance
-        var ap = {};
-        if (canvasNodes[currentContextNode.id] && canvasNodes[currentContextNode.id].appearance) {
-          ap = Object.assign({}, canvasNodes[currentContextNode.id].appearance);
-        }
-        ap.color = bgColor;
-        
-        // Apply background color
-        try { applyNodeAppearance(currentContextNode.id, ap); } catch(e) {}
-        
-        // Send to server
-        try { 
-          Shiny.setInputValue('node_set_appearance', { 
-            id: currentContextNode.id, 
-            color: bgColor 
-          }, {priority: 'event'}); 
-        } catch(e) {}
-      } else if (action.indexOf('title-color-') === 0) {
-        // Handle title color changes
-        var titleColorMap = {
-          'title-color-red': '#dc3545',
-          'title-color-green': '#28a745',
-          'title-color-blue': '#007bff',
-          'title-color-yellow': '#ffc107',
-          'title-color-black': '#2c3e50',
-          'title-color-orange': '#fd7e14',
-          'title-color-purple': '#6f42c1'
-        };
-        var titleColor = titleColorMap[action] || '#2c3e50';
-        
-        // Get existing appearance
-        var ap = {};
-        if (canvasNodes[currentContextNode.id] && canvasNodes[currentContextNode.id].appearance) {
-          ap = Object.assign({}, canvasNodes[currentContextNode.id].appearance);
-        }
-        ap.titleColor = titleColor;
-        
-        // Apply color to node title
-        try { applyNodeAppearance(currentContextNode.id, ap); } catch(e) {}
-        
-        // Send to server
-        try { 
-          Shiny.setInputValue('node_set_appearance', { 
-            id: currentContextNode.id, 
-            titleColor: titleColor 
-          }, {priority: 'event'}); 
-        } catch(e) {}
       }
     }
+
+    // Shape selector click handler
+    $(document).on('click', '.shape-btn', function() {
+      var shape = $(this).data('shape');
+      $('.shape-btn').removeClass('selected');
+      $(this).addClass('selected');
+      
+      var selectedNode = $('.canvas-node.selected');
+      if (selectedNode.length === 0) return;
+      
+      var nodeId = selectedNode.attr('id');
+      var nodeData = canvasNodes[nodeId];
+      if (!nodeData) return;
+      
+      var appearance = nodeData.appearance || { shape: 'rounded', color: '#2d2d30', titleColor: '#d4d4d4' };
+      appearance.shape = shape;
+      
+      canvasNodes[nodeId].appearance = appearance;
+      applyNodeAppearance(nodeId, appearance);
+      
+      Shiny.setInputValue('node_set_appearance', { 
+        id: nodeId, 
+        color: appearance.color, 
+        shape: shape,
+        titleColor: appearance.titleColor 
+      }, {priority: 'event'});
+    });
     
-    $(document).on('click', function(e) {
-      if (!$(e.target).closest('.context-menu').length) {
-        hideContextMenu();
+    // Color swatch click handler (for shape fill)
+    $(document).on('click', '.color-swatch', function() {
+      var color = $(this).data('color');
+      $('.color-swatch').removeClass('selected');
+      $(this).addClass('selected');
+      $('#node_color_input').val(color);
+      $('#node_color_text').val(color);
+      
+      var selectedNode = $('.canvas-node.selected');
+      if (selectedNode.length === 0) return;
+      
+      var nodeId = selectedNode.attr('id');
+      var nodeData = canvasNodes[nodeId];
+      if (!nodeData) return;
+      
+      var appearance = nodeData.appearance || { shape: 'rounded', color: '#2d2d30', titleColor: '#d4d4d4' };
+      appearance.color = color;
+      
+      canvasNodes[nodeId].appearance = appearance;
+      applyNodeAppearance(nodeId, appearance);
+      
+      Shiny.setInputValue('node_set_appearance', { 
+        id: nodeId, 
+        color: color, 
+        shape: appearance.shape,
+        titleColor: appearance.titleColor 
+      }, {priority: 'event'});
+    });
+    
+    // Text color swatch click handler
+    $(document).on('click', '.text-color-swatch', function() {
+      var color = $(this).data('color');
+      $('.text-color-swatch').removeClass('selected');
+      $(this).addClass('selected');
+      $('#node_title_color').val(color);
+      $('#node_title_color_text').val(color);
+      
+      var selectedNode = $('.canvas-node.selected');
+      if (selectedNode.length === 0) return;
+      
+      var nodeId = selectedNode.attr('id');
+      var nodeData = canvasNodes[nodeId];
+      if (!nodeData) return;
+      
+      var appearance = nodeData.appearance || { shape: 'rounded', color: '#2d2d30', titleColor: '#d4d4d4' };
+      appearance.titleColor = color;
+      
+      canvasNodes[nodeId].appearance = appearance;
+      applyNodeAppearance(nodeId, appearance);
+      
+      Shiny.setInputValue('node_set_appearance', { 
+        id: nodeId, 
+        color: appearance.color, 
+        shape: appearance.shape,
+        titleColor: color 
+      }, {priority: 'event'});
+    });
+    
+    // Color input change handler
+    $(document).on('input change', '#node_color_input, #node_color_text, #node_title_color, #node_title_color_text', function() {
+      var selectedNode = $('.canvas-node.selected');
+      if (selectedNode.length === 0) return;
+      
+      var nodeId = selectedNode.attr('id');
+      var colorInput = $('#node_color_input').val();
+      var colorText = $('#node_color_text').val();
+      var titleColor = $('#node_title_color').val();
+      var titleColorText = $('#node_title_color_text').val();
+      
+      // Sync shape fill color inputs
+      if ($(this).attr('id') === 'node_color_input') {
+        $('#node_color_text').val(colorInput);
+        colorText = colorInput;
+      } else if ($(this).attr('id') === 'node_color_text') {
+        // Validate hex color
+        if (/^#[0-9A-F]{6}$/i.test(colorText)) {
+          $('#node_color_input').val(colorText);
+          colorInput = colorText;
+        }
+      }
+      
+      // Sync text color inputs
+      if ($(this).attr('id') === 'node_title_color') {
+        $('#node_title_color_text').val(titleColor);
+        titleColorText = titleColor;
+      } else if ($(this).attr('id') === 'node_title_color_text') {
+        // Validate hex color
+        if (/^#[0-9A-F]{6}$/i.test(titleColorText)) {
+          $('#node_title_color').val(titleColorText);
+          titleColor = titleColorText;
+        }
+      }
+      
+      var nodeData = canvasNodes[nodeId];
+      if (!nodeData) return;
+      
+      var appearance = nodeData.appearance || { shape: 'rounded', color: '#2d2d30', titleColor: '#d4d4d4' };
+      if ($(this).attr('id') === 'node_color_input' || $(this).attr('id') === 'node_color_text') {
+        appearance.color = colorInput;
+        // Update swatch selection if color matches
+        $('.color-swatch').removeClass('selected');
+        var matchingSwatch = $('.color-swatch[data-color=\"' + colorInput + '\"]');
+        if (matchingSwatch.length) {
+          matchingSwatch.addClass('selected');
+        }
+      } else if ($(this).attr('id') === 'node_title_color' || $(this).attr('id') === 'node_title_color_text') {
+        appearance.titleColor = titleColor;
+        // Update text color swatch selection if color matches
+        $('.text-color-swatch').removeClass('selected');
+        var matchingTextSwatch = $('.text-color-swatch[data-color=\"' + titleColor + '\"]');
+        if (matchingTextSwatch.length) {
+          matchingTextSwatch.addClass('selected');
+        }
+      }
+      
+      canvasNodes[nodeId].appearance = appearance;
+      applyNodeAppearance(nodeId, appearance);
+      
+      Shiny.setInputValue('node_set_appearance', { 
+        id: nodeId, 
+        color: appearance.color, 
+        shape: appearance.shape,
+        titleColor: appearance.titleColor 
+      }, {priority: 'event'});
+    });
+    
+    // Sync color text input when color picker changes (shape fill)
+    $(document).on('input', '#node_color_input', function() {
+      $('#node_color_text').val($(this).val());
+    });
+    
+    // Sync color picker when text input changes (with validation) - shape fill
+    $(document).on('input', '#node_color_text', function() {
+      var val = $(this).val();
+      if (/^#[0-9A-F]{6}$/i.test(val)) {
+        $('#node_color_input').val(val);
       }
     });
-
-    function syncConnections() {
-      var conns = jsPlumbInstance.getConnections();
-      var edges = conns.map(function(c) {
-        return { source: c.sourceId, target: c.targetId };
-      });
-      Shiny.setInputValue('graph_connections', edges, {priority: 'event'});
-    }
-
-    function clearCanvas() {
-      jsPlumbInstance.deleteEveryConnection();
-      jsPlumbInstance.deleteEveryEndpoint();
-      $('#canvas .canvas-node').remove();
-      canvasNodes = {};
-      Shiny.setInputValue('graph_connections', [], {priority: 'event'});
-    }
-
-    // ==================== Connection Context Menu ====================
-    function showConnectionContextMenu(x, y, conn) {
-      var menu = $('#connContextMenu');
-      if (menu.length === 0) {
-        menu = $('<div id=\"connContextMenu\" class=\"context-menu\"></div>');
-        $('body').append(menu);
-      }
-      var html = '' +
-        '<div class=\"context-menu-item\" data-action=\"style-bezier\">Bezier</div>' +
-        '<div class=\"context-menu-item\" data-action=\"style-straight\">Straight</div>' +
-        '<div class=\"context-menu-item\" data-action=\"style-flowchart\">Flowchart</div>' +
-        '<div class=\"context-menu-item danger\" data-action=\"delete\">Delete Connection</div>';
-      menu.html(html);
-      menu.css({ left: x + 'px', top: y + 'px', display: 'block' });
-
-      menu.find('.context-menu-item').off('click').on('click', function(){
-        var action = $(this).data('action');
-        try {
-          if (action === 'delete') {
-            jsPlumbInstance.deleteConnection(conn);
-          } else if (action === 'style-bezier') {
-            conn.setConnector(['Bezier', {curviness:50}]);
-            // Recreate arrow overlay to avoid overlays being lost when connector is rebuilt
-            try {
-              if (conn.removeOverlay) {
-                try { conn.removeOverlay('arrow'); } catch (e) { /* ignore */ }
-              }
-              // add a fresh overlay with an id so we can reliably remove/inspect it later
-              try { conn.addOverlay(['Arrow', { id: 'arrow', location: 1, width: 16, length: 16 }]); } catch (e) { }
-            } catch (e) { /* ignore overlay attach errors */ }
-            jsPlumbInstance.repaintEverything();
-            try { attachConnectionContextMenu(conn); } catch(e) {}
-          } else if (action === 'style-straight') {
-            conn.setConnector('Straight');
-            try {
-              if (conn.removeOverlay) {
-                try { conn.removeOverlay('arrow'); } catch (e) { }
-              }
-              try { conn.addOverlay(['Arrow', { id: 'arrow', location: 1, width: 16, length: 16 }]); } catch (e) { }
-            } catch (e) { }
-            jsPlumbInstance.repaintEverything();
-            try { attachConnectionContextMenu(conn); } catch(e) {}
-          } else if (action === 'style-flowchart') {
-            conn.setConnector(['Flowchart', {cornerRadius:6}]);
-            try {
-              if (conn.removeOverlay) {
-                try { conn.removeOverlay('arrow'); } catch (e) { }
-              }
-              try { conn.addOverlay(['Arrow', { id: 'arrow', location: 1, width: 16, length: 16 }]); } catch (e) { }
-            } catch (e) { }
-            jsPlumbInstance.repaintEverything();
-            try { attachConnectionContextMenu(conn); } catch(e) {}
-          }
-        } catch (e) { console.warn('conn action failed', e); }
-        hideConnectionContextMenu();
-      });
-    }
-    function hideConnectionContextMenu(){ $('#connContextMenu').hide(); }
-    $(document).on('click', function(e){ if (!$(e.target).closest('#connContextMenu').length) hideConnectionContextMenu(); });
-
-    // Track selected connection globally
-    window.selectedConnection = null;
     
-    function attachConnectionContextMenu(connection) {
-      var el = connection.canvas || (connection.getConnector && connection.getConnector().canvas);
-      if (!el) return;
+    // Sync text color text input when color picker changes
+    $(document).on('input', '#node_title_color', function() {
+      $('#node_title_color_text').val($(this).val());
+    });
+    
+    // Sync text color picker when text input changes (with validation)
+    $(document).on('input', '#node_title_color_text', function() {
+      var val = $(this).val();
+      if (/^#[0-9A-F]{6}$/i.test(val)) {
+        $('#node_title_color').val(val);
+      }
+    });
+    
+    // Code Editor handlers
+    var currentEditingNode = null;
+    var currentEditingFilePath = null;
+    
+    // Open code editor
+    window.openCodeEditor = function(nodeId, filePath, fileName) {
+      currentEditingNode = nodeId;
+      currentEditingFilePath = filePath;
+      $('#codeEditorStatus').text('Loading...');
       
-      // Ensure we don't duplicate handlers
-      $(el).off('contextmenu.conn').on('contextmenu.conn', function(e){
-        e.preventDefault(); e.stopPropagation();
-        showConnectionContextMenu(e.pageX, e.pageY, connection);
-        return false;
+      Shiny.setInputValue('load_file_content', { path: filePath }, {priority: 'event'});
+      $('#codeEditorModal').modal('show');
+    };
+    
+    // Close modal (Cancel button and close button)
+    $(document).on('click', '#cancelCodeBtn, .btn-close', function() {
+      $('#codeEditorModal').modal('hide');
+    });
+    
+    // Also support Bootstrap 5 data-bs-dismiss
+    $(document).on('click', '[data-bs-dismiss=\"modal\"]', function() {
+      $('#codeEditorModal').modal('hide');
+    });
+    
+    // Save code
+    $(document).on('click', '#saveCodeBtn', function() {
+      var code = $('#codeEditor').val();
+      if (currentEditingFilePath) {
+        Shiny.setInputValue('save_file_content', {
+          path: currentEditingFilePath,
+          content: code,
+          nodeId: currentEditingNode
+        }, {priority: 'event'});
+        $('#codeEditorModal').modal('hide');
+      }
+    });
+    
+    // Update node status
+    window.updateNodeStatus = function(nodeId, status) {
+      var statusEl = $('#status-' + nodeId);
+      statusEl.removeClass('running success error');
+      if (status) {
+        statusEl.addClass(status);
+      }
+    };
+    
+    // Toggle node output visibility
+    window.toggleNodeOutput = function(nodeId) {
+      var contentEl = $('#output-content-' + nodeId);
+      var toggleEl = $('#output-toggle-' + nodeId);
+      
+      if (contentEl.hasClass('expanded')) {
+        contentEl.removeClass('expanded');
+        toggleEl.text('▼');
+      } else {
+        contentEl.addClass('expanded');
+        toggleEl.text('▲');
+      }
+    };
+    
+    // Update node output
+    window.updateNodeOutput = function(nodeId, output, isError) {
+      var outputEl = $('#output-' + nodeId);
+      var contentEl = $('#output-content-' + nodeId);
+      
+      if (output) {
+        // Update content
+        contentEl.html('<pre class=\"' + (isError ? 'log-error' : 'log-success') + '\">' + 
+                     output.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</pre>');
+        
+        // Show output container (header is always visible)
+        outputEl.show();
+        
+        // Auto-expand on first output
+        if (!contentEl.hasClass('expanded')) {
+          contentEl.addClass('expanded');
+          $('#output-toggle-' + nodeId).text('▲');
+        }
+      } else {
+        outputEl.hide();
+      }
+    };
+    
+    // Toggle log panel
+    $(document).on('click', '#toggleLog', function() {
+      $('#logPanel').toggleClass('collapsed');
+      $(this).html($('#logPanel').hasClass('collapsed') ? '&#9660;' : '&#9650;');
+    });
+    
+    // Append to log (now goes to right sidebar LOGS tab)
+    window.appendToLog = function(message, type) {
+      var logContent = $('#nodeLogsContent');
+      var className = 'log-line';
+      if (type === 'error') className += ' log-error';
+      else if (type === 'success') className += ' log-success';
+      else if (type === 'code') className += ' log-code';
+      
+      // Remove placeholder text if exists
+      logContent.find('p').remove();
+      
+      // Create log line element
+      var logLine = $('<div>').addClass(className).text(message);
+      logContent.append(logLine);
+      
+      // Scroll to bottom
+      logContent.scrollTop(logContent[0].scrollHeight);
+      
+      // Also update bottom log panel if it exists (for backward compatibility)
+      var bottomLogContent = $('#logContent');
+      if (bottomLogContent.length > 0) {
+        bottomLogContent.append('<div class=\"' + className + '\">' + 
+                             message.replace(/</g, '&lt;').replace(/>/g, '&gt;') + '</div>');
+        bottomLogContent.scrollTop(bottomLogContent[0].scrollHeight);
+      }
+    };
+    
+    // Clear log (now clears right sidebar LOGS tab)
+    window.clearLog = function() {
+      var logContent = $('#nodeLogsContent');
+      logContent.empty();
+      logContent.html('<p style=\"color: #888; font-style: italic;\">Execution logs will appear here</p>');
+      
+      // Also clear bottom log panel if it exists
+      var bottomLogContent = $('#logContent');
+      if (bottomLogContent.length > 0) {
+        bottomLogContent.empty();
+      }
+    };
+    
+    // Load code into editor
+    if (typeof Shiny !== 'undefined' && Shiny.addCustomMessageHandler) {
+      Shiny.addCustomMessageHandler('loadCodeEditor', function(msg) {
+        $('#codeEditor').val(msg.content || '');
+        $('#codeEditorStatus').text('File loaded');
       });
       
-      // Add click handler to select connection
-      $(el).off('click.conn').on('click.conn', function(e) {
-        e.stopPropagation(); // Prevent canvas click from deselecting
+      Shiny.addCustomMessageHandler('openCodeEditorFromTree', function(msg) {
+        currentEditingNode = null;
+        currentEditingFilePath = msg.filePath;
+        $('#codeEditor').val(msg.content || '');
+        $('#codeEditorStatus').text('File loaded: ' + (msg.fileName || ''));
+        $('#codeEditorModal').modal('show');
+      });
+      
+      Shiny.addCustomMessageHandler('promptRenameFile', function(msg) {
+        var newName = prompt('Enter new name for ' + msg.oldName + ':', msg.oldName);
+        if (newName && newName !== msg.oldName) {
+          Shiny.setInputValue('confirm_rename_file', {
+            filePath: msg.filePath,
+            newName: newName
+          }, {priority: 'event'});
+        }
+      });
+      
+      Shiny.addCustomMessageHandler('promptRenameFolder', function(msg) {
+        var newName = prompt('Enter new name for ' + msg.oldName + ':', msg.oldName);
+        if (newName && newName !== msg.oldName) {
+          Shiny.setInputValue('confirm_rename_folder', {
+            oldName: msg.oldName,
+            newName: newName
+          }, {priority: 'event'});
+        }
+      });
+      
+      Shiny.addCustomMessageHandler('triggerFileInputClick', function(msg) {
+        // Try to find and click the file input
+        var selector = msg.selector || 'input[type=\\'file\\']';
+        var fileInput = $(selector).first();
+        if (fileInput.length > 0) {
+          fileInput.click();
+          console.log('Triggered file input click via message');
+        } else {
+          console.warn('Could not find file input with selector:', selector);
+          // Try all file inputs
+          $('input[type=\\'file\\']').each(function() {
+            var $input = $(this);
+            var dataNamespace = $input.attr('data-namespace') || '';
+            if (dataNamespace.indexOf('shiny') !== -1) {
+              $input.click();
+              console.log('Found and clicked shiny file input');
+              return false; // break
+            }
+          });
+        }
+      });
+      
+      Shiny.addCustomMessageHandler('codeEditorStatus', function(msg) {
+        $('#codeEditorStatus').text(msg.message || '');
+        $('#codeEditorStatus').css('color', msg.success ? '#4caf50' : '#f44336');
+      });
+      
+      Shiny.addCustomMessageHandler('openCodeEditorFromTree', function(msg) {
+        currentEditingNode = null;
+        currentEditingFilePath = msg.filePath;
+        $('#codeEditor').val(msg.content || '');
+        $('#codeEditorStatus').text('File loaded: ' + (msg.fileName || ''));
+        $('#codeEditorModal').modal('show');
+      });
+      
+      Shiny.addCustomMessageHandler('promptRenameFile', function(msg) {
+        var newName = prompt('Enter new name for ' + msg.oldName + ':', msg.oldName);
+        if (newName && newName !== msg.oldName) {
+          Shiny.setInputValue('confirm_rename_file', {
+            filePath: msg.filePath,
+            newName: newName
+          }, {priority: 'event'});
+        }
+      });
+      
+      Shiny.addCustomMessageHandler('promptRenameFolder', function(msg) {
+        var newName = prompt('Enter new name for ' + msg.oldName + ':', msg.oldName);
+        if (newName && newName !== msg.oldName) {
+          Shiny.setInputValue('confirm_rename_folder', {
+            oldName: msg.oldName,
+            newName: newName
+          }, {priority: 'event'});
+        }
+      });
+      
+      Shiny.addCustomMessageHandler('updateNodeStatus', function(msg) {
+        updateNodeStatus(msg.id, msg.status);
+      });
+      
+      Shiny.addCustomMessageHandler('updateNodeOutput', function(msg) {
+        updateNodeOutput(msg.id, msg.output, msg.isError);
+      });
+      
+      Shiny.addCustomMessageHandler('appendToLog', function(msg) {
+        appendToLog(msg.message, msg.type);
+      });
+      
+      Shiny.addCustomMessageHandler('clearLog', function(msg) {
+        clearLog();
+      });
+      
+      Shiny.addCustomMessageHandler('addNodePlot', function(msg) {
+        var outputEl = $('#output-' + msg.id);
+        var contentEl = $('#output-content-' + msg.id);
+        var img = $('<img>').attr('src', 'data:image/png;base64,' + msg.plotData)
+                           .addClass('node-plot');
+        contentEl.append(img);
+        outputEl.show();
         
-        // Deselect all nodes
-        $('.canvas-node').removeClass('selected');
-        Shiny.setInputValue('node_selected', {id: null, filePath: null}, {priority: 'event'});
-        
-        // Deselect previous connection
-        if (window.selectedConnection && window.selectedConnection !== connection) {
+        // Auto-expand on first plot
+        if (!contentEl.hasClass('expanded')) {
+          contentEl.addClass('expanded');
+          $('#output-toggle-' + msg.id).text('▲');
+        }
+      });
+      
+      Shiny.addCustomMessageHandler('downloadFile', function(msg) {
+        var blob = new Blob([msg.content], { type: msg.mimeType });
+        var url = URL.createObjectURL(blob);
+        var a = document.createElement('a');
+        a.href = url;
+        a.download = msg.filename;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+      });
+      
+      Shiny.addCustomMessageHandler('updateWebRStatus', function(msg) {
+        updateWebRStatus(msg.status, msg.message);
+      });
+      
+      Shiny.addCustomMessageHandler('updateNodeLogs', function(msg) {
+        var logsContent = $('#nodeLogsContent');
+        if (msg.logs) {
+          // Check if there are already execution logs
+          var existingLogs = logsContent.find('.log-line');
+          var hasExecutionLogs = existingLogs.length > 0;
+          
+          // If there are execution logs, append node output as a separator section
+          if (hasExecutionLogs) {
+            var separator = $('<div>').addClass('log-line').css({
+              'border-top': '1px solid #444',
+              'margin-top': '10px',
+              'padding-top': '10px',
+              'color': '#888',
+              'font-style': 'italic'
+            }).text('--- Node Output ---');
+            logsContent.append(separator);
+          } else {
+            // If no execution logs, replace placeholder
+            logsContent.find('p').remove();
+          }
+          
+          // Format as pre-formatted text with proper escaping
+          var formattedLogs = msg.logs.replace(/</g, '&lt;').replace(/>/g, '&gt;');
+          var nodeOutput = $('<pre>').addClass('log-content').css({
+            'white-space': 'pre-wrap',
+            'word-wrap': 'break-word',
+            'font-family': 'monospace',
+            'font-size': '12px',
+            'padding': '10px',
+            'background': '#1e1e1e',
+            'color': '#d4d4d4',
+            'border-radius': '4px',
+            'margin-top': '5px'
+          }).text(formattedLogs);
+          logsContent.append(nodeOutput);
+          
+          // Scroll to bottom
+          logsContent.scrollTop(logsContent[0].scrollHeight);
+        } else if (logsContent.find('.log-line').length === 0) {
+          // Only show placeholder if there are no logs at all
+          logsContent.html('<p style=\"color: #888; font-style: italic;\">Execution logs will appear here</p>');
+        }
+      });
+      
+      Shiny.addCustomMessageHandler('showOpenFolder', function(msg) {
+        if (msg.show) {
+          $('#openFolderContainer').show();
+        } else {
+          $('#openFolderContainer').hide();
+        }
+      });
+      
+      // Remove node from canvas
+      Shiny.addCustomMessageHandler('removeNode', function(msg) {
+        try {
+          var nodeId = msg.id;
+          if (!nodeId) return;
+          
+          // Remove from jsPlumb
           try {
-            var prevEl = window.selectedConnection.canvas || (window.selectedConnection.getConnector && window.selectedConnection.getConnector().canvas);
-            if (prevEl) $(prevEl).removeClass('connection-selected');
-          } catch(e) {}
-        }
-        
-        // Select this connection
-        window.selectedConnection = connection;
-        $(el).addClass('connection-selected');
-      });
-    }
-
-    Shiny.addCustomMessageHandler('clear_canvas_ui', function(msg) {
-      clearCanvas();
-    });
-
-    Shiny.addCustomMessageHandler('export_svg_trigger', function(msg) {
-      exportCanvasToSVG();
-    });
-
-    Shiny.addCustomMessageHandler('delete_node_ui', function(data) {
-      var nodeId = data.id;
-      try {
-        var conns = jsPlumbInstance.getConnections();
-        var connectionsToRemove = [];
-        for (var i = 0; i < conns.length; i++) {
-          if (conns[i].sourceId === nodeId || conns[i].targetId === nodeId) {
-            connectionsToRemove.push(conns[i]);
+            var connections = jsPlumbInstance.getConnections({source: nodeId});
+            connections.forEach(function(conn) {
+              jsPlumbInstance.deleteConnection(conn);
+            });
+            connections = jsPlumbInstance.getConnections({target: nodeId});
+            connections.forEach(function(conn) {
+              jsPlumbInstance.deleteConnection(conn);
+            });
+            jsPlumbInstance.remove(nodeId);
+          } catch (e) {
+            console.warn('Error removing node from jsPlumb:', e);
           }
-        }
-        connectionsToRemove.forEach(function(conn) {
-          jsPlumbInstance.deleteConnection(conn);
-        });
-        jsPlumbInstance.removeAllEndpoints(nodeId);
-        jsPlumbInstance.remove(nodeId);
-        $('#' + nodeId).remove();
-        delete canvasNodes[nodeId];
-        syncConnections();
-      } catch (error) {
-        console.error('Error during node deletion:', error);
-      }
-    });
-
-    Shiny.addCustomMessageHandler('restore_canvas', function(data) {
-      clearCanvas();
-      data.nodes.forEach(function(n) {
-        createCanvasNode(n.id, n.filePath, n.fileName, n.x, n.y, n.firstLine || '', n.appearance);
-      });
-      setTimeout(function() {
-        data.edges.forEach(function(e) {
-          jsPlumbInstance.connect({ source: e.source, target: e.target, overlays: [['Arrow', { id: 'arrow', location: 1, width: 16, length: 16 }]] });
-        });
-      }, 100);
-    });
-    
-    // Handle node display update (for first line)
-    Shiny.addCustomMessageHandler('update_node_display', function(data) {
-      var nodeId = data.id;
-      var nodeEl = $('#' + nodeId);
-      if (nodeEl.length > 0) {
-        var infoEl = nodeEl.find('.node-info');
-        if (infoEl.length > 0) {
-          var firstLine = data.firstLine || '';
-          // Truncate if too long
-          if (firstLine.length > 40) {
-            firstLine = firstLine.substring(0, 40) + '...';
+          
+          // Remove from DOM
+          $('#' + nodeId).remove();
+          
+          // Remove from canvasNodes
+          if (window.canvasNodes && window.canvasNodes[nodeId]) {
+            delete window.canvasNodes[nodeId];
           }
-          infoEl.text(firstLine);
-        }
-        // Update stored data
-        if (canvasNodes[nodeId]) {
-          canvasNodes[nodeId].firstLine = data.firstLine || '';
-        }
-      }
-    });
-
-    // Export canvas to SVG (more stable than PNG)
-    function exportCanvasToSVG() {
-      const canvas = document.getElementById('canvas');
-      if (!canvas) {
-        console.error('Canvas element not found');
-        Shiny.setInputValue('svg_export_error', 'Canvas element not found', {priority: 'event'});
-        return;
-      }
-      
-      // Show loading notification
-      Shiny.setInputValue('svg_export_started', true, {priority: 'event'});
-      
-      // Ensure jsPlumb has finished rendering all connections
-      if (jsPlumbInstance) {
-        try {
-          jsPlumbInstance.repaintEverything();
+          
+          // Sync connections after removal
+          syncConnections();
         } catch (e) {
-          console.warn('Repaint warning:', e);
+          console.error('Error in removeNode handler:', e);
+        }
+      });
+    }
+    
+    // Run workflow button (in header)
+    $(document).on('click', '#runWorkflowBtn', function() {
+      // Switch to LOGS tab when running workflow
+      $('.right-sidebar-tab[data-tab=\"logs\"]').click();
+      $('#rightSidebar').removeClass('hidden');
+      Shiny.setInputValue('run_workflow', 1, {priority: 'event'});
+    });
+    
+    // Export RMarkdown button (in header)
+    $(document).on('click', '#exportRmdBtn', function() {
+      Shiny.setInputValue('export_rmd', 1, {priority: 'event'});
+    });
+    
+    // Refresh RMD Preview button
+    $(document).on('click', '#refreshRmdPreviewBtn', function() {
+      Shiny.setInputValue('refresh_rmd_preview', 1, {priority: 'event'});
+    });
+    
+    // Export RMD from preview button
+    $(document).on('click', '#exportRmdFromPreviewBtn', function() {
+      var previewContent = $('#rmdPreview').val();
+      if (previewContent) {
+        Shiny.setInputValue('export_rmd_from_preview', {content: previewContent}, {priority: 'event'});
+      }
+    });
+    
+    // Import RMD button
+    $(document).on('click', '#importRmdBtn', function() {
+      // Create file input
+      var fileInput = $('<input>').attr({
+        type: 'file',
+        accept: '.Rmd,.rmd',
+        style: 'display: none;'
+      });
+      
+      fileInput.on('change', function(e) {
+        var file = e.target.files[0];
+        if (file) {
+          var reader = new FileReader();
+          reader.onload = function(e) {
+            var content = e.target.result;
+            Shiny.setInputValue('import_rmd', {content: content, fileName: file.name}, {priority: 'event'});
+          };
+          reader.readAsText(file);
+        }
+        fileInput.remove();
+      });
+      
+      $('body').append(fileInput);
+      fileInput.click();
+    });
+    
+    // Update RMD preview handler
+    if (typeof Shiny !== 'undefined' && Shiny.addCustomMessageHandler) {
+      Shiny.addCustomMessageHandler('updateRmdPreview', function(msg) {
+        $('#rmdPreview').val(msg.content || '');
+      });
+      
+      // Create node from RMD import
+      Shiny.addCustomMessageHandler('createNodeFromRmd', function(msg) {
+        var nodeId = msg.id;
+        var filePath = msg.filePath;
+        var fileName = msg.fileName;
+        var level = msg.level || 1;
+        
+        // Calculate position based on level
+        var x = 100 + (level - 1) * 250;
+        var y = 100 + (Object.keys(canvasNodes).length * 150);
+        
+        // Create node on canvas
+        createCanvasNode(nodeId, filePath, fileName, x, y, '', null);
+      });
+      
+      // Create connection from RMD import
+      Shiny.addCustomMessageHandler('createConnectionFromRmd', function(msg) {
+        var sourceId = msg.source;
+        var targetId = msg.target;
+        
+        try {
+          // Wait a bit for nodes to be ready - increase delay to ensure nodes are fully initialized
+          setTimeout(function() {
+            var sourceEl = $('#' + sourceId);
+            var targetEl = $('#' + targetId);
+            
+            if (sourceEl.length && targetEl.length) {
+              // Check if connection already exists
+              var existing = jsPlumbInstance.getConnections({
+                source: sourceId,
+                target: targetId
+              });
+              
+              if (existing && existing.length > 0) {
+                console.log('Connection already exists:', sourceId, '->', targetId);
+                return;
+              }
+              
+              // Get current connector style from default or selected style
+              var connectorType = $('#connectorStyleBtn').data('type') || 'bezier';
+              var connectorConfig = null;
+              if (connectorType === 'bezier') {
+                connectorConfig = ['Bezier', { curviness: 50 }];
+              } else if (connectorType === 'straight') {
+                connectorConfig = 'Straight';
+              } else if (connectorType === 'flowchart') {
+                connectorConfig = ['Flowchart', { stub: [10, 15], gap: 10, cornerRadius: 5, alwaysRespectStubs: true }];
+              } else {
+                connectorConfig = ['Bezier', { curviness: 50 }];
+              }
+              
+              // Create connection using jsPlumb
+              var connection = jsPlumbInstance.connect({
+                source: sourceId,
+                target: targetId,
+                anchors: ['Bottom', 'Top'],
+                endpoint: ['Dot', { radius: 5 }],
+                paintStyle: { stroke: '#B89D5D', strokeWidth: 2 },
+                connector: connectorConfig,
+                overlays: [['Arrow', { location: 1, width: 16, length: 16 }]]
+              });
+              
+              if (connection) {
+                console.log('Connection created:', sourceId, '->', targetId);
+                // Sync connections to server
+                syncConnections();
+              } else {
+                console.warn('Failed to create connection:', sourceId, '->', targetId);
+              }
+            } else {
+              console.warn('Nodes not found for connection:', sourceId, '->', targetId, 
+                'sourceEl:', sourceEl.length, 'targetEl:', targetEl.length);
+            }
+          }, 300);
+        } catch(e) {
+          console.error('Error creating connection from RMD:', e, 'source:', sourceId, 'target:', targetId);
+        }
+      });
+    }
+    
+    // Toggle left sidebar
+    $(document).on('click', '#toggleLeftSidebar, #toggleLeftSidebarBtn', function() {
+      var leftSidebar = $('#leftSidebar');
+      leftSidebar.toggleClass('hidden');
+      var isHidden = leftSidebar.hasClass('hidden');
+      $('#toggleLeftSidebar').html(isHidden ? '▶' : '▼');
+      updateToggleButtons();
+    });
+    
+    // Toggle right sidebar
+    $(document).on('click', '#toggleRightSidebar, #toggleRightSidebarBtn', function() {
+      var rightSidebar = $('#rightSidebar');
+      rightSidebar.toggleClass('hidden');
+      updateToggleButtons();
+    });
+    
+    function updateToggleButtons() {
+      var leftHidden = $('#leftSidebar').hasClass('hidden');
+      var rightHidden = $('#rightSidebar').hasClass('hidden');
+      
+      if (leftHidden) {
+        $('#toggleLeftSidebarBtn').show().addClass('visible');
+      } else {
+        $('#toggleLeftSidebarBtn').hide().removeClass('visible');
+      }
+      
+      if (rightHidden) {
+        $('#toggleRightSidebarBtn').show().addClass('visible');
+      } else {
+        $('#toggleRightSidebarBtn').hide().removeClass('visible');
+      }
+    }
+    
+    // Initialize toggle button visibility
+    $(document).ready(function() {
+      updateToggleButtons();
+      
+      // Update toggle buttons when sidebars change
+      var observer = new MutationObserver(function(mutations) {
+        updateToggleButtons();
+      });
+      
+      if ($('#leftSidebar').length) {
+        observer.observe(document.getElementById('leftSidebar'), { attributes: true, attributeFilter: ['class'] });
+      }
+      if ($('#rightSidebar').length) {
+        observer.observe(document.getElementById('rightSidebar'), { attributes: true, attributeFilter: ['class'] });
+      }
+    });
+    
+    // New file button
+    $(document).on('click', '#newFileBtn', function() {
+      var fileName = prompt('Enter file name (e.g., new_script.R):');
+      if (fileName && fileName.trim()) {
+        if (!fileName.endsWith('.R') && !fileName.endsWith('.r')) {
+          fileName = fileName + '.R';
+        }
+        Shiny.setInputValue('create_new_file', {fileName: fileName}, {priority: 'event'});
+      }
+    });
+    
+    // New folder button
+    $(document).on('click', '#newFolderBtn', function() {
+      var folderName = prompt('Enter folder name:');
+      if (folderName && folderName.trim()) {
+        Shiny.setInputValue('create_new_folder', {folderName: folderName}, {priority: 'event'});
+      }
+    });
+    
+    // Refresh files button
+    $(document).on('click', '#refreshFilesBtn', function() {
+      Shiny.setInputValue('refresh_files', 1, {priority: 'event'});
+    });
+    
+    // Open folder button (if shinyFiles is available)
+    $(document).on('click', '#openFolderBtn, #openFolderBtnHeader', function() {
+      // shinyFiles/shinyDirChoose creates hidden file inputs
+      // We need to find and trigger them
+      var found = false;
+      
+      // Try multiple selectors to find the input
+      var selectors = [
+        'input[type=\\'file\\'][data-namespace=\\'shinyFiles\\']',
+        'input[type=\\'file\\'][data-namespace=\\'shinyDirectories\\']',
+        'input[type=\\'file\\'][id*=\\'importFolder\\']',
+        'input[type=\\'file\\'][id*=\\'shinyFiles\\']',
+        'input[type=\\'file\\'][data-input=\\'importFolder\\']'
+      ];
+      
+      for (var i = 0; i < selectors.length; i++) {
+        var fileInput = $(selectors[i]);
+        if (fileInput.length > 0) {
+          fileInput.click();
+          found = true;
+          console.log('Found and clicked shinyFiles input:', selectors[i]);
+          break;
         }
       }
       
-      // Wait a bit to ensure all connections are rendered
-      setTimeout(function() {
-        try {
-          // Ensure all connectors are up to date before export
-          if (jsPlumbInstance) {
-            jsPlumbInstance.repaintEverything();
+      // Also try finding by traversing all file inputs
+      if (!found) {
+        $('input[type=\\'file\\']').each(function() {
+          var $input = $(this);
+          var id = $input.attr('id') || '';
+          var dataInput = $input.attr('data-input') || '';
+          var dataNamespace = $input.attr('data-namespace') || '';
+          
+          if (id.indexOf('importFolder') !== -1 || 
+              id.indexOf('shinyFiles') !== -1 ||
+              dataInput.indexOf('importFolder') !== -1 ||
+              dataNamespace.indexOf('shinyFiles') !== -1 ||
+              dataNamespace.indexOf('shinyDirectories') !== -1) {
+            $input.click();
+            found = true;
+            console.log('Found and clicked shinyFiles input by traversal:', id, dataInput, dataNamespace);
+            return false; // break
           }
-          
-          // Get canvas dimensions
-          const canvasRect = canvas.getBoundingClientRect();
-          const canvasWidth = canvas.offsetWidth || canvas.clientWidth || 800;
-          const canvasHeight = canvas.offsetHeight || canvas.clientHeight || 600;
-          
-          // Create a new SVG wrapper
-          const wrapperSvg = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
-          wrapperSvg.setAttribute('width', canvasWidth);
-          wrapperSvg.setAttribute('height', canvasHeight);
-          wrapperSvg.setAttribute('xmlns', 'http://www.w3.org/2000/svg');
-          wrapperSvg.setAttribute('xmlns:xlink', 'http://www.w3.org/1999/xlink');
-          
-          // Add background
-          const bgRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-          bgRect.setAttribute('width', '100%');
-          bgRect.setAttribute('height', '100%');
-          bgRect.setAttribute('fill', '#FAFAFA');
-          wrapperSvg.appendChild(bgRect);
-          
-          // Helper function to get relative position
-          const relPos = function(el) {
-            const r = el.getBoundingClientRect();
-            return {
-              x: r.left - canvasRect.left,
-              y: r.top - canvasRect.top,
-              w: r.width,
-              h: r.height
-            };
-          };
-          
-          // Add all nodes as SVG elements
-          const nodes = canvas.querySelectorAll('.canvas-node');
-          console.log('Found', nodes.length, 'nodes to export');
-          
-          nodes.forEach(function(node) {
-            const p = relPos(node);
-            const computedStyle = window.getComputedStyle(node);
-            
-            // Create a group for the node
-            const nodeGroup = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            
-            // Draw node rectangle
-            const nodeRect = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
-            nodeRect.setAttribute('x', p.x);
-            nodeRect.setAttribute('y', p.y);
-            nodeRect.setAttribute('width', p.w);
-            nodeRect.setAttribute('height', p.h);
-            nodeRect.setAttribute('rx', '10');
-            nodeRect.setAttribute('ry', '10');
-            nodeRect.setAttribute('fill', computedStyle.backgroundColor || '#ffffff');
-            nodeRect.setAttribute('stroke', computedStyle.borderColor || '#CEB888');
-            nodeRect.setAttribute('stroke-width', computedStyle.borderWidth || '3');
-            nodeGroup.appendChild(nodeRect);
-            
-            // Add text
-            const titleEl = node.querySelector('.node-title');
-            const infoEl = node.querySelector('.node-info');
-            
-            if (titleEl) {
-              // Get text color from node appearance or computed style
-              var titleColor = '#2c3e50'; // default
-              var nodeId = node.id;
-              if (canvasNodes[nodeId] && canvasNodes[nodeId].appearance && canvasNodes[nodeId].appearance.titleColor) {
-                titleColor = canvasNodes[nodeId].appearance.titleColor;
-              } else {
-                // Fallback to computed style
-                var titleStyle = window.getComputedStyle(titleEl);
-                titleColor = titleStyle.color || '#2c3e50';
-              }
-              
-              const titleText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-              titleText.setAttribute('x', p.x + 12);
-              titleText.setAttribute('y', p.y + 25);
-              titleText.setAttribute('font-family', 'Arial, sans-serif');
-              titleText.setAttribute('font-size', '15');
-              titleText.setAttribute('font-weight', 'bold');
-              titleText.setAttribute('fill', titleColor);
-              titleText.textContent = titleEl.textContent || titleEl.innerText;
-              nodeGroup.appendChild(titleText);
-            }
-            
-            if (infoEl) {
-              const infoText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-              infoText.setAttribute('x', p.x + 12);
-              infoText.setAttribute('y', p.y + 45);
-              infoText.setAttribute('font-family', 'Arial, sans-serif');
-              infoText.setAttribute('font-size', '11');
-              infoText.setAttribute('fill', '#666');
-              let text = infoEl.textContent || infoEl.innerText;
-              // Truncate at 40 chars as per requirements
-              if (text.length > 40) text = text.substring(0, 40) + '...';
-              infoText.textContent = text;
-              nodeGroup.appendChild(infoText);
-            }
-            
-            wrapperSvg.appendChild(nodeGroup);
-          });
-          
-          // Add all jsPlumb connections (SVG elements) with correct coordinate offsets
-          const svgs = canvas.querySelectorAll('svg');
-          console.log('Found', svgs.length, 'SVG elements (connections)');
-          
-          svgs.forEach(function(svg) {
-            const rect = svg.getBoundingClientRect();
-            
-            // Calculate offset of this SVG relative to the main canvas
-            const dx = rect.left - canvasRect.left;
-            const dy = rect.top - canvasRect.top;
-            
-            // Create a group element to shift the coordinates
-            const g = document.createElementNS('http://www.w3.org/2000/svg', 'g');
-            g.setAttribute('transform', 'translate(' + dx + ', ' + dy + ')');
-            
-            // Clone and append each child path/element
-            const children = svg.children;
-            for (let i = 0; i < children.length; i++) {
-              const cloned = children[i].cloneNode(true);
-              
-              // Force stroke style if missing
-              if (cloned.tagName === 'path' || cloned.tagName === 'line' || cloned.tagName === 'polyline') {
-                if (!cloned.getAttribute('stroke')) {
-                  cloned.setAttribute('stroke', '#B89D5D');
-                }
-                if (!cloned.getAttribute('stroke-width')) {
-                  cloned.setAttribute('stroke-width', '2');
-                }
-              }
-              
-              g.appendChild(cloned);
-            }
-            
-            // Append the group to the wrapper SVG
-            wrapperSvg.appendChild(g);
-          });
-          
-          // Serialize SVG to string
-          const serializer = new XMLSerializer();
-          const source = serializer.serializeToString(wrapperSvg);
-          
-          // Create blob and download
-          const blob = new Blob([source], { type: 'image/svg+xml;charset=utf-8' });
-          const url = URL.createObjectURL(blob);
-          const link = document.createElement('a');
-          const timestamp = new Date().toISOString().replace(/[:.]/g, '-').slice(0, -5);
-          link.href = url;
-          link.download = 'rcw_workflow_' + timestamp + '.svg';
-          link.click();
-          URL.revokeObjectURL(url);
-          
-          // Notify server that export completed
-          Shiny.setInputValue('svg_export_completed', true, {priority: 'event'});
-          
-        } catch (error) {
-          console.error('Error in SVG export:', error);
-          Shiny.setInputValue('svg_export_error', error.toString(), {priority: 'event'});
-        }
-      }, 300);
-    }
-
-    // Export SVG will be triggered via Shiny input system
-    // The server will send a custom message to trigger export
-
-    // Toggle panels
-    $(function () {
-      var leftOpen = true, rightOpen = true;
-      function toggleLeft()  { $('#leftPanel').toggleClass('hidden'); leftOpen  = !leftOpen; }
-      function toggleRight() { $('#rightPanel').toggleClass('hidden'); rightOpen = !rightOpen; }
-      $('#toggleLeftPanel').on('click', toggleLeft);
-      $('#toggleRightPanel').on('click', toggleRight);
+        });
+      }
+      
+      if (!found) {
+        console.warn('Could not find shinyFiles input, trying server-side trigger');
+        // Fallback: send message to server
+        Shiny.setInputValue('trigger_import_folder', 1, {priority: 'event'});
+      }
     });
-  "))
+    
+    // Store current connector type
+    window.currentConnectorType = 'bezier';
+    
+    // Connection line style selector click handler
+    $(document).on('click', '.connector-style-btn', function() {
+      var connectorType = $(this).data('connector');
+      $('.connector-style-btn').removeClass('selected');
+      $(this).addClass('selected');
+      window.currentConnectorType = connectorType;
+      
+      // Update all connections' connector style (preserve arrow overlay)
+      try {
+        var connections = jsPlumbInstance.getConnections();
+        connections.forEach(function(conn) {
+          try {
+            var connectorConfig = null;
+            if (connectorType === 'bezier') {
+              connectorConfig = ['Bezier', { curviness: 50 }];
+            } else if (connectorType === 'straight') {
+              connectorConfig = 'Straight';
+            } else if (connectorType === 'flowchart') {
+              connectorConfig = ['Flowchart', { cornerRadius: 6 }];
+            }
+            
+            if (connectorConfig) {
+              // Always add arrow overlay after setting connector
+              conn.setConnector(connectorConfig);
+              
+              // Always add arrow overlay (setConnector may remove overlays)
+              try {
+                // Remove existing arrow if any
+                try {
+                  conn.removeOverlay('arrow');
+                } catch(e) {}
+                // Add arrow overlay
+                conn.addOverlay(['Arrow', { id: 'arrow', location: 1, width: 16, length: 16 }]);
+              } catch(e) {
+                console.warn('Failed to add arrow overlay:', e);
+              }
+            }
+          } catch(e) {
+            console.warn('Failed to update connector:', e);
+          }
+        });
+        
+        // Update default connector for new connections (with arrow)
+        if (connectorType === 'bezier') {
+          jsPlumbInstance.Defaults.Connector = ['Bezier', { curviness: 50 }];
+        } else if (connectorType === 'straight') {
+          jsPlumbInstance.Defaults.Connector = 'Straight';
+        } else if (connectorType === 'flowchart') {
+          jsPlumbInstance.Defaults.Connector = ['Flowchart', { cornerRadius: 6 }];
+        }
+        // Ensure arrow overlay is always in defaults
+        jsPlumbInstance.Defaults.ConnectionOverlays = [
+          ['Arrow', { location: 1, width: 16, length: 16 }]
+        ];
+        
+        jsPlumbInstance.repaintEverything();
+      } catch(e) {
+        console.warn('Failed to update connector style:', e);
+      }
+    });
+    
+    // Right sidebar tab switching
+    $(document).on('click', '.right-sidebar-tab', function() {
+      var tabName = $(this).data('tab');
+      $('.right-sidebar-tab').removeClass('active');
+      $(this).addClass('active');
+      $('.tab-pane').removeClass('active');
+      $('#' + tabName + 'Tab').addClass('active');
+      
+      // Auto-refresh RMD preview when switching to RMD tab
+      if (tabName === 'rmd') {
+        setTimeout(function() {
+          Shiny.setInputValue('refresh_rmd_preview', 1, {priority: 'event'});
+        }, 100);
+      }
+    });
+    
+    // Close folder button
+    $(document).on('click', '#closeFolderBtn', function() {
+      // Clear external folders
+      Shiny.setInputValue('close_folder', 1, {priority: 'event'});
+    });
+    
+    // Update WebR status
+    window.updateWebRStatus = function(status, message) {
+      var statusEl = $('#webrStatus');
+      statusEl.removeClass('loading ready error');
+      statusEl.addClass(status);
+      statusEl.find('span:last').text(message || status);
+    };
+    
+    // Initialize WebR status as ready (since we're using server-side R)
+    $(document).ready(function() {
+      setTimeout(function() {
+        updateWebRStatus('ready', 'R Ready');
+      }, 1000);
+    });
+    "))
   ),
-  
-  # Title bar
-  div(class = "title-bar",
-    # Left: title/subtitle
-    div(style = "display: flex; align-items: center; justify-content: space-between;",
-      div(style = "flex: 1;",
-        uiOutput("app_title_ui"),
-        uiOutput("app_subtitle_ui")
+    
+    # Top Header
+    tags$div(class = "top-header",
+      tags$div(class = "header-left",
+        tags$div(class = "header-logo", "R"),
+        tags$div(class = "header-title", "RCW Editor")
       ),
-      # Right: canvas settings button (removed - per-node controls now via right-click)
-      div(style = "margin-left: 12px;",
-        HTML('')
-      )
-    )
-  ),
-
-  # Toggle buttons
-  div(id = "toggleLeftBtn", class = "toggle-btn-left",
-      actionButton("toggleLeftPanel", HTML("&#10094;"), class = "btn btn-sm btn-secondary")),
-  div(id = "toggleRightBtn", class = "toggle-btn-right",
-      actionButton("toggleRightPanel", HTML("&#10095;"), class = "btn btn-sm btn-secondary")),
-
-  # Three-panel container
-  div(class = "three-panel-container",
-    # Left: File Tree
-    div(id = "leftPanel", class = "left-panel",
-      div(class = "panel-section",
-        h4(textOutput("left_title_notebooks"), class = "section-title"),
-        div(style = "background: #e7f3ff; padding: 10px; border-radius: 6px; margin-bottom: 12px;",
-          p(style = "margin: 0; font-size: 0.85rem; color: #1565c0;",
-            textOutput("left_tip_drag"))
+      tags$div(class = "header-right",
+        tags$div(id = "webrStatus", class = "webr-status loading",
+          tags$span(class = "webr-status-dot"),
+          tags$span("Loading...")
         ),
-        div(class = "btn-row",
-          actionButton("new_folder", label = NULL, 
-                      class = "btn btn-sm btn-primary",
-                      style = "flex: 1;"),
-          actionButton("new_file", label = NULL, 
-                      class = "btn btn-sm btn-primary",
-                      style = "flex: 1;")
-        ),
-        div(class = "btn-row",
-          actionButton("add_external_folder", label = NULL, 
-                      class = "btn btn-sm btn-secondary", 
-                      style = "flex: 1;")
-        ),
-        hr(style = "margin: 12px 0;"),
-        uiOutput("file_tree_ui")
-      ),
-      div(class = "btn-row",
-        actionButton("run_pipeline", label = NULL, 
-                    class = "btn btn-primary",
-                    style = "flex: 1; font-size: 1rem; padding: 10px;"),
-        actionButton("clear_canvas", label = NULL, 
-                    class = "btn btn-secondary",
-                    style = "padding: 10px;")
+        tags$button(class = "btn btn-primary btn-sm", id = "runWorkflowBtn", 
+          style = "background: #007acc; border: none; color: white; padding: 6px 16px;",
+          "Run"),
+        tags$button(class = "btn btn-secondary btn-sm", id = "exportRmdBtn",
+          style = "background: #3e3e42; border: none; color: white; padding: 6px 16px;",
+          HTML("&#11123; Export"))
       )
     ),
     
-    # Center: Canvas
-    div(class = "center-panel",
-      div(id = "canvas")
-    ),
-    
-    # Right: Output & Download
-    div(id = "rightPanel", class = "right-panel",
-      navset_card_tab(
-        id = "rightTabs",
-        nav_panel(uiOutput("tab_title_pipeline_output"),
-          div(style = "margin-top: 12px;",
-            h5(textOutput("right_exec_results"), style = "color: #2c3e50;"),
-            verbatimTextOutput("pipeline_output"),
-            hr(),
-            h5(textOutput("right_run_log"), style = "color: #2c3e50;"),
-            verbatimTextOutput("run_log")
+    # Main Container
+    tags$div(class = "main-container",
+      # Left Sidebar - Explorer
+      tags$div(class = "left-sidebar", id = "leftSidebar",
+        tags$div(class = "sidebar-header",
+          tags$div(style = "display: flex; align-items: center; gap: 8px; flex: 1;",
+            tags$button(id = "toggleLeftSidebar", class = "sidebar-toggle-icon", 
+              style = "background: none; border: none; color: #cccccc; cursor: pointer; padding: 2px 4px; font-size: 10px;",
+              HTML("&#9660;")),
+            tags$span("EXPLORER")
+          ),
+          tags$div(style = "display: flex; align-items: center; gap: 4px;",
+            tags$button(id = "newFileBtn", class = "sidebar-action-btn",
+              style = "background: none; border: none; color: #cccccc; cursor: pointer; padding: 4px; font-size: 12px;",
+              title = "New File", HTML("&#128196;&#43;")),
+            tags$button(id = "newFolderBtn", class = "sidebar-action-btn",
+              style = "background: none; border: none; color: #cccccc; cursor: pointer; padding: 4px; font-size: 12px;",
+              title = "New Folder", HTML("&#128193;&#43;")),
+            tags$button(id = "refreshFilesBtn", class = "sidebar-action-btn",
+              style = "background: none; border: none; color: #cccccc; cursor: pointer; padding: 4px; font-size: 12px;",
+              title = "Refresh", HTML("&#8635;")),
+            if (exists("HAS_SHINYFILES") && HAS_SHINYFILES) {
+              tags$button(id = "openFolderBtnHeader", class = "sidebar-action-btn",
+                style = "background: none; border: none; color: #cccccc; cursor: pointer; padding: 4px; font-size: 12px;",
+                title = "Open Folder", HTML("&#128193;"))
+            },
+            tags$button(id = "closeFolderBtn", class = "sidebar-action-btn",
+              style = "background: none; border: none; color: #cccccc; cursor: pointer; padding: 4px;",
+              title = "Close Folder", HTML("&times;"))
           )
         ),
-        nav_panel(uiOutput("tab_title_export_rmd"),
-          div(style = "margin-top: 12px;",
-            h5(textOutput("right_export_rmd_title"), style = "color: #2c3e50;"),
-            p(textOutput("right_export_rmd_desc"), 
-              style = "color: #666; font-size: 0.9em;"),
-            div(class = "btn-row",
-              downloadButton("export_rmd", label = NULL, 
-                           class = "btn btn-primary",
-                           style = "flex: 1; padding: 10px;")
+        tags$div(class = "sidebar-content",
+          uiOutput("file_tree_ui"),
+          # Open Folder button (shown when no files)
+          tags$div(id = "openFolderContainer", style = "padding: 20px; text-align: center; display: none;",
+            tags$p(style = "color: #888; margin-bottom: 12px; font-size: 12px;", "No files found"),
+            if (exists("HAS_SHINYFILES") && HAS_SHINYFILES) {
+              tags$button(class = "btn btn-primary", id = "openFolderBtn",
+                style = "background: #CEB888; border: none; color: #000; padding: 8px 16px; font-weight: 600; cursor: pointer;",
+                "Open Folder")
+            } else {
+              tags$p(style = "color: #666; font-size: 11px;", "Install shinyFiles package to import folders")
+            }
+          )
+        ),
+      ),
+      
+      # Center Canvas
+      tags$div(class = "center-canvas",
+        tags$div(id = "canvas")
+      ),
+      
+      # Sidebar Toggle Buttons (always visible)
+      tags$button(id = "toggleLeftSidebarBtn", class = "sidebar-toggle-btn", HTML("▶")),
+      tags$button(id = "toggleRightSidebarBtn", class = "sidebar-toggle-btn", HTML("◀")),
+      
+      # Right Sidebar
+      tags$div(class = "right-sidebar", id = "rightSidebar",
+        tags$div(class = "right-sidebar-tabs",
+          tags$button(class = "right-sidebar-tab active", `data-tab` = "style", "STYLE"),
+          tags$button(class = "right-sidebar-tab", `data-tab` = "logs", "LOGS"),
+          tags$button(class = "right-sidebar-tab", `data-tab` = "rmd", "RMD")
+        ),
+        tags$div(class = "right-sidebar-content",
+          # Style Tab
+          tags$div(id = "styleTab", class = "tab-pane active",
+          
+          # Shape Selector
+          tags$div(style = "margin-bottom: 20px;",
+            tags$h4(style = "font-size: 0.9rem; font-weight: 600; margin-bottom: 8px; color: #d4d4d4;", "Shape"),
+            tags$div(class = "shape-selector",
+              tags$div(class = "shape-btn", `data-shape` = "rectangle", title = "Rectangle",
+                tags$div(class = "shape-preview rectangle")
+              ),
+              tags$div(class = "shape-btn selected", `data-shape` = "rounded", title = "Rounded",
+                tags$div(class = "shape-preview rounded")
+              ),
+              tags$div(class = "shape-btn", `data-shape` = "circle", title = "Circle",
+                tags$div(class = "shape-preview circle")
+              ),
+              tags$div(class = "shape-btn", `data-shape` = "diamond", title = "Diamond",
+                tags$div(class = "shape-preview diamond")
+              ),
+              tags$div(class = "shape-btn", `data-shape` = "parallelogram", title = "Parallelogram",
+                tags$div(class = "shape-preview parallelogram")
+              ),
+              tags$div(class = "shape-btn", `data-shape` = "cylinder", title = "Cylinder",
+                tags$div(class = "shape-preview cylinder")
+              )
+            )
+          ),
+          
+          # Shape Fill Color (图形颜色)
+          tags$div(class = "color-picker-section", style = "margin-bottom: 20px;",
+            tags$h4(style = "font-size: 0.9rem; font-weight: 600; margin-bottom: 8px; color: #d4d4d4;", "Shape Fill"),
+            tags$div(class = "color-grid",
+              # Common colors
+              tags$div(class = "color-swatch selected", `data-color` = "#2d2d30", style = "background: #2d2d30;", title = "Dark Gray"),
+              tags$div(class = "color-swatch", `data-color` = "#f0f0f0", style = "background: #f0f0f0;", title = "Light Gray"),
+              tags$div(class = "color-swatch", `data-color` = "#e0e0e0", style = "background: #e0e0e0;", title = "Gray"),
+              tags$div(class = "color-swatch", `data-color` = "#d0d0d0", style = "background: #d0d0d0;", title = "Dark Gray"),
+              tags$div(class = "color-swatch", `data-color` = "#ffebee", style = "background: #ffebee;", title = "Light Red"),
+              tags$div(class = "color-swatch", `data-color` = "#fff3e0", style = "background: #fff3e0;", title = "Light Orange"),
+              tags$div(class = "color-swatch", `data-color` = "#fff9c4", style = "background: #fff9c4;", title = "Light Yellow"),
+              tags$div(class = "color-swatch", `data-color` = "#f1f8e9", style = "background: #f1f8e9;", title = "Light Green"),
+              tags$div(class = "color-swatch", `data-color` = "#e3f2fd", style = "background: #e3f2fd;", title = "Light Blue"),
+              tags$div(class = "color-swatch", `data-color` = "#f3e5f5", style = "background: #f3e5f5;", title = "Light Purple"),
+              tags$div(class = "color-swatch", `data-color` = "#fce4ec", style = "background: #fce4ec;", title = "Light Pink"),
+              tags$div(class = "color-swatch", `data-color` = "#e0f2f1", style = "background: #e0f2f1;", title = "Light Teal"),
+              tags$div(class = "color-swatch", `data-color` = "#fff5e6", style = "background: #fff5e6;", title = "Cream"),
+              tags$div(class = "color-swatch", `data-color` = "#f5f5f5", style = "background: #f5f5f5;", title = "Off White"),
+              tags$div(class = "color-swatch", `data-color` = "#CEB888", style = "background: #CEB888;", title = "Primary"),
+              tags$div(class = "color-swatch", `data-color` = "#B89D5D", style = "background: #B89D5D;", title = "Primary Dark")
             ),
-            hr(),
-            h5(textOutput("right_export_svg_title"), style = "color: #2c3e50; margin-top: 20px;"),
-            p(textOutput("right_export_svg_desc"), 
-              style = "color: #666; font-size: 0.9em;"),
-            div(class = "btn-row",
-              actionButton("export_svg_btn", label = NULL, 
-                          class = "btn btn-primary",
-                          style = "flex: 1; padding: 10px;")
+            tags$div(class = "color-input-wrapper",
+              tags$input(type = "color", id = "node_color_input", value = "#2d2d30", style = "width: 60px; height: 40px; border: 2px solid #3e3e42; border-radius: 4px; cursor: pointer; background: #1e1e1e;"),
+              tags$input(type = "text", id = "node_color_text", value = "#2d2d30", placeholder = "#2d2d30", style = "flex: 1; padding: 8px; border: 2px solid #3e3e42; border-radius: 4px; background: #1e1e1e; color: #d4d4d4;")
+            )
+          ),
+          
+          # Connection Line Style (连接线形状)
+          tags$div(style = "margin-top: 20px; margin-bottom: 20px;",
+            tags$h4(style = "font-size: 0.9rem; font-weight: 600; margin-bottom: 8px; color: #d4d4d4;", "Connection Line Style"),
+            tags$div(class = "connector-style-selector", style = "display: flex; gap: 8px; flex-wrap: wrap;",
+              tags$div(class = "connector-style-btn selected", `data-connector` = "bezier", title = "Curved Line (Bezier)",
+                style = "width: 80px; height: 50px; border: 2px solid #3e3e42; border-radius: 4px; background: #1e1e1e; display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative;",
+                tags$div(style = "width: 60px; height: 2px; background: #CEB888; border-radius: 50px; transform: rotate(-5deg); position: absolute; top: 20px; left: 10px;")),
+              tags$div(class = "connector-style-btn", `data-connector` = "straight", title = "Straight Line",
+                style = "width: 80px; height: 50px; border: 2px solid #3e3e42; border-radius: 4px; background: #1e1e1e; display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative;",
+                tags$div(style = "width: 60px; height: 2px; background: #CEB888; position: absolute; top: 24px; left: 10px;")),
+              tags$div(class = "connector-style-btn", `data-connector` = "flowchart", title = "Step Line (Flowchart)",
+                style = "width: 80px; height: 50px; border: 2px solid #3e3e42; border-radius: 4px; background: #1e1e1e; display: flex; align-items: center; justify-content: center; cursor: pointer; position: relative;",
+                tags$svg(style = "width: 60px; height: 30px; position: absolute; top: 10px; left: 10px;",
+                  tags$path(d = "M 0 15 L 20 15 L 20 5 L 50 5 L 50 15 L 60 15", 
+                    stroke = "#CEB888", "stroke-width" = "2", fill = "none")))
+            )
+          ),
+          
+          # Text Color (文字颜色)
+          tags$div(class = "color-picker-section", style = "margin-top: 20px;",
+            tags$h4(style = "font-size: 0.9rem; font-weight: 600; margin-bottom: 8px; color: #d4d4d4;", "Text Color"),
+            tags$div(class = "color-grid text-color-grid",
+              # Common text colors
+              tags$div(class = "text-color-swatch selected", `data-color` = "#d4d4d4", style = "background: #d4d4d4;", title = "Light Gray"),
+              tags$div(class = "text-color-swatch", `data-color` = "#ffffff", style = "background: #ffffff;", title = "White"),
+              tags$div(class = "text-color-swatch", `data-color` = "#000000", style = "background: #000000;", title = "Black"),
+              tags$div(class = "text-color-swatch", `data-color` = "#2d2d30", style = "background: #2d2d30;", title = "Dark Gray"),
+              tags$div(class = "text-color-swatch", `data-color` = "#f44336", style = "background: #f44336;", title = "Red"),
+              tags$div(class = "text-color-swatch", `data-color` = "#ff9800", style = "background: #ff9800;", title = "Orange"),
+              tags$div(class = "text-color-swatch", `data-color` = "#ffeb3b", style = "background: #ffeb3b;", title = "Yellow"),
+              tags$div(class = "text-color-swatch", `data-color` = "#4caf50", style = "background: #4caf50;", title = "Green"),
+              tags$div(class = "text-color-swatch", `data-color` = "#2196f3", style = "background: #2196f3;", title = "Blue"),
+              tags$div(class = "text-color-swatch", `data-color` = "#9c27b0", style = "background: #9c27b0;", title = "Purple"),
+              tags$div(class = "text-color-swatch", `data-color` = "#e91e63", style = "background: #e91e63;", title = "Pink"),
+              tags$div(class = "text-color-swatch", `data-color` = "#00bcd4", style = "background: #00bcd4;", title = "Cyan"),
+              tags$div(class = "text-color-swatch", `data-color` = "#ff5722", style = "background: #ff5722;", title = "Deep Orange"),
+              tags$div(class = "text-color-swatch", `data-color` = "#795548", style = "background: #795548;", title = "Brown"),
+              tags$div(class = "text-color-swatch", `data-color` = "#CEB888", style = "background: #CEB888;", title = "Primary"),
+              tags$div(class = "text-color-swatch", `data-color` = "#B89D5D", style = "background: #B89D5D;", title = "Primary Dark")
             ),
-            hr(),
-            h5(textOutput("right_preview"), style = "color: #2c3e50;"),
-            verbatimTextOutput("rmd_preview")
+            tags$div(class = "color-input-wrapper",
+              tags$input(type = "color", id = "node_title_color", value = "#d4d4d4", style = "width: 60px; height: 40px; border: 2px solid #3e3e42; border-radius: 4px; cursor: pointer; background: #1e1e1e;"),
+              tags$input(type = "text", id = "node_title_color_text", value = "#d4d4d4", placeholder = "#d4d4d4", style = "flex: 1; padding: 8px; border: 2px solid #3e3e42; border-radius: 4px; background: #1e1e1e; color: #d4d4d4;")
+            )
+          )
+          ),
+          
+          # Logs Tab
+          tags$div(id = "logsTab", class = "tab-pane",
+            tags$div(id = "nodeLogsContent", class = "log-content", style = "max-height: calc(100vh - 200px); overflow-y: auto; padding: 10px;",
+              tags$p(style = "color: #888; font-style: italic;", "Execution logs will appear here")
+            )
+          ),
+          
+          # RMD Preview Tab
+          tags$div(id = "rmdTab", class = "tab-pane",
+            tags$div(style = "padding: 10px;",
+              tags$div(style = "margin-bottom: 10px; display: flex; gap: 8px;",
+                tags$button(class = "btn btn-primary btn-sm", id = "refreshRmdPreviewBtn",
+                  style = "background: #CEB888; border: none; color: #000; padding: 6px 12px; font-weight: 600; cursor: pointer;",
+                  "Refresh Preview"),
+                tags$button(class = "btn btn-secondary btn-sm", id = "exportRmdFromPreviewBtn",
+                  style = "background: #3e3e42; border: none; color: white; padding: 6px 12px; cursor: pointer;",
+                  "Export RMD"),
+                tags$button(class = "btn btn-secondary btn-sm", id = "importRmdBtn",
+                  style = "background: #3e3e42; border: none; color: white; padding: 6px 12px; cursor: pointer;",
+                  "Import RMD")
+              ),
+              tags$textarea(id = "rmdPreview", 
+                style = "width: 100%; height: calc(100vh - 250px); font-family: 'Courier New', monospace; font-size: 12px; padding: 10px; background: #1e1e1e; color: #d4d4d4; border: 1px solid #3e3e42; border-radius: 4px; resize: vertical;",
+                readonly = "readonly",
+                placeholder = "RMD preview will appear here. Click 'Refresh Preview' to generate.")
+            )
           )
         )
       )
-    )
+    ),
+    
+    # Code Editor Modal
+    tags$div(id = "codeEditorModal", class = "modal fade", tabindex = "-1", role = "dialog",
+      tags$div(class = "modal-dialog modal-lg", role = "document",
+        tags$div(class = "modal-content",
+          tags$div(class = "modal-header",
+            tags$h5(class = "modal-title", "Edit R Code"),
+            tags$button(type = "button", class = "btn-close", `data-bs-dismiss` = "modal", `aria-label` = "Close")
+          ),
+          tags$div(class = "modal-body",
+            tags$textarea(id = "codeEditor", class = "code-editor-area", rows = "20", style = "width: 100%; font-family: 'Courier New', monospace; font-size: 13px;"),
+            tags$div(id = "codeEditorStatus", style = "margin-top: 10px; font-size: 12px; color: #666;")
+          ),
+          tags$div(class = "modal-footer",
+            tags$button(type = "button", class = "btn btn-secondary", id = "cancelCodeBtn", "Cancel"),
+            tags$button(type = "button", class = "btn btn-primary", id = "saveCodeBtn", "Save")
+          )
+        )
+      )
+    ),
+    
+    # Log Display Area (bottom panel) - Hidden, logs now shown in right sidebar LOGS tab
+    tags$div(id = "logPanel", class = "log-panel", style = "display: none;",
+      tags$div(class = "log-header",
+        tags$span("Execution Log"),
+        tags$button(id = "toggleLog", class = "btn btn-sm", HTML("&#9650;"))
+      ),
+      tags$div(id = "logContent", class = "log-content")
+    ),
+    
   )
-)
 
-# ============================
-# Server Logic
-# ============================
+# Server function
 server <- function(input, output, session) {
-  # Ensure workspace path is correct (re-check in server context)
-  # This is important because getwd() may differ when Shiny app runs
-  # Priority: Find inst/RCW/root which contains the actual files
-  possible_roots <- c(
-    file.path(getwd(), "inst", "RCW", "root"),                    # PRIORITY: inst/RCW/root
-    file.path(getwd(), "easybreedeR-main", "inst", "RCW", "root"), # If in parent directory
-    file.path(getwd(), "root"),                                    # Fallback
-    normalizePath(file.path("inst", "RCW", "root"), mustWork = FALSE),
-    normalizePath(file.path("root"), mustWork = FALSE),
-    # Also try absolute path from common locations
-    file.path(dirname(getwd()), "inst", "RCW", "root"),
-    file.path(dirname(dirname(getwd())), "inst", "RCW", "root")
-  )
-  
-  # Find existing root directory - prioritize inst/RCW/root structure
-  found_root <- NULL
-  for (root_candidate in possible_roots) {
-    if (dir.exists(root_candidate)) {
-      # Always prefer inst/RCW/root structure
-      if (grepl("inst[/\\\\]RCW[/\\\\]root", root_candidate, ignore.case = TRUE)) {
-        found_root <- normalizePath(root_candidate, winslash = "/")
-        break
-      }
-      # Otherwise check if it has R files
-      r_files <- list.files(root_candidate, pattern = "\\.R$", recursive = TRUE, full.names = FALSE)
-      if (length(r_files) > 0) {
-        found_root <- normalizePath(root_candidate, winslash = "/")
-        break
-      }
-    }
-  }
-  
-  # If found a valid root, update workspace
-  if (!is.null(found_root)) {
-    .rcw_workspace <<- found_root
-  } else {
-    # If still not found, try to find or create inst/RCW/root
-    if (dir.exists("inst") && dir.exists("inst/RCW")) {
-      root_path <- file.path("inst", "RCW", "root")
-      if (!dir.exists(root_path)) {
-        dir.create(root_path, recursive = TRUE, showWarnings = FALSE)
-      }
-      .rcw_workspace <<- normalizePath(root_path, winslash = "/")
-    } else if (dir.exists("easybreedeR-main") && dir.exists("easybreedeR-main/inst/RCW")) {
-      root_path <- file.path("easybreedeR-main", "inst", "RCW", "root")
-      if (!dir.exists(root_path)) {
-        dir.create(root_path, recursive = TRUE, showWarnings = FALSE)
-      }
-      .rcw_workspace <<- normalizePath(root_path, winslash = "/")
-    }
-  }
-  
-  # Debug: Print workspace path to console (helpful for troubleshooting)
-  cat("=== RCW Workspace Debug ===\n")
-  cat("Current working directory:", getwd(), "\n")
-  cat("Workspace path:", .rcw_workspace, "\n")
-  cat("Workspace exists:", dir.exists(.rcw_workspace), "\n")
-  if (dir.exists(.rcw_workspace)) {
-    r_files <- list.files(.rcw_workspace, pattern = "\\.R$", recursive = TRUE, full.names = FALSE)
-    cat("R files found:", length(r_files), "\n")
-    if (length(r_files) > 0) {
-      cat("Files:", paste(r_files, collapse = ", "), "\n")
-    }
-  }
-  cat("===========================\n")
-  
-  # Language state
-  lang <- reactiveVal("en")
-  observe({
-    resolved <- try({
-      if (exists("resolve_suite_lang", mode = "function")) {
-        get("resolve_suite_lang", mode = "function")(session, default = "en")
-      } else {
-        "en"
-      }
-    }, silent = TRUE)
-    if (!inherits(resolved, "try-error")) {
-      mapped <- try({
-        if (exists("map_suite_lang_for_app", mode = "function")) {
-          get("map_suite_lang_for_app", mode = "function")(resolved, app = "rcw")
-        } else {
-          resolved
-        }
-      }, silent = TRUE)
-      if (!inherits(mapped, "try-error")) lang(mapped)
-    }
-  })
-
-  # Title bar
-  output$app_title_ui <- renderUI({ h1(get_label("app_name", lang())) })
-  output$app_subtitle_ui <- renderUI({ p(get_label("app_subtitle", lang())) })
-
-  # Global canvas settings UI removed. Per-node appearance is available via right-click context menu.
-
-  # Left panel labels/buttons
-  output$left_title_notebooks <- renderText({ get_label("left_notebooks", lang()) })
-  output$left_tip_drag <- renderText({ get_label("left_tip_drag", lang()) })
-  observe({
-    updateActionButton(session, "new_folder", label = get_label("btn_new_folder", lang()))
-    updateActionButton(session, "new_file", label = get_label("btn_new_file", lang()))
-    updateActionButton(session, "add_external_folder", label = get_label("btn_add_folder", lang()))
-    updateActionButton(session, "run_pipeline", label = get_label("btn_run_pipeline", lang()))
-    updateActionButton(session, "clear_canvas", label = get_label("btn_clear", lang()))
-    updateActionButton(session, "toggleLeftPanel", label = HTML("&#10094;"))
-    updateActionButton(session, "toggleRightPanel", label = HTML("&#10095;"))
-  })
-
-  # Right tabs and labels
-  output$tab_title_pipeline_output <- renderUI({ span(get_label("tab_pipeline_output", lang())) })
-  output$tab_title_export_rmd <- renderUI({ span(get_label("tab_export_rmd", lang())) })
-  output$right_exec_results <- renderText({ get_label("right_exec_results", lang()) })
-  output$right_run_log <- renderText({ get_label("right_run_log", lang()) })
-  output$right_export_rmd_title <- renderText({ get_label("right_export_rmd_title", lang()) })
-  output$right_export_rmd_desc <- renderText({ get_label("right_export_rmd_desc", lang()) })
-  output$right_export_svg_title <- renderText({ get_label("right_export_svg_title", lang()) })
-  output$right_export_svg_desc <- renderText({ get_label("right_export_svg_desc", lang()) })
-  output$right_preview <- renderText({ get_label("right_preview", lang()) })
-  observe({
-    # Fallback if updateDownloadButton is not available in current shiny version
-    if (exists("updateDownloadButton", where = asNamespace("shiny"), mode = "function")) {
-      get("updateDownloadButton", envir = asNamespace("shiny"))(session, "export_rmd", label = get_label("btn_download_rmd", lang()))
-    }
-    # Update SVG export button label
-    updateActionButton(session, "export_svg_btn", label = get_label("btn_export_svg", lang()))
-  })
-  
-  # Reactive state - scan workspace after path is confirmed
-  rv <- reactiveValues(
-    workspace = scan_workspace(),  # Will be refreshed immediately below
+  # Initialize canvas state
+  canvas_state <- reactiveValues(
     nodes = list(),
-    edges = list(),
-    rmd_preview = "",
-    selected_node_id = NULL,
-    logs = character(0),
-    pipeline_result = NULL,
-    file_to_delete = NULL,
-    folder_to_delete = NULL,
-    files_to_delete = NULL,
-    selected_dir = NULL,
-    editing_tree_file = NULL,
-    file_to_rename = NULL,
-    folder_to_rename = NULL
+    edges = list()
   )
   
-  # Force refresh workspace scan with correct path
-  rv$workspace <- scan_workspace()
-
-  # Helper: regenerate Rmd preview from current nodes/edges
-  regenerate_rmd <- function() {
-    if (length(rv$nodes) == 0) {
-      rv$rmd_preview <- "No nodes on canvas. Add some R files to the canvas to generate R Markdown."
-      return(invisible(NULL))
-    }
-    # Build hierarchy and generate rmd; protect against errors
-    hierarchy <- tryCatch({ build_node_hierarchy(rv$nodes, rv$edges) }, error = function(e) NULL)
-    if (is.null(hierarchy) || length(hierarchy) == 0) {
-      rv$rmd_preview <- "No nodes in workflow or failed to compute order."
-      return(invisible(NULL))
-    }
-    rv$rmd_preview <- tryCatch({ generate_rmd_from_hierarchy(hierarchy, rv$workspace$files) }, error = function(e) paste0("Error generating Rmd: ", e$message))
-    invisible(NULL)
-  }
-
-  # Compute a robust topological execution order from current graph (Kahn + position tie-break)
-  compute_execution_order <- function() {
-    ids <- names(rv$nodes)
-    if (length(ids) == 0) return(list())
-
-    # Build adjacency and indegree
-    adj <- setNames(lapply(ids, function(i) character(0)), ids)
-    indeg <- setNames(rep(0L, length(ids)), ids)
-    if (length(rv$edges) > 0) {
-      for (e in rv$edges) {
-        s <- as.character(e$source); t <- as.character(e$target)
-        if (nzchar(s) && nzchar(t) && s %in% ids && t %in% ids) {
-          adj[[s]] <- c(adj[[s]], t)
-          indeg[[t]] <- indeg[[t]] + 1L
-        }
-      }
-    }
-
-    # Position tie-breaker (top-to-bottom, then left-to-right)
-    pos_key <- function(id) {
-      node <- rv$nodes[[id]]
-      y <- suppressWarnings(as.numeric(node$y)); if (is.na(y)) y <- 0
-      x <- suppressWarnings(as.numeric(node$x)); if (is.na(x)) x <- 0
-      sprintf("%09d_%09d", as.integer(y), as.integer(x))
-    }
-    order_by_pos <- function(vec) {
-      if (length(vec) <= 1) return(vec)
-      keys <- vapply(vec, pos_key, character(1))
-      vec[order(keys, vec)]
-    }
-
-    # Initialize queue with roots ordered by position
-    q <- order_by_pos(ids[indeg[ids] == 0L])
-    out <- character(0)
-    while (length(q) > 0) {
-      n <- q[1]; q <- q[-1]
-      out <- c(out, n)
-      for (m in adj[[n]]) {
-        indeg[[m]] <- indeg[[m]] - 1L
-        if (indeg[[m]] == 0L) q <- order_by_pos(c(q, m))
-      }
-    }
-    if (length(out) < length(ids)) {
-      out <- c(out, setdiff(ids, out))
-    }
-    lapply(out, function(id) list(id = id, node = rv$nodes[[id]], level = 1))
-  }
-
-  # Note: global canvas settings removed; per-node appearance is stored on nodes
+  # Shared R environment for all nodes
+  shared_env <- new.env()
   
-  # Setup shinyDirChoose for folder selection (only if deps available)
-  if (requireNamespace("fs", quietly = TRUE) && requireNamespace("shinyFiles", quietly = TRUE)) {
-    volumes <- c(Home = fs::path_home(), getVolumes()())
-    shinyDirChoose(input, "dir_choose", roots = volumes, session = session)
-  }
-  
-  # Scan workspace on start and refresh
-  observe({
-    invalidateLater(20000)  # Refresh every 20 seconds
-    rv$workspace <- scan_workspace()
-  })
-  
-  # Initialize selected folder display
-  output$selected_folder_display <- renderUI({
-    p(style = "margin: 0; color: #666; font-size: 0.9rem;",
-      "No folder selected yet...")
-  })
+  # Initialize shared environment with common packages
+  tryCatch({
+    if (requireNamespace("ggplot2", quietly = TRUE)) {
+      attach(list(), name = "ggplot2_env", pos = 2)
+      library(ggplot2)
+    }
+  }, error = function(e) {})
   
   # Render file tree
   output$file_tree_ui <- renderUI({
-    ws <- rv$workspace
+    structure <- scan_workspace()
     
-    # Prefer folders discovered (includes empty ones); fallback to folders from files
-    folders <- unique(unlist(ws$folders))
-    if (length(folders) == 0) {
-      folders <- unique(sapply(ws$files, function(f) f$folder))
+    if (length(structure$folders) == 0 && length(structure$files) == 0) {
+      # Show Open Folder button
+      session$sendCustomMessage("showOpenFolder", list(show = TRUE))
+      return(tags$div())
     }
     
-    if (length(folders) == 0) {
-      return(div(
-        style = "padding: 20px; text-align: center; color: #999;",
-        p("No folders yet"),
-        p(style = "font-size: 0.85rem;", "Use 'New Folder' to create one")
+    # Hide Open Folder button if files exist
+    session$sendCustomMessage("showOpenFolder", list(show = FALSE))
+    
+    # Group files by folder
+    files_by_folder <- list()
+    for (file_info in structure$files) {
+      folder <- file_info$folder
+      if (!folder %in% names(files_by_folder)) {
+        files_by_folder[[folder]] <- list()
+      }
+      files_by_folder[[folder]] <- c(files_by_folder[[folder]], list(file_info))
+    }
+    
+    # Build HTML
+    html_list <- list()
+    
+    # Sort folders
+    sorted_folders <- sort(unique(structure$folders))
+    
+    for (folder in sorted_folders) {
+      folder_id <- gsub("[^a-zA-Z0-9]", "_", folder)
+      folder_name <- if (folder == "root") "root" else gsub("^root/", "", folder)
+      
+      # Folder header
+      folder_files <- files_by_folder[[folder]] %||% list()
+      
+      html_list <- c(html_list, list(
+        tags$div(
+          class = "file-tree-item folder",
+          `data-folder-id` = folder_id,
+          tags$div(class = "folder-header",
+            tags$span(class = "folder-toggle", "▶"),
+            tags$span(class = "folder-name", title = folder, folder_name)
+          )
+        ),
+        tags$div(
+          id = paste0("folder-files-", folder_id),
+          class = "folder-files",
+          lapply(folder_files, function(file_info) {
+            tags$div(
+              class = "file-tree-item file",
+              `data-filepath` = file_info$path,
+              `data-filename` = file_info$name,
+              tags$span(class = "file-icon", "📄"),
+              tags$span(class = "file-name", title = file_info$name, file_info$name)
+            )
+          })
+        )
       ))
     }
     
-    folders <- sort(folders)
-    
-    # Helpers to compute hierarchy
-    get_parent <- function(label) {
-      parts <- strsplit(label, "/", fixed = TRUE)[[1]]
-      if (length(parts) <= 1) return(NA_character_)
-      paste(parts[-length(parts)], collapse = "/")
-    }
-    get_children <- function(label) {
-      prefix <- if (is.na(label)) "" else paste0(label, "/")
-      # direct children: start with prefix, and remaining has no '/'
-      Filter(function(x) {
-        if (!startsWith(x, prefix)) return(FALSE)
-        # Safely obtain the rest of the path after the prefix without regex
-        rest <- if (nchar(prefix) == 0) x else substring(x, nchar(prefix) + 1)
-        !grepl("/", rest, fixed = TRUE)
-      }, folders[folders != label])
-    }
-    
-    rendered <- new.env(parent = emptyenv())
-    render_node <- function(label, level = 0) {
-      if (exists(label, envir = rendered, inherits = FALSE)) return(NULL)
-      assign(label, TRUE, envir = rendered)
-      folder_safe_id <- gsub("[^A-Za-z0-9]", "-", label)
-      folder_id <- paste0("folder-", folder_safe_id)
-      folder_files <- Filter(function(f) f$folder == label, ws$files)
-      children <- get_children(label)
-      indent <- paste0(level * 16, "px")
-      
-      tagList(
-        div(class = "file-tree-item folder",
-          `data-folder-id` = folder_id,
-          style = paste0("margin-left:", indent, ";"),
-          div(class = "folder-header",
-            span(class = "folder-toggle", "▼"),
-            span(class = "file-icon", ""),
-            span(class = "folder-name", title = label, label)
-          )
-        ),
-        div(id = paste0("folder-files-", folder_id), class = "folder-files",
-          # files in this folder
-          lapply(folder_files, function(f) {
-            div(class = "file-tree-item file",
-              style = paste0("margin-left:", indent, ";"),
-              `data-filepath` = f$rel_path,
-              `data-filename` = f$name,
-              span(class = "file-icon", ""),
-              span(class = "file-name", title = f$name, f$name)
-            )
-          }),
-          # then recursively render child folders
-          lapply(children, function(ch) render_node(ch, level + 1))
-        )
-      )
-    }
-    
-    tops <- Filter(function(x) is.na(get_parent(x)), folders)
-    tagList(lapply(tops, function(t) render_node(t, 0)))
+    tags$ul(class = "file-tree", html_list)
   })
   
-  # New folder
-  observeEvent(input$new_folder, {
-    showModal(modalDialog(
-      title = "Create New Folder",
-      textInput("folder_name", "Folder Name:", placeholder = "e.g., data_processing"),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_new_folder", "Create", class = "btn-primary")
-      )
-    ))
-  })
-
-  observeEvent(input$confirm_new_folder, {
-    req(input$folder_name)
-    folder_path <- file.path(.rcw_workspace, input$folder_name)
-    dir.create(folder_path, recursive = TRUE, showWarnings = FALSE)
-    removeModal()
-    showNotification(paste0("Created folder: ", input$folder_name), type = "message")
-    rv$workspace <- scan_workspace()
+  # Toggle panel visibility
+  observeEvent(input$toggle_left, {
+    session$sendCustomMessage("toggle_panel", list(side = "left"))
   })
   
-  # New file
-  observeEvent(input$new_file, {
-    ws <- rv$workspace
-    base_label <- basename(.rcw_workspace)
-    raw <- unique(unlist(ws$folders))
-    rels <- character(0)
-    if (length(raw) > 0) {
-      for (lbl in raw) {
-        if (identical(lbl, base_label)) rels <- c(rels, "")
-        if (startsWith(lbl, paste0(base_label, "/"))) {
-          rels <- c(rels, sub(paste0("^", base_label, "/"), "", lbl))
+  observeEvent(input$toggle_right, {
+    session$sendCustomMessage("toggle_panel", list(side = "right"))
+  })
+  
+  # Create new file
+  observeEvent(input$create_new_file, {
+    if (!is.null(input$create_new_file) && !is.null(input$create_new_file$fileName)) {
+      tryCatch({
+        file_name <- input$create_new_file$fileName
+        # Determine workspace root
+        workspace_root <- .rcw_workspace
+        if (length(.rcw_external_folders) > 0) {
+          workspace_root <- .rcw_external_folders[1]
         }
-      }
-    }
-    rels <- sort(unique(rels[rels != ""]))
-    showModal(modalDialog(
-      title = "Create New R File",
-      textInput("file_name", "File Name:", placeholder = "e.g., analysis.R"),
-      selectInput("file_folder", "Folder:", choices = c("Root", rels)),
-      textAreaInput("file_content", "Initial Content:",
-                    value = "# New R Script\n\n# Your code here\n",
-                    rows = 10),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_new_file", "Create", class = "btn-primary")
-      )
-    ))
-  })
-
-  observeEvent(input$confirm_new_file, {
-    req(input$file_name)
-    file_name <- input$file_name
-    if (!grepl("\\.R$", file_name, ignore.case = TRUE)) {
-      file_name <- paste0(file_name, ".R")
-    }
-
-    folder <- input$file_folder
-    if (folder == "Root") {
-      folder_path <- .rcw_workspace
-    } else {
-      folder <- sub("^/+", "", folder)
-      folder_path <- file.path(.rcw_workspace, folder)
-    }
-
-    dir.create(folder_path, recursive = TRUE, showWarnings = FALSE)
-    file_path <- file.path(folder_path, file_name)
-    write_r_file(file_path, input$file_content %||% "# New R Script\n")
-    removeModal()
-    showNotification(paste0("Created file: ", file_name, " in ", folder), type = "message")
-    rv$workspace <- scan_workspace()
-  })
-  
-  # Add external folder
-  observeEvent(input$add_external_folder, {
-    if (!requireNamespace("shinyFiles", quietly = TRUE)) {
-      showNotification("shinyFiles package not installed; external folder feature is disabled.", type = "warning")
-      return()
-    }
-    showModal(modalDialog(
-      title = "Add External Folder",
-      size = "m",
-      div(style = "margin-bottom: 15px;",
-        shinyDirButton("dir_choose", "Browse for Folder", 
-                      "Please select a folder containing .R files",
-                      class = "btn btn-primary",
-                      style = "width: 100%; padding: 12px; font-size: 1rem;")
-      ),
-      div(id = "selected_folder_display", style = "margin-top: 15px; padding: 12px; background: #f8f9fa; border-radius: 4px; border-left: 4px solid #CEB888; min-height: 50px;",
-        p(style = "margin: 0; color: #666; font-size: 0.9rem;",
-          "No folder selected yet...")
-      ),
-      div(style = "margin-top: 10px; padding: 10px; background: #e7f3ff; border-radius: 4px; border-left: 4px solid #2196F3;",
-        p(style = "margin: 0; font-size: 0.85rem; color: #1565c0;",
-          "Tip: Browse and select a folder containing .R files. All .R files in the folder and subfolders will be available for use.")
-      ),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_add_external_folder", "Add Folder", class = "btn-primary")
-      )
-    ))
-  })
-  
-  # Watch for directory selection
-  observe({
-    if (!requireNamespace("shinyFiles", quietly = TRUE)) return()
-    req(input$dir_choose)
-    
-    if (is.integer(input$dir_choose)) {
-      return()
-    }
-    
-    dir_path <- parseDirPath(volumes, input$dir_choose)
-    
-    if (length(dir_path) > 0 && dir.exists(dir_path)) {
-      rv$selected_dir <- dir_path
-      
-      # Update display
-      output$selected_folder_display <- renderUI({
-        div(style = "padding: 12px; background: #e8f5e9; border-radius: 4px; border-left: 4px solid #4CAF50;",
-          p(style = "margin: 0; font-weight: 600; color: #2e7d32;",
-            "Selected folder:"),
-          p(style = "margin: 5px 0 0 0; color: #1b5e20; font-family: monospace; font-size: 0.85rem;",
-            dir_path)
-        )
+        
+        # Create file path
+        file_path <- file.path(workspace_root, file_name)
+        
+        # Create empty R file
+        writeLines("", file_path)
+        
+        # Trigger file tree refresh
+        file_tree_trigger(isolate(file_tree_trigger()) + 1)
+        
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✓ Created file: ", file_name), 
+          type = "success"
+        ))
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error creating file: ", e$message), 
+          type = "error"
+        ))
       })
     }
   })
   
-  observeEvent(input$confirm_add_external_folder, {
-    req(rv$selected_dir)
-    if (!requireNamespace("shinyFiles", quietly = TRUE)) {
-      showNotification("shinyFiles package not installed; external folder feature is disabled.", type = "warning")
-      return()
+  # Create new folder
+  observeEvent(input$create_new_folder, {
+    if (!is.null(input$create_new_folder) && !is.null(input$create_new_folder$folderName)) {
+      tryCatch({
+        folder_name <- input$create_new_folder$folderName
+        # Determine workspace root
+        workspace_root <- .rcw_workspace
+        if (length(.rcw_external_folders) > 0) {
+          workspace_root <- .rcw_external_folders[1]
+        }
+        
+        # Create folder path
+        folder_path <- file.path(workspace_root, folder_name)
+        
+        # Create directory
+        dir.create(folder_path, recursive = TRUE, showWarnings = FALSE)
+        
+        # Trigger file tree refresh
+        file_tree_trigger(isolate(file_tree_trigger()) + 1)
+        
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✓ Created folder: ", folder_name), 
+          type = "success"
+        ))
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error creating folder: ", e$message), 
+          type = "error"
+        ))
+      })
     }
-    folder_path <- rv$selected_dir
-    
-    if (!dir.exists(folder_path)) {
-      showNotification("Folder does not exist!", type = "error")
-      return()
-    }
-    
-    # Check if already added
-    if (folder_path %in% .rcw_external_folders) {
-      showNotification("Folder already added!", type = "warning")
-      removeModal()
-      rv$selected_dir <- NULL
-      return()
-    }
-    
-    # Add to external folders
-    .rcw_external_folders <<- c(.rcw_external_folders, folder_path)
-    
-    removeModal()
-    showNotification(paste0("Added folder: ", basename(folder_path)), type = "message")
-    rv$selected_dir <- NULL
-    rv$workspace <- scan_workspace()
   })
   
-  # Delete file
-  observeEvent(input$delete_file, {
-    req(input$delete_file)
-    file_path <- input$delete_file$path
-    
-    # Find full path
-    matching_file <- Find(function(f) f$rel_path == file_path, rv$workspace$files)
-    if (is.null(matching_file)) {
-      showNotification("File not found!", type = "error")
-      return()
-    }
-    
-    showModal(modalDialog(
-      title = "Confirm Delete",
-      p(sprintf("Are you sure you want to delete '%s'?", matching_file$name)),
-      p(style = "color: #999; font-size: 0.85rem;", matching_file$path),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_delete_file", "Delete", class = "btn-danger",
-                    style = "background: #dc3545; border-color: #dc3545;")
-      )
+  # Refresh files
+  observeEvent(input$refresh_files, {
+    file_tree_trigger(isolate(file_tree_trigger()) + 1)
+    session$sendCustomMessage("appendToLog", list(
+      message = "✓ Files refreshed", 
+      type = "success"
     ))
-    
-    rv$file_to_delete <- matching_file$path
   })
   
-  observeEvent(input$confirm_delete_file, {
-    req(rv$file_to_delete)
-    
-    if (file.exists(rv$file_to_delete)) {
-      unlink(rv$file_to_delete)
-      showNotification("File deleted", type = "message")
+  # Move file to folder
+  observeEvent(input$move_file_to_folder, {
+    if (!is.null(input$move_file_to_folder)) {
+      tryCatch({
+        file_path <- input$move_file_to_folder$filePath
+        file_name <- input$move_file_to_folder$fileName
+        target_folder <- input$move_file_to_folder$targetFolder
+        
+        if (is.null(file_path) || !file.exists(file_path)) {
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("✗ File not found: ", file_name), 
+            type = "error"
+          ))
+          return()
+        }
+        
+        # Determine workspace root
+        workspace_root <- .rcw_workspace
+        if (length(.rcw_external_folders) > 0) {
+          workspace_root <- .rcw_external_folders[1]
+        }
+        
+        # Calculate target path
+        if (target_folder == "root" || target_folder == "") {
+          target_path <- file.path(workspace_root, file_name)
+        } else {
+          # Remove "root/" prefix if present
+          folder_path <- gsub("^root/", "", target_folder)
+          target_path <- file.path(workspace_root, folder_path, file_name)
+        }
+        
+        # Create target directory if needed
+        dir.create(dirname(target_path), recursive = TRUE, showWarnings = FALSE)
+        
+        # Move file (copy then delete original)
+        if (file_path != target_path) {
+          file.copy(file_path, target_path, overwrite = TRUE)
+          file.remove(file_path)
+          
+          # Trigger file tree refresh
+          file_tree_trigger(isolate(file_tree_trigger()) + 1)
+          
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("✓ Moved file: ", file_name, " to ", target_folder), 
+            type = "success"
+          ))
+        }
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error moving file: ", e$message), 
+          type = "error"
+        ))
+      })
     }
-    
-    removeModal()
-    rv$file_to_delete <- NULL
-    rv$workspace <- scan_workspace()
   })
   
-  # Edit file from tree
-  observeEvent(input$edit_file_tree, {
-    req(input$edit_file_tree)
-    file_rel_path <- input$edit_file_tree$path
-    
-    # Find the actual file
-    matching_file <- Find(function(f) f$rel_path == file_rel_path, rv$workspace$files)
-    if (is.null(matching_file)) {
-      showNotification("File not found!", type = "error")
-      return()
+  # Handle node creation
+  observeEvent(input$node_created, {
+    if (!is.null(input$node_created)) {
+      node_data <- input$node_created
+      node_id <- node_data$id
+      
+      # Ensure filePath is absolute and exists
+      file_path <- node_data$filePath
+      if (!is.null(file_path) && nzchar(file_path)) {
+        # Convert to absolute path if relative
+        if (!file.exists(file_path)) {
+          # Try to find file in workspace
+          structure <- scan_workspace()
+          for (file_info in structure$files) {
+            if (basename(file_info$path) == basename(file_path)) {
+              file_path <- file_info$path
+              break
+            }
+          }
+        }
+        node_data$filePath <- normalizePath(file_path, winslash = "/", mustWork = FALSE)
+      }
+      
+      canvas_state$nodes[[node_id]] <- node_data
+      session$sendCustomMessage("appendToLog", list(
+        message = paste0("Node created: ", node_data$fileName), 
+        type = "success"
+      ))
     }
-    
-    file_path <- matching_file$path
-    content <- read_r_file(file_path)
-    
-    showModal(modalDialog(
-      title = paste0("Edit: ", matching_file$name),
-      size = "l",
-      tags$style(HTML("#edit_tree_file_content { 
-        font-family: 'Courier New', monospace !important;
-        font-size: 13px !important;
-        padding: 12px !important;
-        border: 2px solid #CFB991 !important;
-        border-radius: 4px !important;
-        background: #f8f9fa !important;
-      }")),
-      textAreaInput("edit_tree_file_content", NULL, value = content, 
-                   rows = 20, width = "100%"),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("save_tree_file_edit", "Save", class = "btn-primary")
-      ),
-      easyClose = FALSE
-    ))
-    
-    rv$editing_tree_file <- file_path
   })
   
-  observeEvent(input$save_tree_file_edit, {
-    req(rv$editing_tree_file, input$edit_tree_file_content)
-    write_r_file(rv$editing_tree_file, input$edit_tree_file_content)
-    removeModal()
-    showNotification("Code saved successfully!", type = "message")
-    rv$editing_tree_file <- NULL
-    rv$workspace <- scan_workspace()
-  })
-  
-  # Rename file
-  observeEvent(input$rename_file, {
-    req(input$rename_file)
-    file_rel_path <- input$rename_file$path
-    old_name <- input$rename_file$name
-    
-    # Find the actual file
-    matching_file <- Find(function(f) f$rel_path == file_rel_path, rv$workspace$files)
-    if (is.null(matching_file)) {
-      showNotification("File not found!", type = "error")
-      return()
-    }
-    
-    showModal(modalDialog(
-      title = "Rename File",
-      textInput("new_file_name", "New File Name:", value = old_name),
-      p(style = "color: #999; font-size: 0.85rem;", matching_file$path),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_rename_file", "Rename", class = "btn-primary")
-      )
-    ))
-    
-    rv$file_to_rename <- matching_file$path
-  })
-  
-  observeEvent(input$confirm_rename_file, {
-    req(rv$file_to_rename, input$new_file_name)
-    
-    old_path <- rv$file_to_rename
-    new_name <- input$new_file_name
-    
-    # Ensure .R extension
-    if (!grepl("\\.R$", new_name, ignore.case = TRUE)) {
-      new_name <- paste0(new_name, ".R")
-    }
-    
-    new_path <- file.path(dirname(old_path), new_name)
-    
-    if (file.exists(new_path) && new_path != old_path) {
-      showNotification("A file with this name already exists!", type = "error")
-      return()
-    }
-    
-    file.rename(old_path, new_path)
-    removeModal()
-    showNotification(paste0("Renamed to: ", new_name), type = "message")
-    rv$file_to_rename <- NULL
-    rv$workspace <- scan_workspace()
-  })
-  
-  # Rename folder
-  observeEvent(input$rename_folder, {
-    req(input$rename_folder)
-    folder_name <- input$rename_folder$name
-    
-    # Find folder path
-    folder_path <- NULL
-    base_name <- "root"
-    
-    if (folder_name == base_name) {
-      folder_path <- .rcw_workspace
-    } else if (folder_name %in% sapply(.rcw_external_folders, basename)) {
-      showNotification("Cannot rename external folders!", type = "error")
-      return()
-    } else {
-      # It's a subfolder - need to extract the base folder name
-      parts <- strsplit(folder_name, "/")[[1]]
-      if (length(parts) == 1) {
-        folder_path <- file.path(.rcw_workspace, folder_name)
-      } else {
-        # It's a nested folder like "R_Notebooks/subfolder"
-        folder_path <- file.path(.rcw_workspace, parts[-1])
+  # Handle node movement
+  observeEvent(input$node_moved, {
+    if (!is.null(input$node_moved)) {
+      node_data <- input$node_moved
+      node_id <- node_data$id
+      if (node_id %in% names(canvas_state$nodes)) {
+        canvas_state$nodes[[node_id]]$x <- node_data$x
+        canvas_state$nodes[[node_id]]$y <- node_data$y
       }
     }
-    
-    if (is.null(folder_path) || !dir.exists(folder_path)) {
-      showNotification("Folder not found!", type = "error")
-      return()
-    }
-    
-    showModal(modalDialog(
-      title = "Rename Folder",
-      textInput("new_folder_name", "New Folder Name:", value = basename(folder_path)),
-      p(style = "color: #999; font-size: 0.85rem;", folder_path),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_rename_folder", "Rename", class = "btn-primary")
-      )
-    ))
-    
-    rv$folder_to_rename <- folder_path
   })
   
-  observeEvent(input$confirm_rename_folder, {
-    req(rv$folder_to_rename, input$new_folder_name)
-    
-    old_path <- rv$folder_to_rename
-    new_name <- input$new_folder_name
-    new_path <- file.path(dirname(old_path), new_name)
-    
-    if (dir.exists(new_path) && new_path != old_path) {
-      showNotification("A folder with this name already exists!", type = "error")
-      return()
+  # Handle node appearance updates
+  observeEvent(input$node_set_appearance, {
+    if (!is.null(input$node_set_appearance)) {
+      node_data <- input$node_set_appearance
+      node_id <- node_data$id
+      if (node_id %in% names(canvas_state$nodes)) {
+        canvas_state$nodes[[node_id]]$appearance <- list(
+          shape = node_data$shape,
+          color = node_data$color,
+          titleColor = node_data$titleColor
+        )
+      }
     }
-    
-    file.rename(old_path, new_path)
-    removeModal()
-    showNotification(paste0("Renamed to: ", new_name), type = "message")
-    rv$folder_to_rename <- NULL
-    rv$workspace <- scan_workspace()
+  })
+  
+  # Handle connections
+  observeEvent(input$canvas_connections, {
+    if (!is.null(input$canvas_connections)) {
+      # Ensure edges is always a list
+      if (is.list(input$canvas_connections)) {
+        canvas_state$edges <- input$canvas_connections
+      } else {
+        # If it's not a list, convert to empty list
+        canvas_state$edges <- list()
+      }
+    } else {
+      canvas_state$edges <- list()
+    }
+  })
+  
+  # Get node logs
+  observeEvent(input$get_node_logs, {
+    if (!is.null(input$get_node_logs)) {
+      node_id <- input$get_node_logs$nodeId
+      if (node_id %in% names(canvas_state$nodes)) {
+        node <- canvas_state$nodes[[node_id]]
+        logs <- node$lastOutput %||% "No logs available for this node."
+        session$sendCustomMessage("updateNodeLogs", list(logs = logs))
+      }
+    }
+  })
+  
+  # Close folder
+  observeEvent(input$close_folder, {
+    .rcw_external_folders <<- character(0)
+    # Trigger file tree refresh
+    output$file_tree_ui <- renderUI({
+      structure <- scan_workspace()
+      if (length(structure$folders) == 0 && length(structure$files) == 0) {
+        session$sendCustomMessage("showOpenFolder", list(show = TRUE))
+        return(tags$div())
+      }
+      session$sendCustomMessage("showOpenFolder", list(show = FALSE))
+      
+      # Group files by folder
+      files_by_folder <- list()
+      for (file_info in structure$files) {
+        folder <- file_info$folder
+        if (!folder %in% names(files_by_folder)) {
+          files_by_folder[[folder]] <- list()
+        }
+        files_by_folder[[folder]] <- c(files_by_folder[[folder]], list(file_info))
+      }
+      
+      # Build HTML
+      html_list <- list()
+      sorted_folders <- sort(unique(structure$folders))
+      
+      for (folder in sorted_folders) {
+        folder_id <- gsub("[^a-zA-Z0-9]", "_", folder)
+        folder_name <- if (folder == "root") "root" else gsub("^root/", "", folder)
+        folder_files <- files_by_folder[[folder]] %||% list()
+        
+        html_list <- c(html_list, list(
+          tags$div(
+            class = "file-tree-item folder",
+            `data-folder-id` = folder_id,
+            tags$div(class = "folder-header",
+              tags$span(class = "folder-toggle", "▶"),
+              tags$span(class = "folder-name", title = folder, folder_name)
+            )
+          ),
+          tags$div(
+            id = paste0("folder-files-", folder_id),
+            class = "folder-files",
+            lapply(folder_files, function(file_info) {
+              tags$div(
+                class = "file-tree-item file",
+                `data-filepath` = file_info$path,
+                `data-filename` = file_info$name,
+                tags$span(class = "file-icon", "📄"),
+                tags$span(class = "file-name", title = file_info$name, file_info$name)
+              )
+            })
+          )
+        ))
+      }
+      
+      tags$ul(class = "file-tree", html_list)
+    })
+  })
+  
+  # Edit file from file tree
+  observeEvent(input$edit_file_tree, {
+    if (!is.null(input$edit_file_tree)) {
+      tryCatch({
+        file_path <- input$edit_file_tree$path
+        file_name <- input$edit_file_tree$name
+        
+        if (is.null(file_path) || !file.exists(file_path)) {
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("✗ File not found: ", file_name), 
+            type = "error"
+          ))
+          return()
+        }
+        
+        # Read file content
+        file_content <- paste(readLines(file_path, warn = FALSE), collapse = "\n")
+        
+        # Send to client to open editor
+        session$sendCustomMessage("openCodeEditorFromTree", list(
+          filePath = file_path,
+          fileName = file_name,
+          content = file_content
+        ))
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error opening file: ", e$message), 
+          type = "error"
+        ))
+      })
+    }
+  })
+  
+  # Delete file from file tree
+  observeEvent(input$delete_file, {
+    if (!is.null(input$delete_file)) {
+      tryCatch({
+        file_path <- input$delete_file$path
+        
+        if (is.null(file_path) || !file.exists(file_path)) {
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("✗ File not found"), 
+            type = "error"
+          ))
+          return()
+        }
+        
+        # Delete file
+        file.remove(file_path)
+        
+        # Trigger file tree refresh
+        file_tree_trigger(isolate(file_tree_trigger()) + 1)
+        
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✓ Deleted file: ", basename(file_path)), 
+          type = "success"
+        ))
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error deleting file: ", e$message), 
+          type = "error"
+        ))
+      })
+    }
+  })
+  
+  # Delete multiple files
+  observeEvent(input$delete_files, {
+    if (!is.null(input$delete_files) && !is.null(input$delete_files$paths)) {
+      tryCatch({
+        file_paths <- input$delete_files$paths
+        deleted_count <- 0
+        
+        for (file_path in file_paths) {
+          if (file.exists(file_path)) {
+            file.remove(file_path)
+            deleted_count <- deleted_count + 1
+          }
+        }
+        
+        # Trigger file tree refresh
+        file_tree_trigger(isolate(file_tree_trigger()) + 1)
+        
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✓ Deleted ", deleted_count, " file(s)"), 
+          type = "success"
+        ))
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error deleting files: ", e$message), 
+          type = "error"
+        ))
+      })
+    }
   })
   
   # Delete folder
   observeEvent(input$delete_folder, {
-    req(input$delete_folder)
-    folder_name <- input$delete_folder$name
-    
-    # Check if it's internal or external folder
-    if (folder_name == "root") {
-      showNotification("Cannot delete main workspace folder!", type = "error")
-      return()
-    }
-    
-    # Try to find matching folder path
-    folder_path <- NULL
-    # Determine which base this label belongs to (workspace or an external)
-    parts <- strsplit(folder_name, "/")[[1]]
-    base_label <- parts[1]
-    external_labels <- sapply(.rcw_external_folders, basename)
-    if (identical(base_label, "root")) {
-      base_dir <- .rcw_workspace
-      rel_parts <- parts[-1]
-    } else if (base_label %in% external_labels) {
-      base_dir <- .rcw_external_folders[which(external_labels == base_label)[1]]
-      rel_parts <- parts[-1]
-    } else {
-      # Fallback: assume workspace base if not matched
-      base_dir <- .rcw_workspace
-      rel_parts <- if (length(parts) > 1) parts[-1] else parts
-    }
-    if (length(rel_parts) == 0) {
-      folder_path <- base_dir
-    } else {
-      folder_path <- file.path(base_dir, do.call(file.path, as.list(rel_parts)))
-    }
-    
-    if (is.null(folder_path) || !dir.exists(folder_path)) {
-      showNotification("Folder not found!", type = "error")
-      return()
-    }
-    
-    # Count files
-    file_count <- length(list.files(folder_path, pattern = "\\.R$", recursive = TRUE))
-    
-    showModal(modalDialog(
-      title = "Confirm Delete Folder",
-      p(sprintf("Are you sure you want to delete folder '%s'?", folder_name)),
-      p(style = "color: #dc3545; font-weight: 600;", 
-        sprintf("This will delete %d R file(s)!", file_count)),
-      p(style = "color: #999; font-size: 0.85rem;", folder_path),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("confirm_delete_folder", "Delete Folder", class = "btn-danger",
-                    style = "background: #dc3545; border-color: #dc3545;")
-      )
-    ))
-    
-    rv$folder_to_delete <- folder_path
-  })
-  
-  observeEvent(input$confirm_delete_folder, {
-    req(rv$folder_to_delete)
-    
-    # Check if it's external folder
-    if (rv$folder_to_delete %in% .rcw_external_folders) {
-      # Just remove from list, don't delete actual folder
-      .rcw_external_folders <<- .rcw_external_folders[.rcw_external_folders != rv$folder_to_delete]
-      showNotification("External folder removed from workspace", type = "message")
-    } else if (dir.exists(rv$folder_to_delete)) {
-      # Delete internal folder
-      unlink(rv$folder_to_delete, recursive = TRUE)
-      showNotification("Folder deleted", type = "message")
-    }
-    
-    removeModal()
-    rv$folder_to_delete <- NULL
-    rv$workspace <- scan_workspace()
-  })
-  
-  # Handle node created
-  observeEvent(input$node_created, {
-    req(input$node_created)
-    nc <- input$node_created
-    
-    # Get first line of the R file
-    first_line <- ""
-    matching_file <- Find(function(f) f$rel_path == nc$filePath, rv$workspace$files)
-    if (!is.null(matching_file)) {
-      file_path <- matching_file$path
-      first_line <- read_r_file_first_line(file_path)
-    }
-    
-    rv$nodes[[nc$id]] <- list(
-      id = nc$id,
-      filePath = nc$filePath,
-      fileName = nc$fileName,
-      x = nc$x,
-      y = nc$y,
-      firstLine = first_line
-    )
-    # Default per-node appearance (keeps client/server in sync)
-    rv$nodes[[nc$id]]$appearance <- list(shape = 'square', color = '#ffffff', titleColor = '#2c3e50')
-    
-    # Send first line to client to update node display
-    session$sendCustomMessage("update_node_display", list(
-      id = nc$id,
-      fileName = nc$fileName,
-      firstLine = first_line
-    ))
-    
-    # regenerate Rmd since nodes changed
-    try({ regenerate_rmd() }, silent = TRUE)
-  })
-
-  # Persist per-node appearance changes coming from the client
-  observeEvent(input$node_set_appearance, {
-    req(input$node_set_appearance)
-    msg <- input$node_set_appearance
-    # msg is expected to contain id and either color, shape, or titleColor
-    id <- as.character(msg$id)
-    if (!nzchar(id) || is.null(rv$nodes[[id]])) return()
-    if (!is.list(rv$nodes[[id]])) rv$nodes[[id]] <- list(id = id)
-    ap <- rv$nodes[[id]]$appearance %||% list()
-    if (!is.null(msg$color)) ap$color <- as.character(msg$color)
-    if (!is.null(msg$shape)) ap$shape <- as.character(msg$shape)
-    if (!is.null(msg$titleColor)) ap$titleColor <- as.character(msg$titleColor)
-    rv$nodes[[id]]$appearance <- ap
-    # Optionally inform other clients (if multi-session) to apply appearance
-    try({ session$sendCustomMessage('apply_node_appearance', list(id = id, appearance = ap)) }, silent = TRUE)
-  })
-  
-  # Handle node moved
-  observeEvent(input$node_moved, {
-    req(input$node_moved)
-    nm <- input$node_moved
-    if (nm$id %in% names(rv$nodes)) {
-      rv$nodes[[nm$id]]$x <- nm$x
-      rv$nodes[[nm$id]]$y <- nm$y
-    }
-  })
-  
-  # Handle node selected
-  observeEvent(input$node_selected, {
-    req(input$node_selected)
-    rv$selected_node_id <- input$node_selected$id
-  })
-  
-  # Handle node edit
-  observeEvent(input$node_edit, {
-    req(input$node_edit)
-    node <- input$node_edit
-    
-    # Find the actual file path from workspace
-    matching_file <- Find(function(f) f$rel_path == node$filePath, rv$workspace$files)
-    if (is.null(matching_file)) {
-      showNotification("File not found!", type = "error")
-      return()
-    }
-    
-    file_path <- matching_file$path
-    content <- read_r_file(file_path)
-    
-    showModal(modalDialog(
-      title = paste0("Edit: ", node$fileName),
-      size = "l",
-      tags$style(HTML("#edit_code_content { 
-        font-family: 'Courier New', monospace !important;
-        font-size: 13px !important;
-        padding: 12px !important;
-        border: 2px solid #CFB991 !important;
-        border-radius: 4px !important;
-        background: #f8f9fa !important;
-      }")),
-      textAreaInput("edit_code_content", NULL, value = content, 
-                   rows = 20, width = "100%"),
-      footer = tagList(
-        modalButton("Cancel"),
-        actionButton("save_code_edit", "Save", class = "btn-primary")
-      ),
-      easyClose = FALSE
-    ))
-    
-    # Store current editing file
-    rv$editing_file <- file_path
-  })
-  
-  observeEvent(input$save_code_edit, {
-    req(rv$editing_file, input$edit_code_content)
-    write_r_file(rv$editing_file, input$edit_code_content)
-    
-    # Update first line for all nodes using this file
-    new_first_line <- read_r_file_first_line(rv$editing_file)
-    file_rel_path <- gsub(paste0("^", gsub("([.*+?^${}()|\\[\\]\\\\])", "\\\\\\1", .rcw_workspace), "/?"), "", rv$editing_file)
-    
-    for (node_id in names(rv$nodes)) {
-      if (rv$nodes[[node_id]]$filePath == file_rel_path) {
-        rv$nodes[[node_id]]$firstLine <- new_first_line
-        # Update client-side display
-        session$sendCustomMessage("update_node_display", list(
-          id = node_id,
-          fileName = rv$nodes[[node_id]]$fileName,
-          firstLine = new_first_line
-        ))
-      }
-    }
-    
-    removeModal()
-    showNotification("Code saved successfully!", type = "message")
-    rv$editing_file <- NULL
-  })
-  
-  # Handle node run
-  observeEvent(input$node_run, {
-    req(input$node_run)
-    node <- input$node_run
-    
-    # Find the actual file path from workspace
-    matching_file <- Find(function(f) f$rel_path == node$filePath, rv$workspace$files)
-    if (is.null(matching_file)) {
-      showNotification("File not found!", type = "error")
-      return()
-    }
-    
-    file_path <- matching_file$path
-    code <- read_r_file(file_path)
-    
-    rv$logs <- c(rv$logs, sprintf("[%s] RUNNING: %s", Sys.time(), node$fileName))
-    
-    result <- execute_r_code(code)
-    
-    if (result$success) {
-      rv$logs <- c(rv$logs, sprintf("[%s] DONE", Sys.time()))
-      rv$pipeline_result <- result$output
-    } else {
-      rv$logs <- c(rv$logs, sprintf("[%s] ERROR: %s", Sys.time(), result$error))
-      rv$pipeline_result <- paste0("ERROR:\n", result$error, "\n\nOUTPUT:\n", result$output)
-    }
-  })
-  
-  # Handle node delete
-  observeEvent(input$node_delete, {
-    req(input$node_delete)
-    node_id <- input$node_delete$id
-    
-    rv$nodes[[node_id]] <- NULL
-    
-    # Remove edges
-    if (length(rv$edges) > 0) {
-      new_edges <- list()
-      for (edge in rv$edges) {
-        if (!is.null(edge) && edge$source != node_id && edge$target != node_id) {
-          new_edges[[length(new_edges) + 1]] <- edge
+    if (!is.null(input$delete_folder)) {
+      tryCatch({
+        folder_name <- input$delete_folder$name
+        
+        # Determine workspace root
+        workspace_root <- .rcw_workspace
+        if (length(.rcw_external_folders) > 0) {
+          workspace_root <- .rcw_external_folders[1]
         }
-      }
-      rv$edges <- new_edges
+        
+        # Calculate folder path
+        if (folder_name == "root" || folder_name == "" || is.null(folder_name)) {
+          session$sendCustomMessage("appendToLog", list(
+            message = "✗ Cannot delete root folder", 
+            type = "error"
+          ))
+          return()
+        }
+        
+        # Remove "root/" prefix if present
+        folder_name_clean <- gsub("^root/", "", folder_name)
+        folder_path <- file.path(workspace_root, folder_name_clean)
+        
+        
+        if (!dir.exists(folder_path)) {
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("✗ Folder not found: ", folder_path, " (name: ", folder_name, ")"), 
+            type = "error"
+          ))
+          return()
+        }
+        
+        # Delete folder recursively
+        unlink(folder_path, recursive = TRUE)
+        
+        # Trigger file tree refresh
+        file_tree_trigger(isolate(file_tree_trigger()) + 1)
+        
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✓ Deleted folder: ", folder_name), 
+          type = "success"
+        ))
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error deleting folder: ", e$message), 
+          type = "error"
+        ))
+      })
     }
-    
-    session$sendCustomMessage("delete_node_ui", list(id = node_id))
-    showNotification("Node removed from canvas", type = "message")
-    # regenerate Rmd since nodes/edges changed
-    try({ regenerate_rmd() }, silent = TRUE)
   })
   
-  # Handle graph connections
-  observeEvent(input$graph_connections, {
-    connections <- input$graph_connections
-    if (is.null(connections) || length(connections) == 0) {
-      rv$edges <- list()
-      # regenerate Rmd since edges changed
-      try({ regenerate_rmd() }, silent = TRUE)
-    } else {
-      # Check if connections is a list (not atomic vector)
-      if (is.list(connections)) {
-        rv$edges <- lapply(connections, function(e) {
-          list(source = as.character(e$source), target = as.character(e$target))
+  # Rename file
+  observeEvent(input$rename_file, {
+    if (!is.null(input$rename_file)) {
+      tryCatch({
+        file_path <- input$rename_file$path
+        old_name <- input$rename_file$name
+        
+        if (is.null(file_path) || !file.exists(file_path)) {
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("✗ File not found: ", old_name), 
+            type = "error"
+          ))
+          return()
+        }
+        
+        # Use JavaScript prompt instead of readline (which doesn't work in Shiny)
+        session$sendCustomMessage("promptRenameFile", list(
+          filePath = file_path,
+          oldName = old_name
+        ))
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error renaming file: ", e$message), 
+          type = "error"
+        ))
+      })
+    }
+  })
+  
+  # Handle rename file confirmation
+  observeEvent(input$confirm_rename_file, {
+    if (!is.null(input$confirm_rename_file)) {
+      tryCatch({
+        file_path <- input$confirm_rename_file$filePath
+        new_name <- input$confirm_rename_file$newName
+        
+        if (is.null(file_path) || !file.exists(file_path)) {
+          return()
+        }
+        
+        # Ensure .R extension
+        if (!grepl("\\.(r|R)$", new_name)) {
+          new_name <- paste0(new_name, ".R")
+        }
+        
+        # Rename file
+        new_path <- file.path(dirname(file_path), new_name)
+        file.rename(file_path, new_path)
+        
+        # Trigger file tree refresh
+        file_tree_trigger(isolate(file_tree_trigger()) + 1)
+        
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✓ Renamed file: ", basename(file_path), " -> ", new_name), 
+          type = "success"
+        ))
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error renaming file: ", e$message), 
+          type = "error"
+        ))
+      })
+    }
+  })
+  
+  # Rename folder
+  observeEvent(input$rename_folder, {
+    if (!is.null(input$rename_folder)) {
+      tryCatch({
+        old_name <- input$rename_folder$name
+        
+        if (old_name == "root" || old_name == "") {
+          session$sendCustomMessage("appendToLog", list(
+            message = "✗ Cannot rename root folder", 
+            type = "error"
+          ))
+          return()
+        }
+        
+        # Use JavaScript prompt
+        session$sendCustomMessage("promptRenameFolder", list(
+          oldName = old_name
+        ))
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error renaming folder: ", e$message), 
+          type = "error"
+        ))
+      })
+    }
+  })
+  
+  # Handle rename folder confirmation
+  observeEvent(input$confirm_rename_folder, {
+    if (!is.null(input$confirm_rename_folder)) {
+      tryCatch({
+        old_name <- input$confirm_rename_folder$oldName
+        new_name <- input$confirm_rename_folder$newName
+        
+        # Determine workspace root
+        workspace_root <- .rcw_workspace
+        if (length(.rcw_external_folders) > 0) {
+          workspace_root <- .rcw_external_folders[1]
+        }
+        
+        old_path <- file.path(workspace_root, old_name)
+        
+        if (!dir.exists(old_path)) {
+          return()
+        }
+        
+        # Rename folder
+        new_path <- file.path(workspace_root, new_name)
+        file.rename(old_path, new_path)
+        
+        # Trigger file tree refresh
+        file_tree_trigger(isolate(file_tree_trigger()) + 1)
+        
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✓ Renamed folder: ", old_name, " -> ", new_name), 
+          type = "success"
+        ))
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error renaming folder: ", e$message), 
+          type = "error"
+        ))
+      })
+    }
+  })
+  
+  # Update node output and store logs
+  observeEvent(input$node_run, {
+    # This will be handled by existing node_run observer
+    # But we'll also store the output for logs tab
+  })
+  
+  # Load file content for editor
+  observeEvent(input$load_file_content, {
+    if (!is.null(input$load_file_content)) {
+      file_path <- input$load_file_content$path
+      content <- read_r_file(file_path)
+      session$sendCustomMessage("loadCodeEditor", list(content = content))
+    }
+  })
+  
+  # Save file content
+  observeEvent(input$save_file_content, {
+    if (!is.null(input$save_file_content)) {
+      file_path <- input$save_file_content$path
+      content <- input$save_file_content$content
+      write_r_file(file_path, content)
+      session$sendCustomMessage("codeEditorStatus", list(message = "File saved successfully", success = TRUE))
+    }
+  })
+  
+  # Run single node
+  observeEvent(input$node_run, {
+    if (!is.null(input$node_run)) {
+      tryCatch({
+        node_data <- input$node_run
+        node_id <- node_data$id
+        file_path <- node_data$filePath
+        
+        # Validate inputs
+        if (is.null(node_id) || is.null(file_path)) {
+          session$sendCustomMessage("appendToLog", list(message = "✗ Invalid node data", type = "error"))
+          return()
+        }
+        
+        # Check if file exists
+        if (!file.exists(file_path)) {
+          session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "error"))
+          session$sendCustomMessage("appendToLog", list(message = paste0("✗ File not found: ", file_path), type = "error"))
+          return()
+        }
+        
+        # Update status to running
+        session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "running"))
+        session$sendCustomMessage("appendToLog", list(message = paste0("Running: ", node_data$fileName), type = "code"))
+        
+        # Read and execute code
+        code <- read_r_file(file_path)
+        if (is.null(code) || !is.character(code)) {
+          code <- ""
+        }
+        
+        if (nzchar(code)) {
+          # Ensure shared_env exists
+          if (!exists("shared_env") || is.null(shared_env)) {
+            shared_env <<- new.env()
+          }
+          
+          result <- execute_r_code(code, env = shared_env, echo = TRUE)
+          
+          if (is.null(result)) {
+            session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "error"))
+            session$sendCustomMessage("appendToLog", list(message = paste0("✗ Execution returned NULL: ", node_data$fileName), type = "error"))
+            return()
+          }
+          
+          if (result$success) {
+            session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "success"))
+            output_text <- if (is.null(result$output)) "" else as.character(result$output)
+            session$sendCustomMessage("updateNodeOutput", list(id = node_id, output = output_text, isError = FALSE))
+            session$sendCustomMessage("appendToLog", list(message = paste0("✓ Success: ", node_data$fileName), type = "success"))
+            # Store output for logs tab
+            if (node_id %in% names(canvas_state$nodes)) {
+              canvas_state$nodes[[node_id]]$lastOutput <- output_text
+            }
+            
+            # Handle plots
+            if (!is.null(result$plots) && length(result$plots) > 0 && exists("HAS_BASE64ENC") && HAS_BASE64ENC) {
+              for (i in seq_along(result$plots)) {
+                plot_file <- result$plots[[i]]
+                if (!is.null(plot_file) && file.exists(plot_file)) {
+                  tryCatch({
+                    # Read file as raw bytes, then encode
+                    file_size <- file.info(plot_file)$size
+                    if (is.numeric(file_size) && file_size > 0) {
+                      plot_bytes <- readBin(plot_file, "raw", n = as.integer(file_size))
+                      if (length(plot_bytes) > 0) {
+                        plot_data <- base64enc::base64encode(plot_bytes)
+                        session$sendCustomMessage("addNodePlot", list(id = node_id, plotData = plot_data, index = i))
+                      }
+                    }
+                  }, error = function(e) {
+                    # Skip if encoding fails
+                    session$sendCustomMessage("appendToLog", list(
+                      message = paste0("Failed to encode plot: ", e$message), 
+                      type = "error"
+                    ))
+                  })
+                }
+              }
+            }
+          } else {
+            session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "error"))
+            error_msg <- if (is.null(result$error)) "Unknown error" else paste0("Error: ", result$error)
+            session$sendCustomMessage("updateNodeOutput", list(id = node_id, output = error_msg, isError = TRUE))
+            session$sendCustomMessage("appendToLog", list(message = paste0("✗ Error in ", node_data$fileName, ": ", error_msg), type = "error"))
+          }
+        } else {
+          session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "error"))
+          session$sendCustomMessage("appendToLog", list(message = paste0("✗ Empty file: ", node_data$fileName), type = "error"))
+        }
+      }, error = function(e) {
+        # Catch any unexpected errors
+        node_id <- if (exists("node_id")) node_id else "unknown"
+        error_msg <- paste0("Unexpected error: ", e$message)
+        session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "error"))
+        session$sendCustomMessage("appendToLog", list(message = error_msg, type = "error"))
+      })
+    }
+  })
+  
+  # Handle node deletion
+  observeEvent(input$node_delete, {
+    if (!is.null(input$node_delete)) {
+      tryCatch({
+        node_data <- input$node_delete
+        node_id <- node_data$id
+        
+        if (is.null(node_id)) {
+          session$sendCustomMessage("appendToLog", list(message = "✗ Invalid node ID for deletion", type = "error"))
+          return()
+        }
+        
+        # Remove from canvas_state
+        if (node_id %in% names(canvas_state$nodes)) {
+          canvas_state$nodes[[node_id]] <- NULL
+        }
+        
+        # Remove all edges connected to this node
+        if (!is.null(canvas_state$edges) && length(canvas_state$edges) > 0 && is.list(canvas_state$edges)) {
+          edges_to_remove <- c()
+          for (i in seq_along(canvas_state$edges)) {
+            edge <- canvas_state$edges[[i]]
+            # Check if edge is a list (not atomic vector)
+            if (is.list(edge) && !is.null(edge)) {
+              if (!is.null(edge$source) && edge$source == node_id) {
+                edges_to_remove <- c(edges_to_remove, i)
+              } else if (!is.null(edge$target) && edge$target == node_id) {
+                edges_to_remove <- c(edges_to_remove, i)
+              }
+            }
+          }
+          if (length(edges_to_remove) > 0) {
+            canvas_state$edges <- canvas_state$edges[-edges_to_remove]
+          }
+        }
+        
+        # Send message to client to remove node from DOM and jsPlumb
+        session$sendCustomMessage("removeNode", list(id = node_id))
+        node_name <- if (!is.null(node_data$fileName)) node_data$fileName else node_id
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✓ Removed node: ", node_name), 
+          type = "success"
+        ))
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error deleting node: ", e$message), 
+          type = "error"
+        ))
+      })
+    }
+  })
+  
+  # Run workflow (topological order)
+  observeEvent(input$run_workflow, {
+    tryCatch({
+      if (is.null(canvas_state$nodes) || length(canvas_state$nodes) == 0) {
+        session$sendCustomMessage("appendToLog", list(message = "No nodes to run", type = "error"))
+        return()
+      }
+      
+      # Ensure shared_env exists
+      if (!exists("shared_env") || is.null(shared_env)) {
+        shared_env <<- new.env()
+      }
+      
+      # Build hierarchy
+      sorted_nodes <- tryCatch({
+        build_node_hierarchy(canvas_state$nodes, canvas_state$edges)
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error building node hierarchy: ", e$message), 
+          type = "error"
+        ))
+        return(list())
+      })
+      
+      if (length(sorted_nodes) == 0) {
+        session$sendCustomMessage("appendToLog", list(message = "No valid nodes to execute", type = "error"))
+        return()
+      }
+      
+      # Clear log
+      session$sendCustomMessage("clearLog", list())
+      session$sendCustomMessage("appendToLog", list(message = "Starting workflow execution...", type = "code"))
+      
+      # Reset all node statuses
+      for (node_id in names(canvas_state$nodes)) {
+        session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = NULL))
+      }
+      
+      # Execute nodes in order (following arrow connections)
+      for (node_info in sorted_nodes) {
+        tryCatch({
+          node_id <- node_info$id
+          node <- node_info$node
+          file_path <- node$filePath
+          
+          # Validate inputs
+          if (is.null(node_id) || is.null(node) || is.null(file_path)) {
+            session$sendCustomMessage("appendToLog", list(
+              message = "✗ Invalid node data in workflow", 
+              type = "error"
+            ))
+            next
+          }
+          
+          # Validate file path
+          if (!nzchar(file_path) || !file.exists(file_path)) {
+            session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "error"))
+            session$sendCustomMessage("appendToLog", list(
+              message = paste0("✗ File not found: ", if (!is.null(node$fileName)) node$fileName else file_path), 
+              type = "error"
+            ))
+            session$sendCustomMessage("appendToLog", list(
+              message = "Workflow stopped due to missing file", 
+              type = "error"
+            ))
+            break
+          }
+          
+          # Update status to running
+          session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "running"))
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("→ Running: ", if (!is.null(node$fileName)) node$fileName else basename(file_path)), 
+            type = "code"
+          ))
+          
+          # Execute code in shared environment
+          code <- read_r_file(file_path)
+          if (is.null(code) || !is.character(code)) {
+            code <- ""
+          }
+          
+          if (nzchar(code)) {
+            result <- tryCatch({
+              execute_r_code(code, env = shared_env, echo = TRUE)
+            }, error = function(e) {
+              list(success = FALSE, error = e$message, output = paste0("Execution error: ", e$message))
+            })
+            
+            if (is.null(result)) {
+              session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "error"))
+              session$sendCustomMessage("appendToLog", list(
+                message = paste0("✗ Execution returned NULL: ", if (!is.null(node$fileName)) node$fileName else basename(file_path)), 
+                type = "error"
+              ))
+              break
+            }
+            
+            if (result$success) {
+              session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "success"))
+              output_text <- if (is.null(result$output)) "" else as.character(result$output)
+              session$sendCustomMessage("updateNodeOutput", list(
+                id = node_id, 
+                output = output_text, 
+                isError = FALSE
+              ))
+              # Store output for logs tab
+              if (node_id %in% names(canvas_state$nodes)) {
+                canvas_state$nodes[[node_id]]$lastOutput <- output_text
+              }
+              session$sendCustomMessage("appendToLog", list(
+                message = paste0("✓ Success: ", if (!is.null(node$fileName)) node$fileName else basename(file_path)), 
+                type = "success"
+              ))
+            } else {
+              session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "error"))
+              error_msg <- if (is.null(result$error)) "Unknown error" else paste0("Error: ", result$error)
+              session$sendCustomMessage("updateNodeOutput", list(
+                id = node_id, 
+                output = error_msg, 
+                isError = TRUE
+              ))
+              session$sendCustomMessage("appendToLog", list(
+                message = paste0("✗ Error in ", if (!is.null(node$fileName)) node$fileName else basename(file_path), ": ", error_msg), 
+                type = "error"
+              ))
+              # Stop execution on error (arrow connections ensure proper order)
+              session$sendCustomMessage("appendToLog", list(
+                message = "Workflow stopped due to error", 
+                type = "error"
+              ))
+              break
+            }
+          } else {
+            session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "error"))
+            session$sendCustomMessage("appendToLog", list(
+              message = paste0("✗ Empty file: ", if (!is.null(node$fileName)) node$fileName else basename(file_path)), 
+              type = "error"
+            ))
+          }
+        }, error = function(e) {
+          # Catch errors in individual node execution
+          node_id <- if (exists("node_id")) node_id else "unknown"
+          session$sendCustomMessage("updateNodeStatus", list(id = node_id, status = "error"))
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("✗ Unexpected error executing node: ", e$message), 
+            type = "error"
+          ))
         })
-        # regenerate Rmd since edges changed
-        try({ regenerate_rmd() }, silent = TRUE)
-      } else {
-        rv$edges <- list()
-        # regenerate Rmd since edges changed
-        try({ regenerate_rmd() }, silent = TRUE)
       }
+      
+      session$sendCustomMessage("appendToLog", list(message = "Workflow execution completed", type = "success"))
+    }, error = function(e) {
+      # Catch any top-level errors
+      session$sendCustomMessage("appendToLog", list(
+        message = paste0("✗ Fatal error in workflow execution: ", e$message), 
+        type = "error"
+      ))
+    })
+  })
+  
+  # Refresh RMD Preview
+  observeEvent(input$refresh_rmd_preview, {
+    tryCatch({
+      # Check if nodes exist and are valid
+      if (is.null(canvas_state$nodes) || length(canvas_state$nodes) == 0) {
+        session$sendCustomMessage("updateRmdPreview", list(content = "# No nodes in workflow\n\nAdd nodes to the canvas to generate RMD preview."))
+        return()
+      }
+      
+      # Ensure nodes is a list
+      if (!is.list(canvas_state$nodes)) {
+        session$sendCustomMessage("updateRmdPreview", list(content = "# Invalid node structure\n\nPlease refresh the page and try again."))
+        return()
+      }
+      
+      # Build node hierarchy
+      sorted_nodes <- tryCatch({
+        build_node_hierarchy(canvas_state$nodes, canvas_state$edges)
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error building node hierarchy: ", e$message), 
+          type = "error"
+        ))
+        return(list())
+      })
+      
+      if (length(sorted_nodes) == 0) {
+        session$sendCustomMessage("updateRmdPreview", list(content = "# No valid nodes in workflow\n\nEnsure nodes are properly connected."))
+        return()
+      }
+      
+      # Get workspace structure
+      structure <- tryCatch({
+        scan_workspace()
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error scanning workspace: ", e$message), 
+          type = "error"
+        ))
+        return(list(files = list(), folders = character(0)))
+      })
+      
+      # Generate RMD content
+      rmd_content <- tryCatch({
+        generate_rmd_from_hierarchy(sorted_nodes, structure$files, canvas_state$edges, include_metadata = TRUE)
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error generating RMD: ", e$message), 
+          type = "error"
+        ))
+        return("# Error generating RMD preview\n\nPlease check the logs for details.")
+      })
+      
+      # Update preview
+      session$sendCustomMessage("updateRmdPreview", list(content = rmd_content))
+      session$sendCustomMessage("appendToLog", list(message = "✓ RMD preview refreshed", type = "success"))
+    }, error = function(e) {
+      session$sendCustomMessage("updateRmdPreview", list(content = paste0("# Error refreshing RMD preview\n\n", e$message)))
+      session$sendCustomMessage("appendToLog", list(
+        message = paste0("✗ Error refreshing RMD preview: ", e$message), 
+        type = "error"
+      ))
+    })
+  })
+  
+  # Export RMD from preview
+  observeEvent(input$export_rmd_from_preview, {
+    if (!is.null(input$export_rmd_from_preview) && !is.null(input$export_rmd_from_preview$content)) {
+      rmd_content <- input$export_rmd_from_preview$content
+      session$sendCustomMessage("downloadFile", list(
+        filename = "workflow.Rmd",
+        content = rmd_content,
+        mimeType = "text/plain"
+      ))
+      session$sendCustomMessage("appendToLog", list(message = "✓ RMD file exported", type = "success"))
     }
   })
   
-  # Clear canvas
-  observeEvent(input$clear_canvas, {
-    rv$nodes <- list()
-    rv$edges <- list()
-    rv$selected_node_id <- NULL
-    rv$logs <- character(0)
-    rv$pipeline_result <- NULL
-    session$sendCustomMessage("clear_canvas_ui", list())
-    # regenerate Rmd (will set default message)
-    try({ regenerate_rmd() }, silent = TRUE)
-  })
-  
-  # Run pipeline
-  observeEvent(input$run_pipeline, {
-    rv$logs <- character(0)
-    rv$pipeline_result <- ""
-    
-    if (length(rv$nodes) == 0) {
-      showNotification("No nodes on canvas!", type = "warning")
+  # Export to RMarkdown (from header button)
+  observeEvent(input$export_rmd, {
+    if (length(canvas_state$nodes) == 0) {
+      session$sendCustomMessage("appendToLog", list(message = "No nodes to export", type = "error"))
       return()
     }
     
-    rv$logs <- c(rv$logs, sprintf("[%s] Pipeline execution started", Sys.time()))
-    rv$logs <- c(rv$logs, sprintf("[%s] Total scripts: %d", Sys.time(), length(rv$nodes)))
+    sorted_nodes <- build_node_hierarchy(canvas_state$nodes, canvas_state$edges)
+    structure <- scan_workspace()
+    rmd_content <- generate_rmd_from_hierarchy(sorted_nodes, structure$files, canvas_state$edges, include_metadata = TRUE)
     
-    # Execution: follow connection order (use build_node_hierarchy to respect arrows)
-    executed_env <- new.env()  # Shared environment for all scripts
-    all_output <- character(0)
-
-    # Prefer explicit topological sort; fallback to DFS hierarchy then insertion order
-    ordered <- tryCatch({ compute_execution_order() }, error = function(e) NULL)
-    if (is.null(ordered) || length(ordered) == 0) {
-      ordered <- tryCatch({ build_node_hierarchy(rv$nodes, rv$edges) }, error = function(e) NULL)
+    # Create download
+    session$sendCustomMessage("downloadFile", list(
+      filename = "workflow.Rmd",
+      content = rmd_content,
+      mimeType = "text/plain"
+    ))
+    session$sendCustomMessage("appendToLog", list(message = "✓ RMD file exported", type = "success"))
+  })
+  
+  # Parse RMD file and restore canvas
+  parse_rmd_file <- function(rmd_content) {
+    # Extract metadata section - use more flexible regex
+    # Try multiple patterns to handle different line ending formats
+    patterns <- c(
+      "<!-- RCW_METADATA_START[\\s\\S]*?RCW_METADATA_END -->",
+      "<!--\\s*RCW_METADATA_START[\\s\\S]*?RCW_METADATA_END\\s*-->",
+      "RCW_METADATA_START[\\s\\S]*?RCW_METADATA_END"
+    )
+    
+    metadata_match <- NULL
+    for (pattern in patterns) {
+      metadata_match <- regmatches(rmd_content, regexpr(pattern, rmd_content, perl = TRUE))
+      if (length(metadata_match) > 0 && nchar(metadata_match[1]) > 0) {
+        break
+      }
     }
-    if (is.null(ordered) || length(ordered) == 0) {
-      ordered <- lapply(names(rv$nodes), function(id) list(id = id, node = rv$nodes[[id]], level = 1))
+    
+    if (length(metadata_match) == 0 || nchar(metadata_match[1]) == 0) {
+      # Try to find if file contains any RCW markers
+      has_rcw_markers <- grepl("RCW_METADATA|RCW_NODE", rmd_content)
+      if (!has_rcw_markers) {
+        return(list(success = FALSE, error = "No RCW metadata found in RMD file. This file was not exported from RCW or metadata was removed."))
+      } else {
+        return(list(success = FALSE, error = "RCW markers found but metadata section could not be parsed. File may be corrupted."))
+      }
     }
-
-    if (length(ordered) == 0) {
-      showNotification('No executable nodes found', type = 'warning')
-    }
-
-    for (node_info in ordered) {
-      node <- node_info$node
-      node_id <- node_info$id
-
-      # Find the actual file path from workspace
-      matching_file <- Find(function(f) f$rel_path == node$filePath, rv$workspace$files)
-      if (is.null(matching_file)) {
-        rv$logs <- c(rv$logs, sprintf("[%s] File not found: %s", Sys.time(), node$fileName))
+    
+    metadata_text <- metadata_match[1]
+    
+    # Parse nodes and connections from metadata
+    nodes <- list()
+    connections <- list()
+    node_lines <- strsplit(metadata_text, "\n")[[1]]
+    current_node <- NULL
+    parsing_connections <- FALSE
+    current_connection <- NULL
+    
+    for (line in node_lines) {
+      # Remove HTML comment markers if present
+      line <- gsub("^<!--\\s*", "", line)
+      line <- gsub("\\s*-->$", "", line)
+      line <- trimws(line)
+      
+      # Skip empty lines and metadata headers
+      if (line == "" || grepl("^RCW_", line) || grepl("^RCW_VERSION|^NODE_COUNT", line)) {
         next
       }
-
-      file_path <- matching_file$path
-
-      rv$logs <- c(rv$logs, sprintf("[%s] Executing: %s", Sys.time(), node$fileName))
-
-      code <- read_r_file(file_path)
-      result <- execute_r_code(code, executed_env)
-
-      if (result$success) {
-        rv$logs <- c(rv$logs, sprintf("[%s] Completed: %s", Sys.time(), node$fileName))
-        all_output <- c(all_output,
-                       sprintf("=== %s ===\n%s\n", node$fileName, result$output))
-      } else {
-        rv$logs <- c(rv$logs, sprintf("[%s] Error in %s: %s",
-                                      Sys.time(), node$fileName, result$error))
-        all_output <- c(all_output,
-                       sprintf("=== %s (ERROR) ===\n%s\n", node$fileName, result$error))
+      
+      # Check if we're starting to parse connections
+      if (grepl("^CONNECTIONS:", line)) {
+        parsing_connections <- TRUE
+        # Save the last node if any
+        if (!is.null(current_node) && !is.null(current_node$id)) {
+          nodes[[current_node$id]] <- current_node
+          current_node <- NULL
+        }
+        next
+      }
+      
+      # Skip CONNECTION_COUNT line (for debugging, but we can use it to validate)
+      if (grepl("^CONNECTION_COUNT:", line)) {
+        next
+      }
+      
+      # Parse connections
+      if (parsing_connections) {
+        if (grepl("^\\s*-\\s*source:", line) || grepl("^source:", line)) {
+          # Save previous connection if any
+          if (!is.null(current_connection) && !is.null(current_connection$source) && !is.null(current_connection$target)) {
+            connections[[length(connections) + 1]] <- current_connection
+          }
+          # Extract source
+          source_value <- gsub("^\\s*-\\s*source:\\s*", "", line)
+          source_value <- gsub("^source:\\s*", "", source_value)
+          current_connection <- list(source = trimws(source_value))
+        } else if (grepl("^\\s+target:", line) && !is.null(current_connection)) {
+          # Extract target
+          target_value <- gsub("^\\s+target:\\s*", "", line)
+          target_value <- gsub("^target:\\s*", "", target_value)
+          current_connection$target <- trimws(target_value)
+        }
+        next
+      }
+      
+      # Parse nodes (only if not parsing connections)
+      if (grepl("^NODES:", line)) {
+        next
+      }
+      
+      # Handle YAML list item format: "  - id: xxx" or just "id: xxx"
+      if (grepl("^\\s*-\\s*id:", line) || grepl("^id:", line)) {
+        if (!is.null(current_node) && !is.null(current_node$id)) {
+          nodes[[current_node$id]] <- current_node
+        }
+        # Extract ID - handle both "  - id: xxx" and "id: xxx" formats
+        id_value <- gsub("^\\s*-\\s*id:\\s*", "", line)
+        id_value <- gsub("^id:\\s*", "", id_value)
+        current_node <- list(id = trimws(id_value))
+      } else if (grepl("fileName:", line) && !is.null(current_node)) {
+        # Handle indented fields: "    fileName: xxx" or "fileName: xxx"
+        # Remove leading whitespace and "fileName:" prefix
+        value <- gsub("^\\s+fileName:\\s*", "", line)
+        value <- gsub("^fileName:\\s*", "", value)
+        value <- trimws(value)
+        # Remove quotes if present
+        value <- gsub("^[\"']|[\"']$", "", value)
+        current_node$fileName <- value
+      } else if (grepl("filePath:", line) && !is.null(current_node)) {
+        # Handle indented fields: "    filePath: xxx" or "filePath: xxx"
+        # Remove leading whitespace and "filePath:" prefix
+        value <- gsub("^\\s+filePath:\\s*", "", line)
+        value <- gsub("^filePath:\\s*", "", value)
+        value <- trimws(value)
+        # Remove quotes if present
+        value <- gsub("^[\"']|[\"']$", "", value)
+        current_node$filePath <- value
+      } else if (grepl("level:", line) && !is.null(current_node)) {
+        level_str <- trimws(gsub("^\\s+level:\\s*", "", line))
+        level_str <- gsub("^level:\\s*", "", level_str)
+        level_str <- trimws(level_str)
+        current_node$level <- as.integer(level_str)
+      } else if (grepl("index:", line) && !is.null(current_node)) {
+        # Also capture index if present
+        index_str <- trimws(gsub("^\\s+index:\\s*", "", line))
+        index_str <- gsub("^index:\\s*", "", index_str)
+        index_str <- trimws(index_str)
+        current_node$index <- as.integer(index_str)
       }
     }
-
-    rv$pipeline_result <- paste(all_output, collapse = "\n\n")
-    rv$logs <- c(rv$logs, sprintf("[%s] Pipeline completed", Sys.time()))
-    showNotification("Pipeline execution completed!", type = "message")
-  })
-  
-  # Output displays
-  output$pipeline_output <- renderText({
-    if (is.null(rv$pipeline_result) || rv$pipeline_result == "") {
-      return("No output yet. Run the pipeline to see results.")
+    
+    # Don't forget the last node and connection
+    if (!is.null(current_node) && !is.null(current_node$id)) {
+      nodes[[current_node$id]] <- current_node
     }
-    rv$pipeline_result
-  })
-  
-  output$run_log <- renderText({
-    if (length(rv$logs) == 0) {
-      return("No logs yet.")
+    if (!is.null(current_connection) && !is.null(current_connection$source) && !is.null(current_connection$target)) {
+      connections[[length(connections) + 1]] <- current_connection
     }
-    paste(rv$logs, collapse = "\n")
-  })
-  
-  # Generate Rmd preview - show all content with scrollbar
-  output$rmd_preview <- renderText({
-    # Build on-demand using the same order as execution to ensure consistency
-    ord <- tryCatch({ compute_execution_order() }, error = function(e) list())
-    if (length(ord) == 0) return("No nodes on canvas. Add some R files to the canvas to generate R Markdown.")
-    rmd <- tryCatch({
-      generate_rmd_from_hierarchy(ord, rv$workspace$files)
-    }, error = function(e) paste0("Error generating Rmd: ", e$message))
-    rmd
-  })
-  
-  # Export to Rmd
-  output$export_rmd <- downloadHandler(
-    filename = function() {
-      paste0("rcw_workflow_", format(Sys.time(), "%Y%m%d_%H%M%S"), ".Rmd")
-    },
-    content = function(file) {
-      # Ensure client-side connections are synced before export
-      try({ session$sendCustomMessage('request_graph_sync', list()) }, silent = TRUE)
-      timeout <- Sys.time() + 1
-      while (Sys.time() < timeout && length(rv$edges) == 0) Sys.sleep(0.05)
-
-      ord <- compute_execution_order()
-      rmd_content <- generate_rmd_from_hierarchy(ord, rv$workspace$files)
-      writeLines(rmd_content, con = file)
+    
+    # Extract code chunks and match with nodes - use more flexible regex
+    node_chunk_patterns <- c(
+      "<!-- RCW_NODE_START[\\s\\S]*?RCW_NODE_END[^>]*-->",
+      "<!--\\s*RCW_NODE_START[\\s\\S]*?RCW_NODE_END\\s*-->",
+      "RCW_NODE_START[\\s\\S]*?RCW_NODE_END"
+    )
+    
+    node_chunks <- NULL
+    for (pattern in node_chunk_patterns) {
+      node_chunks <- regmatches(rmd_content, gregexpr(pattern, rmd_content, perl = TRUE))[[1]]
+      if (length(node_chunks) > 0) {
+        break
+      }
     }
-  )
+    
+    if (length(node_chunks) > 0) {
+      for (chunk in node_chunks) {
+        # Extract node ID - try multiple patterns
+        id_patterns <- c("id:\\s*([^\\s]+)", "id:([^\\s]+)", "id=\"([^\"]+)\"", "id='([^']+)'")
+        node_id <- NULL
+        for (id_pattern in id_patterns) {
+          id_match <- regmatches(chunk, regexpr(id_pattern, chunk, perl = TRUE))
+          if (length(id_match) > 0) {
+            node_id <- gsub(id_pattern, "\\1", id_match[1], perl = TRUE)
+            break
+          }
+        }
+        
+        if (!is.null(node_id) && node_id != "") {
+          # Extract level
+          level_patterns <- c("level:\\s*([0-9]+)", "level:([0-9]+)", "level=\"([0-9]+)\"", "level='([0-9]+)'")
+          for (level_pattern in level_patterns) {
+            level_match <- regmatches(chunk, regexpr(level_pattern, chunk, perl = TRUE))
+            if (length(level_match) > 0) {
+              level <- as.integer(gsub(level_pattern, "\\1", level_match[1], perl = TRUE))
+              if (node_id %in% names(nodes)) {
+                nodes[[node_id]]$level <- level
+              }
+              break
+            }
+          }
+        }
+      }
+    }
+    
+    return(list(success = TRUE, nodes = nodes, connections = connections))
+  }
   
-  # Handle SVG export button click
-  observeEvent(input$export_svg_btn, {
-    # Trigger client-side SVG export
-    session$sendCustomMessage("export_svg_trigger", list())
+  # Import RMD file
+  observeEvent(input$import_rmd, {
+    if (!is.null(input$import_rmd) && !is.null(input$import_rmd$content)) {
+      tryCatch({
+        rmd_content <- input$import_rmd$content
+        
+        # Log file info for debugging
+        file_size <- nchar(rmd_content)
+        has_rcw_markers <- grepl("RCW_METADATA|RCW_NODE", rmd_content)
+        
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("→ Importing RMD file (", file_size, " chars, RCW markers: ", if (has_rcw_markers) "found" else "not found", ")"), 
+          type = "code"
+        ))
+        
+        parsed <- parse_rmd_file(rmd_content)
+        
+        if (!parsed$success) {
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("✗ Error importing RMD: ", parsed$error), 
+            type = "error"
+          ))
+          return()
+        }
+        
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✓ Parsed ", length(parsed$nodes), " nodes from RMD metadata"), 
+          type = "success"
+        ))
+        
+        # Log connection information
+        if (!is.null(parsed$connections) && length(parsed$connections) > 0) {
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("→ Found ", length(parsed$connections), " connections in RMD metadata"), 
+            type = "code"
+          ))
+        } else {
+          session$sendCustomMessage("appendToLog", list(
+            message = "→ No connections found in RMD metadata", 
+            type = "warning"
+          ))
+        }
+        
+        # Clear existing canvas
+        canvas_state$nodes <- list()
+        canvas_state$edges <- list()
+        
+        # Restore nodes directly from RMD metadata, without checking if files exist
+        node_order <- names(parsed$nodes)
+        
+        # Sort nodes by level and index to maintain order
+        node_levels <- sapply(parsed$nodes, function(n) n$level %||% 1)
+        node_order <- node_order[order(node_levels)]
+        
+        restored_nodes <- list()
+        
+        for (node_id in node_order) {
+          node_info <- parsed$nodes[[node_id]]
+          
+          # Debug: log what we have
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("→ Processing node ", node_id, ": filePath=", 
+              if (is.null(node_info$filePath)) "NULL" else node_info$filePath,
+              ", fileName=", 
+              if (is.null(node_info$fileName)) "NULL" else node_info$fileName), 
+            type = "code"
+          ))
+          
+          file_path <- node_info$filePath
+          file_name <- node_info$fileName
+          
+          # Determine the file path to use - prioritize filePath from metadata, fallback to fileName
+          final_file_path <- NULL
+          final_file_name <- NULL
+          
+          # Use filePath from metadata if available
+          if (!is.null(file_path) && is.character(file_path) && nchar(trimws(file_path)) > 0) {
+            final_file_path <- trimws(file_path)
+            # Extract fileName from path if fileName is not provided
+            if (is.null(file_name) || !is.character(file_name) || nchar(trimws(file_name)) == 0) {
+              final_file_name <- basename(final_file_path)
+            } else {
+              final_file_name <- trimws(file_name)
+            }
+          } else if (!is.null(file_name) && is.character(file_name) && nchar(trimws(file_name)) > 0) {
+            # Use fileName and construct path from workspace root
+            final_file_name <- trimws(file_name)
+            workspace_root <- .rcw_workspace
+            if (length(.rcw_external_folders) > 0) {
+              workspace_root <- .rcw_external_folders[1]
+            }
+            final_file_path <- file.path(workspace_root, final_file_name)
+          } else {
+            # If both are missing, try to extract from node_id or use a default
+            # Sometimes node_id might be the filename
+            if (!is.null(node_id) && is.character(node_id) && nchar(trimws(node_id)) > 0) {
+              # Check if node_id looks like a filename
+              if (grepl("\\.(R|r)$", node_id)) {
+                final_file_name <- node_id
+                workspace_root <- .rcw_workspace
+                if (length(.rcw_external_folders) > 0) {
+                  workspace_root <- .rcw_external_folders[1]
+                }
+                final_file_path <- file.path(workspace_root, final_file_name)
+              } else {
+                # Use node_id as fileName with .R extension
+                final_file_name <- paste0(node_id, ".R")
+                workspace_root <- .rcw_workspace
+                if (length(.rcw_external_folders) > 0) {
+                  workspace_root <- .rcw_external_folders[1]
+                }
+                final_file_path <- file.path(workspace_root, final_file_name)
+              }
+            }
+          }
+          
+          # Create node if we have at least a fileName
+          if (!is.null(final_file_name) && nchar(final_file_name) > 0) {
+            # Create node on canvas directly from RMD metadata
+            session$sendCustomMessage("createNodeFromRmd", list(
+              id = node_id,
+              filePath = if (is.null(final_file_path)) "" else final_file_path,
+              fileName = final_file_name,
+              level = node_info$level %||% 1
+            ))
+            
+            # Store for later connection restoration
+            restored_nodes[[node_id]] <- list(
+              filePath = if (is.null(final_file_path)) "" else final_file_path,
+              fileName = final_file_name,
+              level = node_info$level %||% 1
+            )
+            
+            # Log whether file exists or not (informational only)
+            file_exists_msg <- ""
+            if (!is.null(final_file_path) && file.exists(final_file_path)) {
+              file_exists_msg <- " (file exists)"
+            } else if (!is.null(final_file_path)) {
+              file_exists_msg <- " (file not found, but node created)"
+            }
+            
+            session$sendCustomMessage("appendToLog", list(
+              message = paste0("✓ Restored node: ", final_file_name, file_exists_msg), 
+              type = "success"
+            ))
+          } else {
+            session$sendCustomMessage("appendToLog", list(
+              message = paste0("⚠ Skipping node ", node_id, ": no fileName or filePath available"), 
+              type = "error"
+            ))
+          }
+        }
+        
+        # Wait a bit for nodes to be created, then restore connections
+        Sys.sleep(1.0)
+        
+        # Restore connections from parsed metadata
+        if (!is.null(parsed$connections) && length(parsed$connections) > 0) {
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("→ Found ", length(parsed$connections), " connections in metadata"), 
+            type = "code"
+          ))
+          
+          connection_count <- 0
+          for (conn in parsed$connections) {
+            if (is.list(conn) && !is.null(conn$source) && !is.null(conn$target)) {
+              source_id <- trimws(conn$source)
+              target_id <- trimws(conn$target)
+              
+              # Verify both nodes exist in restored_nodes
+              if (source_id %in% names(restored_nodes) && target_id %in% names(restored_nodes)) {
+                # Create connection with a small delay between each to avoid race conditions
+                Sys.sleep(0.1)
+                session$sendCustomMessage("createConnectionFromRmd", list(
+                  source = source_id,
+                  target = target_id
+                ))
+                connection_count <- connection_count + 1
+              } else {
+                session$sendCustomMessage("appendToLog", list(
+                  message = paste0("⚠ Skipping connection: source or target node not found (", source_id, " -> ", target_id, ")"), 
+                  type = "warning"
+                ))
+              }
+            }
+          }
+          
+          # Wait a bit more for all connections to be created
+          Sys.sleep(0.5)
+          
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("✓ Restored ", connection_count, " connections"), 
+            type = "success"
+          ))
+        } else {
+          # Fallback: Build connections based on level hierarchy if no connections in metadata
+          session$sendCustomMessage("appendToLog", list(
+            message = "→ No connection metadata found, inferring from level hierarchy", 
+            type = "code"
+          ))
+          
+          for (i in seq_along(restored_nodes)) {
+            current_id <- names(restored_nodes)[i]
+            current_level <- restored_nodes[[current_id]]$level
+            
+            # Find parent (node with level = current_level - 1, closest before current)
+            if (current_level > 1) {
+              for (j in seq_len(i - 1)) {
+                parent_id <- names(restored_nodes)[j]
+                parent_level <- restored_nodes[[parent_id]]$level
+                if (parent_level == current_level - 1) {
+                  # Create connection
+                  session$sendCustomMessage("createConnectionFromRmd", list(
+                    source = parent_id,
+                    target = current_id
+                  ))
+                  break
+                }
+              }
+            }
+          }
+        }
+        
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✓ RMD file imported: ", length(parsed$nodes), " nodes restored"), 
+          type = "success"
+        ))
+      }, error = function(e) {
+        session$sendCustomMessage("appendToLog", list(
+          message = paste0("✗ Error importing RMD: ", e$message), 
+          type = "error"
+        ))
+      })
+    }
   })
   
-  # Handle SVG export events
-  observeEvent(input$svg_export_started, {
-    msg <- get_label("rcw_svg_export_generating", lang())
-    showNotification(msg, type = "message", duration = 2)
-  })
+  # File import (if shinyFiles is available)
+  if (exists("HAS_SHINYFILES") && HAS_SHINYFILES) {
+    volumes <- c(Home = path.expand("~"), getVolumes()())
+    
+    # Use shinyDirChoose for folder selection (not shinyFileChoose)
+    if (exists("shinyDirChoose", mode = "function")) {
+      shinyDirChoose(input, "importFolder", roots = volumes, session = session)
+    } else {
+      # Fallback to shinyFileChoose if shinyDirChoose not available
+      shinyFileChoose(input, "importFolder", roots = volumes, session = session, filetypes = NULL)
+    }
+    
+    # Trigger folder selection dialog
+    observeEvent(input$trigger_import_folder, {
+      if (!is.null(input$trigger_import_folder)) {
+        # Send JavaScript message to trigger the file input click
+        session$sendCustomMessage("triggerFileInputClick", list(
+          selector = "input[type='file'][data-namespace='shinyFiles'], input[type='file'][data-namespace='shinyDirectories']"
+        ))
+      }
+    })
+    
+    observeEvent(input$importFolder, {
+      if (!is.null(input$importFolder) && !identical(input$importFolder, "")) {
+        tryCatch({
+          # Try parseDirPath first (for shinyDirChoose)
+          if (exists("parseDirPath")) {
+            folder_path <- tryCatch({
+              parseDirPath(volumes, input$importFolder)
+            }, error = function(e) {
+              # Fallback to parseFilePaths
+              selected_path <- parseFilePaths(volumes, input$importFolder)
+              if (nrow(selected_path) > 0) {
+                # Get directory from file path
+                dirname(selected_path$datapath[1])
+              } else {
+                NULL
+              }
+            })
+          } else {
+            # Use parseFilePaths and get directory
+            selected_path <- parseFilePaths(volumes, input$importFolder)
+            if (nrow(selected_path) > 0) {
+              folder_path <- dirname(selected_path$datapath[1])
+            } else {
+              folder_path <- NULL
+            }
+          }
+          
+          if (!is.null(folder_path) && dir.exists(folder_path)) {
+            # Add to external folders if not already added
+            folder_path_norm <- normalizePath(folder_path, winslash = "/")
+            if (!folder_path_norm %in% .rcw_external_folders) {
+              .rcw_external_folders <<- c(.rcw_external_folders, folder_path_norm)
+            }
+            
+            # Trigger file tree refresh
+            file_tree_trigger(isolate(file_tree_trigger()) + 1)
+            
+            session$sendCustomMessage("appendToLog", list(
+              message = paste0("✓ Imported folder: ", folder_path), 
+              type = "success"
+            ))
+          } else {
+            session$sendCustomMessage("appendToLog", list(
+              message = paste0("✗ Invalid folder path or not a directory: ", ifelse(is.null(folder_path), "NULL", folder_path)), 
+              type = "error"
+            ))
+          }
+        }, error = function(e) {
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("✗ Error importing folder: ", e$message), 
+            type = "error"
+          ))
+        })
+      }
+    })
+  }
   
-  observeEvent(input$svg_export_completed, {
-    msg <- get_label("rcw_svg_export_success", lang())
-    showNotification(msg, type = "message", duration = 3)
-  })
+  # Reactive value to trigger file tree refresh
+  file_tree_trigger <- reactiveVal(0)
   
-  observeEvent(input$svg_export_error, {
-    msg <- get_label("rcw_svg_export_error_msg", lang())
-    showNotification(paste0(msg, ": ", input$svg_export_error), type = "error", duration = 5)
+  # Auto-refresh file tree
+  observe({
+    file_tree_trigger()  # Depend on this reactive value
+    structure <- scan_workspace()
+    
+    output$file_tree_ui <- renderUI({
+      if (length(structure$folders) == 0 && length(structure$files) == 0) {
+        session$sendCustomMessage("showOpenFolder", list(show = TRUE))
+        return(tags$div())
+      }
+      
+      session$sendCustomMessage("showOpenFolder", list(show = FALSE))
+      
+      # Group files by folder
+      files_by_folder <- list()
+      for (file_info in structure$files) {
+        folder <- file_info$folder
+        if (!folder %in% names(files_by_folder)) {
+          files_by_folder[[folder]] <- list()
+        }
+        files_by_folder[[folder]] <- c(files_by_folder[[folder]], list(file_info))
+      }
+      
+      # Build HTML
+      html_list <- list()
+      sorted_folders <- sort(unique(structure$folders))
+      
+      for (folder in sorted_folders) {
+        folder_id <- gsub("[^a-zA-Z0-9]", "_", folder)
+        folder_name <- if (folder == "root") "root" else gsub("^root/", "", folder)
+        folder_files <- files_by_folder[[folder]] %||% list()
+        
+        html_list <- c(html_list, list(
+          tags$div(
+            class = "file-tree-item folder",
+            `data-folder-id` = folder_id,
+            tags$div(class = "folder-header",
+              tags$span(class = "folder-toggle", "▶"),
+              tags$span(class = "folder-name", title = folder, folder_name)
+            )
+          ),
+          tags$div(
+            id = paste0("folder-files-", folder_id),
+            class = "folder-files",
+            lapply(folder_files, function(file_info) {
+              tags$div(
+                class = "file-tree-item file",
+                `data-filepath` = file_info$path,
+                `data-filename` = file_info$name,
+                tags$span(class = "file-icon", "📄"),
+                tags$span(class = "file-name", title = file_info$name, file_info$name)
+              )
+            })
+          )
+        ))
+      }
+      
+      tags$ul(class = "file-tree", html_list)
+    })
   })
 }
 
-shinyApp(ui, server)
+# Run the application
+shinyApp(ui = ui, server = server)
