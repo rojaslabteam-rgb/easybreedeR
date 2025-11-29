@@ -9,8 +9,9 @@ affiliations:
   - index: 1
     name: Department of Animal Sciences, Purdue University, USA
 date: "13 January 2025"
-version: "v0.0.1"
-doi: "10.5281/zenodo.0000000"
+version: "v0.4.0"
+doi: "[10.5281/zenodo.0000000](https://doi.org/10.5281/zenodo.17764672)"
+https://doi.org/10.5281/zenodo.17764672
 ---
 
 # Summary
