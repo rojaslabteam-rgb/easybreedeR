@@ -49,8 +49,16 @@ jobs:
         run: |
           Rscript -e "options(crayon.enabled = TRUE); rcmdcheck::rcmdcheck(args = c('--no-manual', '--as-cran'), error_on = 'warning', check_dir = 'check')"
 
-      - name: Show testthat output
-        if: always()
+      - name: Show testthat output (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path check) {
+            Get-ChildItem -Path check -Recurse -Filter "testthat.Rout*" | ForEach-Object { Get-Content $_.FullName }
+          }
+
+      - name: Show testthat output (Unix)
+        if: always() && runner.os != 'Windows'
         run: |
           if [ -d check ]; then
             find check -name "testthat.Rout*" -exec cat {} \;
