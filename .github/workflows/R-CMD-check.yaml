@@ -47,15 +47,14 @@ jobs:
         env:
           _R_CHECK_CRAN_INCOMING_REMOTE_: false
         run: |
-          options(crayon.enabled = TRUE)
-          rcmdcheck::rcmdcheck(args = c("--no-manual", "--as-cran"), error_on = "warning", check_dir = "check")
-        shell: bash
+          Rscript -e "options(crayon.enabled = TRUE); rcmdcheck::rcmdcheck(args = c('--no-manual', '--as-cran'), error_on = 'warning', check_dir = 'check')"
 
       - name: Show testthat output
         if: always()
         run: |
-          find check -name "testthat.Rout*" -exec cat {} \;
-        shell: bash
+          if [ -d check ]; then
+            find check -name "testthat.Rout*" -exec cat {} \;
+          fi
 
       - name: Upload check results
         if: failure()
