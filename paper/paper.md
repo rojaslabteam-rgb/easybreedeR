@@ -10,7 +10,7 @@ affiliations:
     name: Department of Animal Sciences, Purdue University, USA
 date: "13 January 2025"
 version: "v0.4.0"
-https://doi.org/10.5281/zenodo.17764672
+doi: "10.5281/zenodo.17764672"
 ---
 
 # Summary
@@ -25,6 +25,4 @@ Researchers preparing a JOSS submission often need to confirm that their Markdow
 
 # Acknowledgements
 
-The authors thank the JOSS editorial team for providing clear publishing guidelines.
-
-# References
+The authors thank the JOSS editorial team for providing clear publis
