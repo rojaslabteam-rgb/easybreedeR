@@ -8,12 +8,10 @@
 
 easybreedeR combines multiple Shiny applications into a unified suite, offering:
 
-- **BLUP/REML Analysis** with AI-assisted parameter generation
-- **Pedigree Visualization** and quality control
-- **Data Preview and Exploration** tools
-- **Visual Workflow Builder** for R script pipelines
-- **Multilingual Interface** (English, Chinese, Portuguese)
-
+- **dataprevieweR** A dedicated tool for phenotype visualization and basic phenotype quality control.
+- **pediviweR** An interactive pedigree viewer supporting visualization, validation, and essential pedigree QC procedures.
+- **easyblup** A streamlined generator for blupf90 parameter cards, designed to work seamlessly with cleaned data produced by the previous two tools or by user-provided datasets.
+- **RCW(R canvas workflow)** A mind-map–style workflow organizer that helps structure, connect, and manage R scripts visually.
 ## Installation
 
 ### From GitHub
@@ -53,32 +51,16 @@ run_easybreedeR()  # Opens Studio with access to all applications
 You can also launch specific applications directly:
 
 ```r
-run_easyblup()       # BLUP/REML parameter generator with AI assistant
-run_pedivieweR()     # Pedigree viewer and quality control
-run_dataprevieweR()  # Data preview and exploration
+run_dataprevieweR()  # Phenotype preview and exploration
+run_pedivieweR()     # Pedigree viewer and pedigree quality control
+run_easyblup()       # blupf90 parameter cards generator
 run_rcw()            # Visual pipeline builder (R Canvas Workflow)
 ```
 
-## Applications
+## Applications and key functions
 
 ### 🎯 easybreedeR Studio
 The main launcher providing unified access to all applications in the suite.
-
-### 📊 easyblup
-**BLUP/REML Parameter Generator with AI Assistant**
-
-- Generate BLUP (Best Linear Unbiased Prediction) and REML (Restricted Maximum Likelihood) parameters
-- AI-powered assistant for parameter configuration and optimization
-- Configurable OpenAI-compatible API integration
-- Interactive parameter tuning and model building
-
-### 🌳 pedivieweR
-**Pedigree Viewer and Quality Control**
-
-- Interactive pedigree visualization using `visNetwork`
-- Pedigree quality control and validation
-- Relationship analysis and generation tracking
-- Export pedigree data with metadata
 
 ### 🔍 dataprevieweR
 **Data Preview and Exploration**
@@ -88,6 +70,22 @@ The main launcher providing unified access to all applications in the suite.
 - Data quality assessment
 - Export capabilities
 
+### 🌳 pedivieweR
+**Pedigree Viewer and Quality Control**
+
+- Interactive pedigree visualization using `visNetwork`
+- Pedigree quality control and validation
+- Relationship analysis and generation tracking
+- Export pedigree data with metadata
+
+### 📊 easyblup
+**blupf90 Parameter card Generator**
+
+- Generate BLUP (Best Linear Unbiased Prediction) and REML (Restricted Maximum Likelihood) parameters
+- AI-powered assistant for parameter configuration and optimization
+- Configurable OpenAI-compatible API integration
+- Interactive parameter tuning and model building
+
 ### 🔄 RCW (R Canvas Workflow)
 **Visual Pipeline Builder**
 
@@ -96,30 +94,6 @@ The main launcher providing unified access to all applications in the suite.
 - Export workflows as R Markdown documents
 - Import and restore saved workflows
 - Execute workflows with dependency management
-
-## Key Features
-
-### ✨ Multilingual Support
-- English, Chinese (中文), and Portuguese (Português) interfaces
-- Shared translation framework for consistent terminology
-- Easy to extend with additional languages
-
-### 🤖 AI Assistant Integration
-- Built-in AI assistant in easyblup for parameter optimization
-- Configurable API endpoints (OpenAI-compatible)
-- Customizable system prompts and model parameters
-- Settings stored in browser localStorage
-
-### 🎨 Modern User Interface
-- Bootstrap 5-based responsive design
-- Custom Purdue-themed color scheme
-- Dark mode support in workflow builder
-- Intuitive navigation and user experience
-
-### 📦 Modular Architecture
-- Each application can run independently
-- Shared utilities and translation framework
-- Easy to extend with new applications
 
 ## Project Structure
 
@@ -187,18 +161,6 @@ run_easybreedeR()
 # Or directly: shiny::runApp('inst/easybreedeR_Studio/app.R')
 ```
 
-### Building the Package
-
-```r
-# Generate documentation
-roxygen2::roxygenise()
-
-# Check package
-devtools::check()
-
-# Build package
-devtools::build()
-```
 
 ## Version
 
@@ -227,13 +189,3 @@ For issues, questions, or feature requests, please visit:
 - **GitHub Issues**: https://github.com/rojaslabteam-rgb/easybreedeR/issues
 - **Maintainer**: Huangyi Tang <tang749@purdue.edu>
 
-## Notes
-
-- Each application has its own `app.R` file under `inst/`
-- The Studio (`easybreedeR_Studio`) serves as the main launcher
-- RCW uses `inst/RCW/root/` as the default workspace directory
-- All applications support the shared multilingual framework via `inst/Language.R`
-
----
-
-**Made with ❤️ for the breeding research community**
