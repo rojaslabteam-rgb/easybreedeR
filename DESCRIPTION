@@ -7,7 +7,7 @@ Maintainer: Huangyi Tang <tang749@purdue.edu>
 Description: A comprehensive R/Shiny application suite for breeding data analysis,
     including BLUP/REML parameter generation, pedigree visualization, data preview,
     and visual workflow management with AI-assisted features.
-License: GPL-3
+License: GPL-3 + file LICENSE
 Encoding: UTF-8
 LazyData: true
 Depends: 

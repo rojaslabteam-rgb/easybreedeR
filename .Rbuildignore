@@ -12,6 +12,8 @@
 ^root/
 ^.*_cache/
 ^\.svn$
+^\.github/
+^example_data/
 
 # Non-standard top-level files (documentation files)
 ^BUILD\.md$
