@@ -1,5 +1,7 @@
 # easybreedeR — Multi-breeding related Shiny Application
 
+[![R-CMD-check](https://github.com/rojaslabteam-rgb/easybreedeR/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/rojaslabteam-rgb/easybreedeR/actions/workflows/R-CMD-check.yaml)
+
 easybreedeR is a collection of Shiny applications for breeding data analysis and workflow management. It provides a unified launcher (Studio) and several focused tools you can run individually.
 
 ## Project structure
