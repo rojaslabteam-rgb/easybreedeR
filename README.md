@@ -12,6 +12,8 @@ easybreedeR combines multiple Shiny applications into a unified suite, offering:
 - **pediviweR** An interactive pedigree viewer supporting visualization, validation, and essential pedigree QC procedures.
 - **easyblup** A streamlined generator for blupf90 parameter cards, designed to work seamlessly with cleaned data produced by the previous two tools or by user-provided datasets.
 - **RCW(R canvas workflow)** A mind-map–style workflow organizer that helps structure, connect, and manage R scripts visually.
+
+
 ![9927656b-f858-4df1-81d4-31b34f66b7a8](https://github.com/user-attachments/assets/ef62a104-a723-46f8-8121-6422f853ab6d)
 
 
