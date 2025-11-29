@@ -11,6 +11,7 @@ affiliations:
 date: "13 January 2025"
 version: "v0.4.0"
 doi: "10.5281/zenodo.17764672"
+bibliography: paper.bib 
 ---
 
 # Summary
