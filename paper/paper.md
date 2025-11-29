@@ -25,4 +25,4 @@ Researchers preparing a JOSS submission often need to confirm that their Markdow
 
 # Acknowledgements
 
-The authors thank the JOSS editorial team for providing clear publis test2
+The authors thank the JOSS editorial team for providing clear publis test3
