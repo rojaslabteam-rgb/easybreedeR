@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: actions/checkout@v3
       - name: Build paper
-        uses: openjournals/openjournals-action@v1
+        uses: openjournals/openjournals@v1.4
         with:
           journal: joss
           paper-path: paper/paper.md
