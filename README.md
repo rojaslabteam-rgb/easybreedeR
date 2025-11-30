@@ -1,4 +1,4 @@
-# easybreedeR: An Integrated R Shiny Application for Livestock Breeding Data Analysis
+# easybreedeR: An Integrated R Shiny Application for Breeding Data Analysis
 
 [![R-CMD-check](https://github.com/rojaslabteam-rgb/easybreedeR/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/rojaslabteam-rgb/easybreedeR/actions/workflows/R-CMD-check.yaml)
 
