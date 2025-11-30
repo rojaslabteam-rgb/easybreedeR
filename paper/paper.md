@@ -32,9 +32,7 @@ easybreedeR directly addresses this challenge by providing a user-friendly, poin
 
 ![Overview of the dataprevieweR interface.](Figures/Figure1.png){#fig:dataprevieweR}
 
-Figure @fig:dataprevieweR shows the graphical interface of dataprevieweR.
-
-Phenotype QC is conducted through interactive data exploration and statistical filtering methods. Data visualization is implemented using the `ggplot2` package [@Wickham2016], offering customizable histograms for distribution analysis and boxplots for outlier detection. Quality control filtering employs three statistical methods:
+As shown in Figure \@ref(fig:dataprevieweR), the dataprevieweR interface. Phenotype QC is conducted through interactive data exploration and statistical filtering methods. Data visualization is implemented using the `ggplot2` package [@Wickham2016], offering customizable histograms for distribution analysis and boxplots for outlier detection. Quality control filtering employs three statistical methods:
 1. Threshold-based filtering (user-defined minimum/maximum bounds).
 2. Standard Deviation (SD)-based filtering ($\text{mean} \pm k \times \text{SD}$).
 3. Interquartile Range (IQR)-based filtering ($\text{Q1} - k \times \text{IQR}$ and $\text{Q3} + k \times \text{IQR}$) [@RCoreTeam2024].
@@ -45,26 +43,21 @@ Data import supports multiple formats (CSV, TSV, TXT, XLSX, XLS, RDS), with data
 
 ![Overview of the pedivieweR interface.](Figures/Figure2.png){#fig:pedivieweR}
 
-Figure @fig:pedivieweR shows the graphical interface of pedivieweR.
-
-Pedigree quality control employs Rcpp-accelerated algorithms to automatically detect and report common errors, including duplicate IDs, self-parenting, and circular ancestry loops [@RCoreTeam2024]. `pedivieweR` provides comprehensive diagnostic reports and offers automatic fixing capabilities.
+As shown in Figure \@ref(fig:pedivieweR), the pedivieweR interface. Pedigree quality control employs Rcpp-accelerated algorithms to automatically detect and report common errors, including duplicate IDs, self-parenting, and circular ancestry loops [@RCoreTeam2024]. `pedivieweR` provides comprehensive diagnostic reports and offers automatic fixing capabilities.
 Interactive pedigree visualization is implemented using the `visNetwork` package [@Thieurmel2025]. Inbreeding coefficients ($F$) are calculated using the tabular method from the `inbreeding()` function in the `pedigreeTools` package [@PerezRodriguez2024]. Relationship analysis uses the `kinship()` function and graph-based traversal methods via the `igraph` package [@Csardi2025] to efficiently identify relationships. These capabilities ensure data integrity and facilitate an intuitive understanding of population structure.
 
 ### Generate Parameter Files for blupf90 (`easyblup`)
 
 ![Overview of the easyblup interface.](Figures/Figure3.png){#fig:easyblup}
 
-Figure @fig:easyblup shows the graphical interface of easyblup.
+As shown in Figure \@ref(fig:easyblup), the easyblup interface.
 
 The `easyblup` module transforms the complex blupf90 parameter file specification into an interactive Graphical User Interface (GUI), eliminating the need for manual text editing. Users can upload necessary files and interactively specify model components, including traits, fixed effects, random effects, and animal effects. The interface logically organizes blupf90 options covering basic settings, analysis methods, genomic configurations, and advanced solver options. The application generates the parameter files in real-time, with a preview panel allowing direct text editing if necessary, significantly reducing the technical barrier associated with blupf90 parameter file syntax [@Misztal2018].
 
 ### Visual R Script Workflow Management (`RCW`)
 
 ![Overview of the RCW interface.](Figures/Figure4.png){#fig:rcw}
-
-Figure @fig:rcw shows the graphical interface of RCW.
-
-The RCW (R Canvas Workflow) provides a novel, mind-map-style visual interface for structuring, connecting, and managing R scripts as executable pipelines. Users drag-and-drop R scripts onto a canvas, representing them as nodes. Nodes can be visually connected using arrows to define execution dependencies, creating a Directed Acyclic Graph (DAG) that represents the analysis workflow . The application automatically determines the correct execution order using topological sorting. Workflows run in a shared R environment that preserves objects between steps.
+As shown in Figure \@ref(fig:rcw), the RCW interface. The RCW (R Canvas Workflow) provides a novel, mind-map-style visual interface for structuring, connecting, and managing R scripts as executable pipelines. Users drag-and-drop R scripts onto a canvas, representing them as nodes. Nodes can be visually connected using arrows to define execution dependencies, creating a Directed Acyclic Graph (DAG) that represents the analysis workflow . The application automatically determines the correct execution order using topological sorting. Workflows run in a shared R environment that preserves objects between steps.
 
 # Conclusion
 easybreedeR successfully addresses the critical need for a streamlined, user-friendly platform in quantitative genetic and animal breeding data analysis. By consolidating disparate, technical workflows from phenotype and pedigree quality control to the generation of complex blupf90 parameter files into a single, intuitive R Shiny application, easybreedeR significantly lowers the technical barrier for both novice researchers and seasoned practitioners. The integrated modules leverage robust R packages and efficient algorithms to ensure data quality and provide interactive visualizations, transforming data preparation from a multi-tool ordeal into a guided, reproducible process. Furthermore, the RCW module introduces a novel, mind-map-style approach to R script management, fostering modularity and transparency in complex analysis pipelines. easybreedeR is poised to become an essential resource for students and professionals seeking rigorous yet accessible methods for genetic evaluation, thereby accelerating research and breeding program efficiency through improved reproducibility and accessibility.
