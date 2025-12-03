@@ -122,12 +122,6 @@ R/
 - **DT** (>= 0.20) - Data tables
 - **jsonlite** (>= 1.8.0) - JSON parsing
 
-### Optional Dependencies
-- **shinyFiles**, **fs** - File system operations (RCW)
-- **pedigreeTools**, **visNetwork**, **igraph** - Pedigree analysis (pedivieweR)
-- **openai**, **curl** - AI assistant integration (easyblup)
-- **readxl** - Excel file reading (dataprevieweR)
-
 Dependencies are automatically installed when needed. Optional packages are only loaded when the corresponding features are used.
 
 ## Configuration
