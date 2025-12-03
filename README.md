@@ -163,7 +163,7 @@ run_easybreedeR()
 
 ## Version
 
-**Current Version:** 0.4.0 (2025-10-31)
+**Current Version:** 0.4.0 (2025-11)
 
 ## License
 
