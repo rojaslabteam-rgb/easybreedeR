@@ -47,6 +47,22 @@ get_label <- get_label_local
 # small helper
 `%||%` <- function(x, y) if (is.null(x) || identical(x, "")) y else x
 
+# Determine PLINK prefix from uploaded PED/MAP pair.
+derive_plink_prefix <- function(file_names) {
+  if (is.null(file_names) || length(file_names) == 0) return(NULL)
+  norm_names <- basename(file_names)
+  ped_idx <- grepl("\\.ped$", norm_names, ignore.case = TRUE)
+  map_idx <- grepl("\\.map$", norm_names, ignore.case = TRUE)
+  candidate <- if (any(ped_idx)) {
+    norm_names[ped_idx][1]
+  } else if (any(map_idx)) {
+    norm_names[map_idx][1]
+  } else {
+    norm_names[1]
+  }
+  tools::file_path_sans_ext(candidate)
+}
+
 # ====== AI Assistant (optional) ======
 load_app_rules <- function(app_name) {
   rules_path <- file.path("apps", app_name, "ai_rules.json")
@@ -1233,8 +1249,9 @@ server <- function(input, output, session) {
     if (is.null(data())) {
       param_text <- "Please upload a phenotype file first"
     } else {
-      # Check pedigree file
+      # Check pedigree/genotype files
       has_ped <- !is.null(input$ped_file) && nrow(input$ped_file) > 0
+      has_geno <- !is.null(input$geno_file) && nrow(input$geno_file) > 0
     
     # Build parameter file
     param_text <- paste0(
@@ -1306,9 +1323,15 @@ server <- function(input, output, session) {
         param_text <- paste0(param_text, "OPTIONAL\n", paste(optional_effects, collapse = " "), "\n")
       }
       
-      # Add pedigree file information
+      # Add pedigree file information (and immediately follow with PLINK block when present)
       pedigree_filename <- if (has_ped) basename(input$ped_file$name) else "pedigree.txt"
-        param_text <- paste0(param_text, "FILE\n", pedigree_filename, "\nFILE_POS\n1 2 3 # Progeny Sire Dam\n")
+      param_text <- paste0(param_text, "FILE\n", pedigree_filename, "\nFILE_POS\n1 2 3 # Progeny Sire Dam\n")
+      if (has_geno) {
+        plink_prefix <- derive_plink_prefix(input$geno_file$name)
+        if (!is.null(plink_prefix) && nzchar(plink_prefix)) {
+          param_text <- paste0(param_text, "PLINK_FILE\n", plink_prefix, " # Genotype file name\n")
+        }
+      }
         
         # RENUMF90 pedigree/inbreeding controls (omit INBREEDING/UPG_TYPE per workflow)
         # Include PED_DEPTH only when enabled and not using complete search
@@ -1390,7 +1413,6 @@ server <- function(input, output, session) {
     if (isTRUE(input$opt_em_reml_pure)) options <- c(options, "OPTION EM-REML pure")
     if (isTRUE(input$opt_em_reml_ai_conv)) options <- c(options, "OPTION EM-REML AI conv")
   # Only include use_yams/tunedG2 if genotype file is present
-  has_geno <- !is.null(input$geno_file) && nrow(input$geno_file) > 0
   if (has_geno && input$opt_use_yams) options <- c(options, "OPTION use_yams")
   if (has_geno && input$opt_tuned_g2) options <- c(options, "OPTION tunedG2")
     if (!is.null(input$opt_maxrounds_val) && !is.na(input$opt_maxrounds_val)) options <- c(options, paste("OPTION maxrounds", input$opt_maxrounds_val))
