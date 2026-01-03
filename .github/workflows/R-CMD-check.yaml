@@ -1,0 +1,73 @@
+# https://github.com/r-lib/actions/tree/v2/examples
+# Need help? Build docs https://github.com/r-lib/actions#where-to-find-help
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+name: R-CMD-check
+
+jobs:
+  R-CMD-check:
+    runs-on: ${{ matrix.config.os }}
+
+    name: ${{ matrix.config.os }} (${{ matrix.config.r }})
+
+    strategy:
+      fail-fast: false
+      matrix:
+        config:
+          - {os: macos-latest, r: 'release'}
+          - {os: windows-latest, r: 'release'}
+          - {os: ubuntu-latest, r: 'release', rspm: "https://packagemanager.posit.co/cran/__linux__/jammy/latest"}
+          - {os: ubuntu-latest, r: 'devel', rspm: "https://packagemanager.posit.co/cran/__linux__/jammy/latest", http-user-agent: "R-devel"}
+
+    env:
+      GITHUB_PAT: ${{ secrets.GITHUB_TOKEN }}
+      R_KEEP_PKG_SOURCE: yes
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: r-lib/actions/setup-pandoc@v2
+
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: ${{ matrix.config.r }}
+          http-user-agent: ${{ matrix.config.http-user-agent }}
+          use-public-rspm: true
+
+      - uses: r-lib/actions/setup-r-dependencies@v2
+        with:
+          extra-packages: any::rcmdcheck
+          needs: check
+
+      - name: Check package
+        env:
+          _R_CHECK_CRAN_INCOMING_REMOTE_: false
+        run: |
+          Rscript -e "options(crayon.enabled = TRUE); rcmdcheck::rcmdcheck(args = c('--no-manual', '--as-cran'), error_on = 'warning', check_dir = 'check')"
+
+      - name: Show testthat output (Windows)
+        if: always() && runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          if (Test-Path check) {
+            Get-ChildItem -Path check -Recurse -Filter "testthat.Rout*" | ForEach-Object { Get-Content $_.FullName }
+          }
+
+      - name: Show testthat output (Unix)
+        if: always() && runner.os != 'Windows'
+        run: |
+          if [ -d check ]; then
+            find check -name "testthat.Rout*" -exec cat {} \;
+          fi
+
+      - name: Upload check results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ runner.os }}-r${{ matrix.config.r }}-results
+          path: check
+
