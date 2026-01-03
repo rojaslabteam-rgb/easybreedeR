@@ -1375,9 +1375,9 @@ server <- function(input, output, session) {
         }
         cov_lines <- c(cov_lines, paste(row_vals, collapse = " "))
       }
-      param_text <- paste0(param_text, "(CO)VARIANCES\n", paste(cov_lines, collapse = "\n"), "\n\n")
+      param_text <- paste0(param_text, "(CO)VARIANCES\n", paste(cov_lines, collapse = "\n"), "\n")
     } else {
-      param_text <- paste0(param_text, "(CO)VARIANCES\n1\n\n")
+      param_text <- paste0(param_text, "(CO)VARIANCES\n1\n")
     }
 
     # PE (Permanent Environmental) covariance matrix - works for single or multiple traits
