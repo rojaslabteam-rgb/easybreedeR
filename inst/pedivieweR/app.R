@@ -1958,7 +1958,7 @@ output$app_subtitle_ui <- renderUI({
                   )
               ),
               uiOutput("inb_trend_hint_ui"),
-              plotlyOutput("inb_trend_plot", height = "520px")
+             plotlyOutput("inb_trend_plot", height = "832px")
           )
         ),
         target = "viz",

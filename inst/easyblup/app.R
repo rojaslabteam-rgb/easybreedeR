@@ -385,15 +385,7 @@ ui <- page_fillable(
       background-color: #7F8C8D !important;
       border-color: #7F8C8D !important;
     }
-    /* Align heights for folder selection button and input */
-    #geno_convert_choose_folder_blup {
-      height: 45px !important;
-      display: flex !important;
-      align-items: center !important;
-      justify-content: center !important;
-      box-sizing: border-box !important;
-      margin: 0 !important;
-    }
+    /* Align heights for folder selection input */
     #geno_convert_output_dir,
     #geno_convert_output_dir_blup {
       height: 45px !important;
@@ -2241,11 +2233,6 @@ server <- function(input, output, session) {
                 tags$strong(style = "font-weight: 600; color: #2c3e50; margin-bottom: 8px; display: block;",
                    if (tolower(lang()) == "zh") "📁 选择输出目录" else "📁 Select Output Directory"),
                 div(style = "display: flex; gap: 8px; align-items: center;",
-                  actionButton("geno_convert_choose_folder_blup",
-                             if (tolower(lang()) == "zh") "选择文件夹" else "Choose Folder",
-                             class = "btn-secondary",
-                             onclick = "window.selectOutputFolder();",
-                             style = "white-space: nowrap; flex-shrink: 0; align-self: stretch;"),
                   div(style = "flex: 1; display: flex; align-items: center;",
                     textInput("geno_convert_output_dir",
                              label = NULL,
