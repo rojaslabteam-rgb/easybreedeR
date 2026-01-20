@@ -1,0 +1,25 @@
+^.*\.Rproj$
+^\.Rproj\.user$
+^\.Rhistory$
+^\.git$
+^\.gitignore$
+^\.DS_Store$
+^README\.md$
+^\.Rprofile$
+^easybreedeR\.Rproj$
+^suite_diagnostics\.log$
+^pedigree_cache/
+^root/
+^.*_cache/
+^\.svn$
+^\.github/
+^example_data/
+
+# Non-standard top-level files (documentation files)
+^BUILD\.md$
+^INSTALL\.md$
+^PUBLISH\.md$
+^paper/
+
+# Note: Development files are now only in inst/
+
