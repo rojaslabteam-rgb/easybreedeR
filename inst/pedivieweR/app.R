@@ -29,6 +29,11 @@ library(pedigreeTools)
 library(visNetwork)
 library(igraph)
 library(digest)
+## Optional: used for interactive trend plot (hover tooltips)
+## Kept optional to avoid hard dependency at install time.
+if (requireNamespace("plotly", quietly = TRUE)) {
+  library(plotly)
+}
 
 # Check if linkbreedeR is available for faster inbreeding calculation
 use_linkbreedeR <- FALSE
@@ -1867,6 +1872,9 @@ output$app_subtitle_ui <- renderUI({
   # Cache for F values to avoid repeated calculations
   f_values_cache <- reactiveVal(NULL)
   
+  # Track whether the Inbreeding Trend tab is currently inserted
+  inb_trend_tab_inserted <- reactiveVal(FALSE)
+  
   # Observe file upload and auto-detect
   observe({
     if (is.null(raw_data())) return()
@@ -1924,6 +1932,44 @@ output$app_subtitle_ui <- renderUI({
       data_validation_status(list(valid = FALSE, errors = validation_errors, warnings = c()))
       showNotification(paste("⚠️ Column mapping validation failed:", paste(validation_errors, collapse = "; ")), 
                       type = "warning", duration = 8)
+    }
+  })
+  
+  # Conditionally show/hide "Inbreeding Trend" tab:
+  # Only show when the user mapped a birthdate column in column mapping.
+  observe({
+    has_birthdate_mapping <- !is.null(input$birthdate_col) && nzchar(input$birthdate_col)
+    
+    if (isTRUE(has_birthdate_mapping) && !isTRUE(inb_trend_tab_inserted())) {
+      insertTab(
+        inputId = "mainTabs",
+        tab = nav_panel(
+          "Inbreeding Trend",
+          value = "inb_trend",
+          div(style = "margin-top: 10px;",
+              div(style = "display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;",
+                  tags$strong("Granularity:"),
+                  selectInput(
+                    "inb_trend_granularity",
+                    label = NULL,
+                    choices = c("Week" = "week", "Month" = "month", "Year" = "year"),
+                    selected = "month",
+                    width = "220px"
+                  )
+              ),
+              uiOutput("inb_trend_hint_ui"),
+              plotlyOutput("inb_trend_plot", height = "520px")
+          )
+        ),
+        target = "viz",
+        position = "after"
+      )
+      inb_trend_tab_inserted(TRUE)
+    }
+    
+    if (!isTRUE(has_birthdate_mapping) && isTRUE(inb_trend_tab_inserted())) {
+      removeTab(inputId = "mainTabs", target = "inb_trend")
+      inb_trend_tab_inserted(FALSE)
     }
   })
   
@@ -3694,7 +3740,7 @@ output$app_subtitle_ui <- renderUI({
     }
   })
   
-  # Data preview - highly optimized for large datasets
+  # Data preview - highly optimized for large datasets, shows all data with inbreeding if available
   output$data_preview <- renderDT({
     req(ped_data())
     ped <- ped_data()
@@ -3717,57 +3763,80 @@ output$app_subtitle_ui <- renderUI({
       ))
     }
     
-    n <- nrow(ped)
+    # Merge inbreeding coefficients if available
+    display_data <- ped
+    has_inbreeding <- FALSE
+    f_tbl <- f_values_cache()
+    if (!is.null(f_tbl) && nrow(f_tbl) > 0 && "ID" %in% names(f_tbl) && "F" %in% names(f_tbl)) {
+      display_data <- display_data %>%
+        left_join(f_tbl %>% mutate(ID = as.character(ID)), by = "ID") %>%
+        mutate(F = round(F, 6))  # Round to 6 decimal places for display
+      has_inbreeding <- TRUE
+    }
     
-    # For very large datasets, show only a sample
-    if (n > 10000) {
-      # Show first 5000 rows with warning
-      display_data <- head(ped, 5000)
-      
-      datatable(
+    n <- nrow(display_data)
+    
+    # Determine optimal rendering based on dataset size
+    if (n > 5000) {
+      # Optimized rendering for large datasets - show all data with virtual scrolling
+      dt <- datatable(
         display_data,
         caption = htmltools::tags$caption(
-          style = 'caption-side: top; text-align: left; color: #d9534f; font-weight: bold; padding: 10px;',
-          paste0("⚠️ Displaying first 5,000 of ", format(n, big.mark = ","), 
-                 " rows for performance. Download full data if needed.")
+          style = 'caption-side: top; text-align: left; color: #666; font-weight: normal; padding: 10px;',
+          paste0("📊 Displaying all ", format(n, big.mark = ","), 
+                 " rows. Use filters and search to navigate.")
         ),
         options = list(
           pageLength = 25,
           scrollX = TRUE,
-          scrollY = "400px",
-          deferRender = TRUE,
-          dom = 'Bfrtip',
-          buttons = list('copy', 'csv', 'excel')
-        ),
-        filter = "top",
-        rownames = FALSE
-      )
-    } else if (n > 5000) {
-      # Optimized rendering for large datasets
-      datatable(
-        ped,
-        options = list(
-          pageLength = 25,
-          scrollX = TRUE,
-          scrollY = "400px",
+          scrollY = "500px",
           deferRender = TRUE,
           scroller = TRUE,
-          dom = 'Bfrtip'
+          dom = 'Bfrtip',
+          buttons = list('copy', 'csv', 'excel', 'pdf'),
+          lengthMenu = list(c(10, 25, 50, 100, -1), c('10', '25', '50', '100', 'All'))
         ),
         filter = "top",
-        rownames = FALSE
+        rownames = FALSE,
+        extensions = c('Buttons', 'Scroller')
       )
+      
+      # Apply inbreeding styling if available
+      if (has_inbreeding && "F" %in% names(display_data)) {
+        dt <- dt %>%
+          formatStyle("F", 
+                     backgroundColor = styleInterval(c(0, 0.0625, 0.125), 
+                                                    c("white", "#fff9e6", "#ffe6cc", "#ffcccc")),
+                     fontWeight = styleInterval(0.125, c("normal", "bold")))
+      }
+      return(dt)
     } else {
-      # Normal rendering for small datasets
-      datatable(
-        ped,
+      # Normal rendering for smaller datasets
+      dt <- datatable(
+        display_data,
         options = list(
-          pageLength = 15,
-          scrollX = TRUE
+          pageLength = 25,
+          scrollX = TRUE,
+          scrollY = if(n > 100) "500px" else NULL,
+          deferRender = if(n > 100) TRUE else FALSE,
+          dom = 'Bfrtip',
+          buttons = list('copy', 'csv', 'excel', 'pdf'),
+          lengthMenu = list(c(10, 25, 50, 100, -1), c('10', '25', '50', '100', 'All'))
         ),
         filter = "top",
-        rownames = FALSE
+        rownames = FALSE,
+        extensions = 'Buttons'
       )
+      
+      # Apply inbreeding styling if available
+      if (has_inbreeding && "F" %in% names(display_data)) {
+        dt <- dt %>%
+          formatStyle("F", 
+                     backgroundColor = styleInterval(c(0, 0.0625, 0.125), 
+                                                    c("white", "#fff9e6", "#ffe6cc", "#ffcccc")),
+                     fontWeight = styleInterval(0.125, c("normal", "bold")))
+      }
+      return(dt)
     }
   })
   
@@ -5016,6 +5085,139 @@ output$app_subtitle_ui <- renderUI({
       })
     })
   })
+
+  # ---- Inbreeding Trend (requires Birthdate mapping + F values) ----
+  output$inb_trend_hint_ui <- renderUI({
+    # If plotly isn't available, show a clear hint
+    if (!requireNamespace("plotly", quietly = TRUE)) {
+      return(div(class = "alert alert-warning", style = "padding: 8px; font-size: 0.9rem;",
+                 tags$strong("Plotly not installed. "),
+                 "Please install it to view the interactive Inbreeding Trend plot: ",
+                 tags$code("install.packages('plotly')")))
+    }
+    
+    # If inbreeding hasn't been calculated yet, guide the user
+    cached_f <- f_values_cache()
+    if (is.null(cached_f) || nrow(cached_f) == 0) {
+      return(div(class = "alert alert-info", style = "padding: 8px; font-size: 0.9rem;",
+                 "To view the trend, please run ",
+                 tags$strong("Calculate F Coefficients"),
+                 " first (right panel)."))
+    }
+    
+    NULL
+  })
+  
+  inb_trend_data <- reactive({
+    req(ped_data())
+    req(!is.null(input$birthdate_col) && nzchar(input$birthdate_col))
+    
+    ped <- ped_data()
+    if (is.null(ped) || nrow(ped) == 0) return(NULL)
+    
+    # Need Birthdate in processed data (ped_data standardizes to "Birthdate")
+    if (!"Birthdate" %in% names(ped)) return(NULL)
+    
+    # Need F values (from cache or calculation)
+    f_tbl <- f_values_cache()
+    if (is.null(f_tbl) || nrow(f_tbl) == 0) return(NULL)
+    
+    # Parse Birthdate robustly (allow Date, POSIXct, character; ignore 0/NA)
+    bd_raw <- ped$Birthdate
+    bd <- suppressWarnings({
+      if (inherits(bd_raw, "Date")) {
+        bd_raw
+      } else if (inherits(bd_raw, "POSIXct") || inherits(bd_raw, "POSIXt")) {
+        as.Date(bd_raw)
+      } else {
+        # Treat "0" and empty as NA
+        bd_chr <- as.character(bd_raw)
+        bd_chr[bd_chr %in% c("0", "", "NA", "NULL")] <- NA_character_
+        as.Date(bd_chr)
+      }
+    })
+    
+    df <- tibble(
+      ID = as.character(ped$ID),
+      Birthdate = bd
+    ) %>%
+      left_join(f_tbl %>% mutate(ID = as.character(ID)), by = "ID") %>%
+      filter(!is.na(Birthdate), !is.na(F))
+    
+    if (nrow(df) == 0) return(NULL)
+    
+    gran <- input$inb_trend_granularity %||% "month"
+    
+    period_start <- switch(
+      gran,
+      week = as.Date(cut(df$Birthdate, breaks = "week", start.on.monday = TRUE)),
+      month = as.Date(paste0(format(df$Birthdate, "%Y-%m"), "-01")),
+      year = as.Date(paste0(format(df$Birthdate, "%Y"), "-01-01")),
+      as.Date(paste0(format(df$Birthdate, "%Y-%m"), "-01"))
+    )
+    
+    df %>%
+      mutate(period = period_start) %>%
+      group_by(period) %>%
+      summarise(
+        mean_F = mean(F, na.rm = TRUE),
+        sd_F = sd(F, na.rm = TRUE),
+        n_animals = dplyr::n(),
+        .groups = "drop"
+      ) %>%
+      arrange(period)
+  })
+  
+  output$inb_trend_plot <- renderPlotly({
+    req(requireNamespace("plotly", quietly = TRUE))
+    
+    dat <- inb_trend_data()
+    validate(need(!is.null(dat) && nrow(dat) > 1, "Not enough data to plot a trend."))
+    
+    # Purdue gold
+    gold <- "#CEB888"
+    ribbon_fill <- "rgba(206,184,136,0.25)"
+    
+    # SD ribbon bounds (handle sd_F NA for singletons)
+    sd_val <- ifelse(is.na(dat$sd_F), 0, dat$sd_F)
+    y0 <- dat$mean_F - sd_val
+    y1 <- dat$mean_F + sd_val
+    
+    hover_txt <- paste0(
+      "<b>", format(dat$period), "</b>",
+      "<br>Animals: ", dat$n_animals,
+      "<br>Mean inbreeding (F): ", signif(dat$mean_F, 5),
+      "<br>SD: ", signif(sd_val, 5)
+    )
+    
+    plotly::plot_ly(dat, x = ~period) %>%
+      plotly::add_ribbons(
+        ymin = ~y0, ymax = ~y1,
+        line = list(color = "rgba(0,0,0,0)"),
+        fillcolor = ribbon_fill,
+        name = "±1 SD",
+        hoverinfo = "skip"
+      ) %>%
+      plotly::add_lines(
+        y = ~mean_F,
+        line = list(color = gold, width = 3),
+        name = "Mean F",
+        hoverinfo = "skip"
+      ) %>%
+      plotly::add_markers(
+        y = ~mean_F,
+        marker = list(color = gold, size = 7),
+        text = hover_txt,
+        hoverinfo = "text",
+        name = "Period"
+      ) %>%
+      plotly::layout(
+        xaxis = list(title = "Time"),
+        yaxis = list(title = "Inbreeding (F)"),
+        hovermode = "closest",
+        legend = list(orientation = "h", x = 0, y = -0.15)
+      )
+  })
   
   # F summary
   output$f_summary <- renderPrint({
@@ -5681,18 +5883,21 @@ output$app_subtitle_ui <- renderUI({
   
   # Simplified network data reactive
   network_data <- reactive({
-    req(ped_data())
-      ped <- ped_data()
+    # Check if raw data is available first
+    if (is.null(raw_data())) {
+      return(list(nodes = tibble(), edges = tibble(), status = "waiting"))
+    }
     
-    # Check if ped_data returned NULL (due to column mapping errors)
+    # Check if ped_data is available
+    ped <- ped_data()
     if (is.null(ped)) {
-      return(list(nodes = tibble(), edges = tibble()))
+      return(list(nodes = tibble(), edges = tibble(), status = "error"))
     }
     
     # Check if required columns exist
     if (!"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
       showNotification("Error: Required columns (ID, Sire, Dam) not found in processed data", type = "error")
-      return(list(nodes = tibble(), edges = tibble()))
+      return(list(nodes = tibble(), edges = tibble(), status = "error"))
     }
     
     # Get target individual
@@ -5700,10 +5905,12 @@ output$app_subtitle_ui <- renderUI({
     
     if (!is.null(target_id)) {
       # Build individual network
-      return(build_individual_network(target_id))
-      } else {
-      # Return empty network
-      return(list(nodes = tibble(), edges = tibble(), layout = "precomputed"))
+      result <- build_individual_network(target_id)
+      result$status <- "success"
+      return(result)
+    } else {
+      # Return empty network (data loaded but no individual selected)
+      return(list(nodes = tibble(), edges = tibble(), layout = "precomputed", status = "no_selection"))
     }
   })
   
@@ -5712,6 +5919,30 @@ output$app_subtitle_ui <- renderUI({
     # Get network data with proper error handling
     tryCatch({
       net <- network_data()
+      
+      # Check status first
+      status <- net$status %||% "unknown"
+      
+      # If waiting for data (raw_data is NULL)
+      if (status == "waiting") {
+        return(visNetwork(data.frame(id = 1, label = "Waiting for data"), data.frame()) %>%
+                 visNodes(shape = "text", color = list(background = "white")) %>%
+                 visOptions(manipulation = FALSE))
+      }
+      
+      # If error occurred (ped_data is NULL or columns missing)
+      if (status == "error") {
+        return(visNetwork(data.frame(id = 1, label = "Error: Data processing failed. Please check column mapping."), data.frame()) %>%
+                 visNodes(shape = "text", color = list(background = "white")) %>%
+                 visOptions(manipulation = FALSE))
+      }
+      
+      # If no individual selected (data loaded but no selection)
+      if (status == "no_selection") {
+        return(visNetwork(data.frame(id = 1, label = "💡 Enter an individual ID above to visualize their pedigree network"), data.frame()) %>%
+                 visNodes(shape = "text", color = list(background = "white")) %>%
+                 visOptions(manipulation = FALSE))
+      }
       
       # Validate network data
       if (is.null(net) || !is.list(net) || 
@@ -5866,7 +6097,13 @@ output$app_subtitle_ui <- renderUI({
         ")
       }
     }, error = function(e) {
-      # Return empty network on error to prevent state conflicts
+      # Check if error is due to missing raw_data
+      if (is.null(raw_data())) {
+        return(visNetwork(data.frame(id = 1, label = "Waiting for data"), data.frame()) %>%
+                 visNodes(shape = "text", color = list(background = "white")) %>%
+                 visOptions(manipulation = FALSE))
+      }
+      # Return error message for other errors
       return(visNetwork(data.frame(id = 1, label = "Error loading network"), data.frame()) %>%
                visNodes(shape = "text", color = list(background = "white")) %>%
                visOptions(manipulation = FALSE))

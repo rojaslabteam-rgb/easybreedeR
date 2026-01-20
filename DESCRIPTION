@@ -18,6 +18,7 @@ Suggests:
     bslib (>= 0.4.0),
     DT (>= 0.20),
     jsonlite (>= 1.8.0),
+    plotly,
     shinyFiles,
     fs,
     pedigreeTools,
