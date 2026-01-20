@@ -27,9 +27,10 @@ Suggests:
     reticulate,
     openai,
     curl,
-    testthat (>= 3.0.0),
-    linkbreedeR,
-    plinkR
+    testthat (>= 3.0.0)
+Remotes:
+    Thymine2001/linkbreedeR,
+    Thymine2001/plinkR
 RoxygenNote: 7.3.3
 Roxygen: list(markdown = TRUE)
 Config/testthat/edition: 3
