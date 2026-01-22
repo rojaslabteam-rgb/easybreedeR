@@ -20,6 +20,7 @@ Suggests:
     jsonlite (>= 1.8.0),
     plotly,
     shinyFiles,
+    shinyDirectoryInput,
     fs,
     pedigreeTools,
     visNetwork,

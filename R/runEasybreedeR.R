@@ -10,7 +10,7 @@
 #' \dontrun{
 #'   run_easybreedeR()            # launch suite
 #' }
-run_easybreedeR <- function() {
+run_easybreedeR <- function(host = "0.0.0.0", port = NULL) {
   # Try to find app in installed package first
   app_dir <- system.file("easybreedeR_Studio", package = "easybreedeR")
   # Fallback to development location
@@ -22,7 +22,22 @@ run_easybreedeR <- function() {
       stop("easybreedeR_Studio application not found. Please reinstall the package or run from package root.")
     }
   }
-  shiny::runApp(app_dir, launch.browser = TRUE)
+  # Get local IP for display
+  local_ip <- tryCatch({
+    env_host <- Sys.getenv("EASYBREEDER_HOST", "")
+    if (nzchar(env_host)) {
+      env_host
+    } else if (.Platform$OS.type == "unix" && Sys.info()["sysname"] == "Darwin") {
+      system("ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo '127.0.0.1'", intern = TRUE)[1]
+    } else if (.Platform$OS.type == "unix") {
+      system("hostname -I 2>/dev/null | awk '{print $1}' || echo '127.0.0.1'", intern = TRUE)[1]
+    } else {
+      "127.0.0.1"
+    }
+  }, error = function(e) "127.0.0.1")
+  local_ip <- trimws(local_ip)
+  
+  shiny::runApp(app_dir, host = host, port = port, launch.browser = TRUE)
 }
 
 #' Launch easyblup application
@@ -36,7 +51,7 @@ run_easybreedeR <- function() {
 #' \dontrun{
 #'   run_easyblup()
 #' }
-run_easyblup <- function() {
+run_easyblup <- function(host = "0.0.0.0", port = NULL) {
   app_dir <- system.file("easyblup", package = "easybreedeR")
   if (app_dir == "") {
     dev_dir <- file.path(getwd(), "inst", "easyblup")
@@ -46,7 +61,7 @@ run_easyblup <- function() {
       stop("easyblup application not found. Please reinstall the package or run from package root.")
     }
   }
-  shiny::runApp(app_dir, launch.browser = TRUE)
+  shiny::runApp(app_dir, host = host, port = port, launch.browser = TRUE)
 }
 
 #' Launch pedivieweR application
@@ -60,7 +75,7 @@ run_easyblup <- function() {
 #' \dontrun{
 #'   run_pedivieweR()
 #' }
-run_pedivieweR <- function() {
+run_pedivieweR <- function(host = "0.0.0.0", port = NULL) {
   app_dir <- system.file("pedivieweR", package = "easybreedeR")
   if (app_dir == "") {
     dev_dir <- file.path(getwd(), "inst", "pedivieweR")
@@ -70,7 +85,7 @@ run_pedivieweR <- function() {
       stop("pedivieweR application not found. Please reinstall the package or run from package root.")
     }
   }
-  shiny::runApp(app_dir, launch.browser = TRUE)
+  shiny::runApp(app_dir, host = host, port = port, launch.browser = TRUE)
 }
 
 #' Launch dataprevieweR application
@@ -83,7 +98,7 @@ run_pedivieweR <- function() {
 #' \dontrun{
 #'   run_dataprevieweR()
 #' }
-run_dataprevieweR <- function() {
+run_dataprevieweR <- function(host = "0.0.0.0", port = NULL) {
   app_dir <- system.file("dataprevieweR", package = "easybreedeR")
   if (app_dir == "") {
     dev_dir <- file.path(getwd(), "inst", "dataprevieweR")
@@ -93,7 +108,7 @@ run_dataprevieweR <- function() {
       stop("dataprevieweR application not found. Please reinstall the package or run from package root.")
     }
   }
-  shiny::runApp(app_dir, launch.browser = TRUE)
+  shiny::runApp(app_dir, host = host, port = port, launch.browser = TRUE)
 }
 
 #' Launch RCW (R Canvas Workflow) application
@@ -106,7 +121,7 @@ run_dataprevieweR <- function() {
 #' \dontrun{
 #'   run_rcw()
 #' }
-run_rcw <- function() {
+run_rcw <- function(host = "0.0.0.0", port = NULL) {
   app_dir <- system.file("RCW", package = "easybreedeR")
   if (app_dir == "") {
     dev_dir <- file.path(getwd(), "inst", "RCW")
@@ -116,6 +131,6 @@ run_rcw <- function() {
       stop("RCW application not found. Please reinstall the package or run from package root.")
     }
   }
-  shiny::runApp(app_dir, launch.browser = TRUE)
+  shiny::runApp(app_dir, host = host, port = port, launch.browser = TRUE)
 }
 

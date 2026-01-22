@@ -76,13 +76,61 @@ language_code <- function(name) {
   "en"
 }
 
+# Get local IP address for LAN access
+.get_local_ip <- function() {
+  # Check environment variable first (user can set EASYBREEDER_HOST)
+  env_host <- Sys.getenv("EASYBREEDER_HOST", "")
+  if (nzchar(env_host)) {
+    return(trimws(env_host))
+  }
+  
+  # Try to detect IP automatically
+  ip <- NULL
+  if (.Platform$OS.type == "unix") {
+    # macOS
+    if (Sys.info()["sysname"] == "Darwin") {
+      try({
+        ip <- system("ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo ''", intern = TRUE)
+        ip <- trimws(ip[1])
+        if (!nzchar(ip) || ip == "") ip <- NULL
+      }, silent = TRUE)
+    } else {
+      # Linux
+      try({
+        ip <- system("hostname -I 2>/dev/null | awk '{print $1}'", intern = TRUE)
+        ip <- trimws(ip[1])
+        if (!nzchar(ip) || ip == "") ip <- NULL
+      }, silent = TRUE)
+    }
+  } else if (.Platform$OS.type == "windows") {
+    # Windows
+    try({
+      ip <- system("ipconfig | findstr /i \"IPv4\" | findstr /v \"127.0.0.1\" | findstr /v \"169.254\"", intern = TRUE)
+      if (length(ip) > 0) {
+        ip <- gsub(".*?([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}).*", "\\1", ip[1])
+        if (!grepl("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", ip)) ip <- NULL
+      } else {
+        ip <- NULL
+      }
+    }, silent = TRUE)
+  }
+  
+  # Fallback to localhost if detection fails
+  if (is.null(ip) || !nzchar(ip)) {
+    return("127.0.0.1")
+  }
+  ip
+}
 
-# Child endpoints and paths
+# Get local IP (cached per session)
+.local_ip <- .get_local_ip()
+
+# Child endpoints and paths (use detected IP for LAN access)
 child_apps <- list(
-  datapreviewer = "http://127.0.0.1:8001",
-  pediviewer   = "http://127.0.0.1:8002",
-  easyblupf90  = "http://127.0.0.1:8003",
-  core_tools   = "http://127.0.0.1:8004"
+  datapreviewer = paste0("http://", .local_ip, ":8001"),
+  pediviewer   = paste0("http://", .local_ip, ":8002"),
+  easyblupf90  = paste0("http://", .local_ip, ":8003"),
+  core_tools   = paste0("http://", .local_ip, ":8004")
 )
 
 # Resolve app directory from the calling context (works when sourced by app.R)
@@ -147,10 +195,11 @@ start_child <- function(path, port) {
     candidate <- paste0(rscript, ".exe")
     if (file.exists(candidate)) rscript <- candidate
   }
-  cmd <- sprintf("shiny::runApp('%s', port=%d, launch.browser=FALSE)", path, as.integer(port))
+  # Use host = "0.0.0.0" to allow LAN access
+  cmd <- sprintf("shiny::runApp('%s', port=%d, host='0.0.0.0', launch.browser=FALSE)", path, as.integer(port))
   stdout <- tempfile(pattern = sprintf("child_%d_out_", as.integer(port)), fileext = ".log")
   stderr <- tempfile(pattern = sprintf("child_%d_err_", as.integer(port)), fileext = ".log")
-  log_suite("spawning child", path, "port", port, "stdout", stdout, "stderr", stderr)
+  log_suite("spawning child", path, "port", port, "host=0.0.0.0", "stdout", stdout, "stderr", stderr)
   pid <- tryCatch({
     system2(rscript, c("-e", shQuote(cmd)), wait = FALSE, stdout = stdout, stderr = stderr)
   }, error = function(e) NA_integer_)
@@ -174,13 +223,16 @@ iframe_panel <- function(url) {
 
 
 # ===== Diagnostics =====
-log_suite <- function(...) {
+log_suite <- function(..., verbose = FALSE) {
   msg <- paste0(format(Sys.time(), "%Y-%m-%d %H:%M:%S"), " ", paste(..., collapse = " "))
-  try(cat(msg, "\n"), silent = TRUE)
+  # Only write to file by default, not to console
+  if (verbose) {
+    try(cat(msg, "\n"), silent = TRUE)
+  }
   try(write(x = msg, file = suite_log_path, append = TRUE), silent = TRUE)
 }
 
-diagnose_suite <- function() {
+diagnose_suite <- function(verbose = FALSE) {
   rscript <- file.path(R.home("bin"), "Rscript")
   if (.Platform$OS.type == "windows" && !file.exists(rscript)) {
     candidate <- paste0(rscript, ".exe")
@@ -191,7 +243,9 @@ diagnose_suite <- function() {
   child_appR_exist <- vapply(child_paths, function(p) file.exists(file.path(p, "app.R")), logical(1))
 
   ports <- c(8001L, 8002L, 8003L, 8004L)
-  port_urls <- sprintf("http://127.0.0.1:%d", ports)
+  # Use detected IP for health check (same as child_apps URLs)
+  check_ip <- tryCatch(.get_local_ip(), error = function(e) "127.0.0.1")
+  port_urls <- sprintf("http://%s:%d", check_ip, ports)
   ports_in_use <- vapply(port_urls, is_alive, logical(1))
 
   result <- list(
@@ -203,21 +257,27 @@ diagnose_suite <- function() {
     ports_in_use = setNames(ports_in_use, ports)
   )
 
-  # Pretty print to console for developers
-  try({
-    cat("\n=== easybreedeR Suite Diagnostics ===\n")
-    cat("Rscript:", result$rscript_path, " exists=", result$rscript_exists, "\n", sep = "")
-    cat("curl available:", result$curl_available, "\n")
-    cat("Child directories exist:\n")
-    for (nm in names(child_dirs_exist)) cat("  - ", nm, ": ", child_dirs_exist[[nm]], "  (", child_paths[[nm]], ")\n", sep = "")
-    cat("Child app.R exist:\n")
-    for (nm in names(child_appR_exist)) cat("  - ", nm, ": ", child_appR_exist[[nm]], "\n", sep = "")
-    cat("Ports in use (TRUE means something already listening):\n")
-    for (pr in names(result$ports_in_use)) cat("  - ", pr, ": ", result$ports_in_use[[pr]], "\n", sep = "")
-    cat("====================================\n\n")
-  }, silent = TRUE)
+  # Only print to console if verbose mode or if there are issues
+  has_issues <- !isTRUE(result$rscript_exists) || 
+                !all(result$child_dirs_exist) || 
+                !all(result$child_appR_exist)
+  
+  if (verbose || has_issues) {
+    try({
+      cat("\n=== easybreedeR Suite Diagnostics ===\n")
+      cat("Rscript:", result$rscript_path, " exists=", result$rscript_exists, "\n", sep = "")
+      cat("curl available:", result$curl_available, "\n")
+      cat("Child directories exist:\n")
+      for (nm in names(child_dirs_exist)) cat("  - ", nm, ": ", child_dirs_exist[[nm]], "  (", child_paths[[nm]], ")\n", sep = "")
+      cat("Child app.R exist:\n")
+      for (nm in names(child_appR_exist)) cat("  - ", nm, ": ", child_appR_exist[[nm]], "\n", sep = "")
+      cat("Ports in use (TRUE means something already listening):\n")
+      for (pr in names(result$ports_in_use)) cat("  - ", pr, ": ", result$ports_in_use[[pr]], "\n", sep = "")
+      cat("====================================\n\n")
+    }, silent = TRUE)
+  }
 
-  # Also log to file
+  # Log to file (without verbose flag, so no console output)
   log_suite("Rscript:", result$rscript_path, "exists=", result$rscript_exists)
   log_suite("curl available:", result$curl_available)
   for (nm in names(child_dirs_exist)) log_suite("dir exists", nm, "=", child_dirs_exist[[nm]], child_paths[[nm]])

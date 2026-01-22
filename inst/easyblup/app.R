@@ -106,6 +106,12 @@ load_app_rules <- function(app_name) {
     }
   }
 
+  # MCP-style tool definitions for easyblup (optional)
+  mcp_tools_path <- normalizePath(file.path(".", "mcp_tools.R"), winslash = "/", mustWork = FALSE)
+  if (file.exists(mcp_tools_path)) {
+    try(source(mcp_tools_path, local = FALSE), silent = TRUE)
+  }
+
 # ====== UI Definition ======
 ui <- page_fillable(
   theme = bs_theme(
@@ -1124,7 +1130,7 @@ server <- function(input, output, session) {
                       12,
                       textInput("ai_api_base", "API Base URL", value = "", width = "100%"),
             div(style = "margin-top:-6px;color:#6c757d;font-size:12px;",
-              "Defaults: OpenAI: https://api.openai.com; DeepSeek: https://api.deepseek.com; Gemini endpoints may include /v1beta.")
+              "Defaults: OpenAI: https://api.openai.com/v1; DeepSeek: https://api.deepseek.com/v1; Gemini endpoints may include /v1beta.")
                     ),
                     column(
                       12,
@@ -2180,11 +2186,19 @@ server <- function(input, output, session) {
                    if (tolower(lang()) == "zh") "📁 选择输出目录" else "📁 Select Output Directory"),
                 div(style = "display: flex; gap: 8px; align-items: center;",
                   div(style = "flex: 1; display: flex; align-items: center;",
-                    textInput("geno_convert_output_dir_blup",
-                             label = NULL,
-                             value = getwd(),
-                             placeholder = if (tolower(lang()) == "zh") "请输入或选择输出目录路径" else "Enter or select output directory path",
-                             width = "100%")
+                    if (requireNamespace("shinyDirectoryInput", quietly = TRUE)) {
+                      shinyDirectoryInput::directoryInput(
+                        inputId = "geno_convert_output_dir_blup",
+                        label = NULL,
+                        value = getwd()
+                      )
+                    } else {
+                      textInput("geno_convert_output_dir_blup",
+                               label = NULL,
+                               value = getwd(),
+                               placeholder = if (tolower(lang()) == "zh") "请输入或选择输出目录路径" else "Enter or select output directory path",
+                               width = "100%")
+                    }
                   )
                 ),
                 p(style = "font-size: 0.85rem; color: #666; margin-top: 8px; margin-bottom: 0;",
@@ -2234,11 +2248,19 @@ server <- function(input, output, session) {
                    if (tolower(lang()) == "zh") "📁 选择输出目录" else "📁 Select Output Directory"),
                 div(style = "display: flex; gap: 8px; align-items: center;",
                   div(style = "flex: 1; display: flex; align-items: center;",
-                    textInput("geno_convert_output_dir",
-                             label = NULL,
-                             value = getwd(),
-                             placeholder = if (tolower(lang()) == "zh") "请输入或选择输出目录路径" else "Enter or select output directory path",
-                             width = "100%")
+                    if (requireNamespace("shinyDirectoryInput", quietly = TRUE)) {
+                      shinyDirectoryInput::directoryInput(
+                        inputId = "geno_convert_output_dir",
+                        label = NULL,
+                        value = getwd()
+                      )
+                    } else {
+                      textInput("geno_convert_output_dir",
+                               label = NULL,
+                               value = getwd(),
+                               placeholder = if (tolower(lang()) == "zh") "请输入或选择输出目录路径" else "Enter or select output directory path",
+                               width = "100%")
+                    }
                   )
                 ),
                 p(style = "font-size: 0.85rem; color: #666; margin-top: 8px; margin-bottom: 0;",
@@ -2272,10 +2294,19 @@ server <- function(input, output, session) {
     
     # 根据转换方向选择对应的输出目录输入字段
     if (direction == "plink_to_blup") {
-      output_dir <- trimws(input$geno_convert_output_dir_blup %||% getwd())
+      if (requireNamespace("shinyDirectoryInput", quietly = TRUE)) {
+        output_dir <- shinyDirectoryInput::readDirectoryInput(session, "geno_convert_output_dir_blup") %||% getwd()
+      } else {
+        output_dir <- input$geno_convert_output_dir_blup %||% getwd()
+      }
     } else {
-      output_dir <- trimws(input$geno_convert_output_dir %||% getwd())
+      if (requireNamespace("shinyDirectoryInput", quietly = TRUE)) {
+        output_dir <- shinyDirectoryInput::readDirectoryInput(session, "geno_convert_output_dir") %||% getwd()
+      } else {
+        output_dir <- input$geno_convert_output_dir %||% getwd()
+      }
     }
+    output_dir <- trimws(output_dir)
     
     if (output_dir == "" || !nzchar(output_dir)) {
       output_dir <- getwd()
@@ -2571,11 +2602,32 @@ server <- function(input, output, session) {
     })
 
     rules <- load_app_rules("easyblupf90")
+    # MCP tools: allow the assistant to directly control Shiny inputs (whitelisted)
+    easyblup_tools <- reactive({
+      if (exists("easyblup_openai_tools", mode = "function")) {
+        get("easyblup_openai_tools", mode = "function")()
+      } else {
+        NULL
+      }
+    })
+    easyblup_tool_call <- function(tool_name, args) {
+      if (!exists("easyblup_mcp_call_tool", mode = "function")) {
+        return(list(ok = FALSE, error = "MCP tools not loaded"))
+      }
+      get("easyblup_mcp_call_tool", mode = "function")(
+        name = tool_name,
+        arguments = args,
+        session = session,
+        input = input,
+        values = values
+      )
+    }
+
     get("aiAssistantServer")("ai_blup", blup_ai_data, blup_apply, app_context = reactive(list(
       app_name = "easyblupf90",
       locale = tryCatch({ if (exists("language_code", mode = "function")) get("language_code")(lang()) else "zh" }, error = function(e) "zh"),
       rules = rules
-    )), ai_settings = ai_settings)
+    )), ai_settings = ai_settings, tool_specs = easyblup_tools, tool_call = easyblup_tool_call)
   }
 }
 

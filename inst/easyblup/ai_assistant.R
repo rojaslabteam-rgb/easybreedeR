@@ -29,13 +29,31 @@ aiAssistantUI <- function(id) {
 }
 
 # Minimal AI server: rule-based stub that produces param_text suggestion using current data
-aiAssistantServer <- function(id, data_reactive, apply_callback, app_context, ai_settings = shiny::reactive(NULL)) {
+aiAssistantServer <- function(
+  id,
+  data_reactive,
+  apply_callback,
+  app_context,
+  ai_settings = shiny::reactive(NULL),
+  tool_specs = shiny::reactive(NULL),
+  tool_call = NULL
+) {
   shiny::moduleServer(id, function(input, output, session) {
     # ns <- session$ns  # Keep for potential future use
     rv <- shiny::reactiveValues(resp = "", pending = FALSE, chat = list(), cooldown_until = as.numeric(Sys.time()) - 1)
 
     `%||%` <- function(x, y) if (is.null(x) || identical(x, "")) y else x
     rtrim_slash <- function(x) sub("/+$$", "", x %||% "")
+    normalize_base_url <- function(x) {
+      # Many OpenAI-compatible servers require the base URL to include /v1.
+      # Users often paste "https://api.openai.com" which yields 404 for /models, etc.
+      b <- rtrim_slash(x %||% "")
+      if (!nzchar(b)) return("")
+      # If user already provided a versioned path (/v1, /v1beta, /v2...), keep it.
+      if (grepl("/v\\d+(\\.|/|$)", b) || grepl("/v1beta(\\.|/|$)", b, ignore.case = TRUE)) return(b)
+      # Otherwise, append /v1.
+      paste0(b, "/v1")
+    }
     num_or <- function(x, default, cast = as.numeric) {
       val <- suppressWarnings(cast(x))
       if (!length(val) || is.na(val) || !is.finite(val)) default else val
@@ -43,9 +61,9 @@ aiAssistantServer <- function(id, data_reactive, apply_callback, app_context, ai
 
     # Gemini support removed; this module now targets OpenAI-compatible APIs only.
 
-    call_openai_compatible <- function(s, msgs) {
+    call_openai_compatible <- function(s, msgs, tools = NULL) {
       # Allow empty base (use default OpenAI host) — do not treat missing base as an error.
-      base <- rtrim_slash(s$base_url %||% "")
+      base <- normalize_base_url(s$base_url %||% "")
 
       # Check for Python openai package via reticulate (not R package)
       if (!requireNamespace("reticulate", quietly = TRUE)) {
@@ -96,9 +114,32 @@ aiAssistantServer <- function(id, data_reactive, apply_callback, app_context, ai
         py_msgs <- tryCatch(reticulate::r_to_py(msgs), error = function(e) NULL)
         if (is.null(py_msgs)) return(list(ok = FALSE, error = "无法将消息转换为 Python 对象"))
 
-        # Call the Python client's chat completions create
+        # Convert tools (if provided)
+        py_tools <- NULL
+        if (!is.null(tools)) {
+          py_tools <- tryCatch(reticulate::r_to_py(tools), error = function(e) NULL)
+          if (is.null(py_tools)) return(list(ok = FALSE, error = "无法将 tools 转换为 Python 对象"))
+        }
+
+        # Call the Python client's chat completions create (with optional tools)
         res_py <- tryCatch({
-          client$chat$completions$create(model = model, messages = py_msgs, temperature = as.numeric(temp_val), max_tokens = as.integer(max_tokens))
+          if (!is.null(py_tools)) {
+            client$chat$completions$create(
+              model = model,
+              messages = py_msgs,
+              tools = py_tools,
+              tool_choice = "auto",
+              temperature = as.numeric(temp_val),
+              max_tokens = as.integer(max_tokens)
+            )
+          } else {
+            client$chat$completions$create(
+              model = model,
+              messages = py_msgs,
+              temperature = as.numeric(temp_val),
+              max_tokens = as.integer(max_tokens)
+            )
+          }
         }, error = function(e) list(.py_err = TRUE, message = conditionMessage(e)))
 
         if (is.list(res_py) && isTRUE(res_py$.py_err)) return(list(ok = FALSE, error = paste0("Python 请求失败：", res_py$message)))
@@ -107,17 +148,56 @@ aiAssistantServer <- function(id, data_reactive, apply_callback, app_context, ai
         res_r <- tryCatch(reticulate::py_to_r(res_py), error = function(e) NULL)
         if (is.null(res_r)) return(list(ok = FALSE, error = "无法解析 Python 响应为 R 对象"))
 
+        # Extract message content and tool calls (if any)
+        msg <- NULL
+        if (!is.null(res_r$choices) && length(res_r$choices) > 0) {
+          msg <- res_r$choices[[1]]$message %||% NULL
+        }
         txt <- NULL
+        tool_calls <- NULL
         try({
-          if (!is.null(res_r$choices) && length(res_r$choices) > 0) {
-            if (!is.null(res_r$choices[[1]]$message$content)) txt <- res_r$choices[[1]]$message$content
-            if (is.null(txt) && !is.null(res_r$choices[[1]]$text)) txt <- res_r$choices[[1]]$text
+          if (!is.null(msg)) {
+            if (!is.null(msg$content)) txt <- msg$content
+            if (!is.null(msg$tool_calls)) tool_calls <- msg$tool_calls
+          }
+          if (is.null(txt) && !is.null(res_r$choices) && length(res_r$choices) > 0 && !is.null(res_r$choices[[1]]$text)) {
+            txt <- res_r$choices[[1]]$text
           }
         }, silent = TRUE)
 
-        if (is.null(txt) || !nzchar(as.character(txt))) return(list(ok = FALSE, error = "空响应（Python openai 返回空结果）"))
-        list(ok = TRUE, text = as.character(txt))
+        # It's valid to return empty text when tool_calls exist
+        if ((is.null(txt) || !nzchar(as.character(txt))) && (is.null(tool_calls) || length(tool_calls) == 0)) {
+          return(list(ok = FALSE, error = "空响应（Python openai 返回空结果）"))
+        }
+        list(ok = TRUE, text = if (is.null(txt)) "" else as.character(txt), tool_calls = tool_calls)
       }
+
+    .get_tools <- function() {
+      ts_fun <- tool_specs
+      if (!is.function(ts_fun)) return(NULL)
+      tryCatch(ts_fun(), error = function(e) NULL) # nolint
+    }
+
+    .parse_tool_args <- function(x) {
+      # OpenAI returns function.arguments as a JSON string
+      if (is.null(x)) return(list())
+      if (is.list(x)) return(x)
+      s <- as.character(x)
+      if (!nzchar(s)) return(list())
+      if (requireNamespace("jsonlite", quietly = TRUE)) {
+        tryCatch(jsonlite::fromJSON(s, simplifyVector = TRUE), error = function(e) list())
+      } else {
+        list()
+      }
+    }
+
+    .tool_result_to_text <- function(obj) {
+      if (requireNamespace("jsonlite", quietly = TRUE)) {
+        jsonlite::toJSON(obj, auto_unbox = TRUE, null = "null")
+      } else {
+        paste(capture.output(str(obj, max.level = 3)), collapse = "\n")
+      }
+    }
 
     call_llm <- function(user_text, context_text) {
       s <- tryCatch(ai_settings(), error = function(e) NULL)
@@ -137,15 +217,58 @@ aiAssistantServer <- function(id, data_reactive, apply_callback, app_context, ai
       }
       msgs <- append(msgs, list(list(role = "user", content = user_text)))
 
-      # Only OpenAI-compatible provider is supported
-      call_openai_compatible(s, msgs)
+      tools <- .get_tools()
+      has_tools <- !is.null(tools) && length(tools) > 0 && is.function(tool_call)
+
+      # If no tools available, do a normal completion
+      if (!isTRUE(has_tools)) {
+        return(call_openai_compatible(s, msgs, tools = NULL))
+      }
+
+      executed_any <- FALSE
+      executed_count <- 0L
+
+      # Tool loop (max 5 rounds)
+      for (i in seq_len(5)) {
+        res <- call_openai_compatible(s, msgs, tools = tools)
+        if (!isTRUE(res$ok)) return(res)
+
+        tc <- res$tool_calls
+        if (is.null(tc) || length(tc) == 0) {
+          final_txt <- res$text %||% ""
+          if (executed_any && !nzchar(final_txt)) {
+            final_txt <- paste0("✅ 已执行工具调用并更新界面（", executed_count, " 次）。")
+          }
+          return(list(ok = TRUE, text = final_txt))
+        }
+
+        # Execute tool calls in order
+        for (j in seq_along(tc)) {
+          call_j <- tc[[j]]
+          fn <- call_j$`function` %||% list()
+          tool_name <- fn$name %||% ""
+          tool_id <- call_j$id %||% paste0("tool_", i, "_", j)
+          args <- .parse_tool_args(fn$arguments)
+
+          out <- tryCatch(tool_call(tool_name, args), error = function(e) list(ok = FALSE, error = conditionMessage(e)))
+          out_txt <- .tool_result_to_text(out)
+          executed_any <- TRUE
+          executed_count <- executed_count + 1L
+
+          # Append tool result as a "tool" message for the model
+          msgs <- append(msgs, list(list(role = "tool", tool_call_id = tool_id, content = out_txt)))
+        }
+        # Continue loop; model will see tool outputs and (hopefully) return a final message
+      }
+
+      list(ok = FALSE, error = "工具调用循环超时（超过最大轮数）")
     }
 
     test_connection <- function() {
       s <- tryCatch(ai_settings(), error = function(e) NULL)
       if (is.null(s)) return(list(ok = FALSE, msg = "No settings"))
 
-  base <- rtrim_slash(s$base_url %||% "")
+  base <- normalize_base_url(s$base_url %||% "")
   key <- s$api_key %||% ""
   # Allow empty base (use default OpenAI host); require API key
   if (!nzchar(key)) return(list(ok = FALSE, msg = "API Key 为空"))
@@ -227,6 +350,15 @@ aiAssistantServer <- function(id, data_reactive, apply_callback, app_context, ai
         # If we couldn't exercise a models/list call, treat successful client creation as success
         list(ok = TRUE, msg = "Python openai 客户端创建成功（无法运行 models 测试）")
       }, error = function(e) list(ok = FALSE, msg = conditionMessage(e)))
+      # Improve guidance for common 404 (missing /v1)
+      if (!isTRUE(out$ok) && nzchar(base) && grepl("404|Not Found|<html>|nginx", out$msg, ignore.case = TRUE)) {
+        out$msg <- paste0(
+          out$msg,
+          "\n\n可能原因：Base URL 缺少版本路径。请尝试把 Base URL 设置为类似：",
+          "\n- OpenAI: https://api.openai.com/v1",
+          "\n- 其他兼容服务：https://<host>/v1"
+        )
+      }
       out
     }
 
@@ -290,8 +422,10 @@ aiAssistantServer <- function(id, data_reactive, apply_callback, app_context, ai
           # Save assistant reply into history
           rv$chat <- append(rv$chat, list(list(role = "assistant", content = res$text)))
           rv$resp <- res$text
-          # Store the assistant reply as the suggested parameter text so the Apply button inserts it
-          rv$last <- list(param_text = as.character(res$text))
+          # Store a reasonable param_text for Apply:
+          # prefer current_param from data snapshot (may be updated by tools), otherwise use assistant text.
+          dat2 <- tryCatch(data_reactive(), error = function(e) list())
+          rv$last <- list(param_text = as.character(dat2$current_param %||% res$text))
           return()
         }
         # If there was an error from the API attempt, surface it to the user

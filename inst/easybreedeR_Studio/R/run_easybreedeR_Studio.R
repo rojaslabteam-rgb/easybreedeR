@@ -34,19 +34,34 @@ run_easybreedeR_Studio <- function() {
     }
     # ensure children alive or spawn them once
     shiny::observeEvent(TRUE, {
-      if (!is_alive(child_apps$datapreviewer)) {
+      # Use detected IP for health check (same logic as get_child_url)
+      check_ip <- tryCatch({
+        if (!is.null(session$clientData) && !is.null(session$clientData$url_hostname)) {
+          hostname <- session$clientData$url_hostname
+          if (hostname %in% c("127.0.0.1", "localhost", "::1")) {
+            detected_ip <- tryCatch(.get_local_ip(), error = function(e) "127.0.0.1")
+            if (detected_ip != "127.0.0.1") detected_ip else "127.0.0.1"
+          } else {
+            hostname
+          }
+        } else {
+          tryCatch(.get_local_ip(), error = function(e) "127.0.0.1")
+        }
+      }, error = function(e) tryCatch(.get_local_ip(), error = function(e) "127.0.0.1"))
+      
+      if (!is_alive(paste0("http://", check_ip, ":8001"))) {
         pid <- start_child(child_paths$datapreviewer, 8001)
         if (!is.na(pid)) .suite_child_pids$pids <- c(.suite_child_pids$pids, pid)
       }
-      if (!is_alive(child_apps$pediviewer)) {
+      if (!is_alive(paste0("http://", check_ip, ":8002"))) {
         pid <- start_child(child_paths$pediviewer, 8002)
         if (!is.na(pid)) .suite_child_pids$pids <- c(.suite_child_pids$pids, pid)
       }
-      if (!is_alive(child_apps$easyblupf90)) {
+      if (!is_alive(paste0("http://", check_ip, ":8003"))) {
         pid <- start_child(child_paths$easyblupf90, 8003)
         if (!is.na(pid)) .suite_child_pids$pids <- c(.suite_child_pids$pids, pid)
       }
-      if (!is_alive(child_apps$core_tools)) {
+      if (!is_alive(paste0("http://", check_ip, ":8004"))) {
         pid <- start_child(child_paths$core_tools, 8004)
         if (!is.na(pid)) .suite_child_pids$pids <- c(.suite_child_pids$pids, pid)
       }
@@ -190,9 +205,40 @@ run_easybreedeR_Studio <- function() {
     # Render iframes with selected language as query param, but wait until service is alive
     lang_code <- shiny::reactive(language_code(suite_language()))
 
-    render_waiting_iframe <- function(url_base, lang_code_reactive, label) {
+    # Helper to get child app URL based on current request hostname
+    get_child_url <- function(port, session) {
+      # Get the hostname from the current request
+      # This ensures iframe URLs work for both local and remote access
+      hostname <- tryCatch({
+        # Try to get from session clientData (available in Shiny)
+        if (!is.null(session$clientData) && !is.null(session$clientData$url_hostname)) {
+          hostname <- session$clientData$url_hostname
+          # If hostname is localhost/127.0.0.1, try to use detected IP for LAN access
+          if (hostname %in% c("127.0.0.1", "localhost", "::1")) {
+            # Use detected IP if available, otherwise keep localhost
+            detected_ip <- tryCatch(.get_local_ip(), error = function(e) "127.0.0.1")
+            if (detected_ip != "127.0.0.1") {
+              return(paste0("http://", detected_ip, ":", port))
+            }
+          }
+          # Use the request hostname (works for both local and remote)
+          return(paste0("http://", hostname, ":", port))
+        }
+        # Fallback: use detected IP or localhost
+        detected_ip <- tryCatch(.get_local_ip(), error = function(e) "127.0.0.1")
+        paste0("http://", detected_ip, ":", port)
+      }, error = function(e) {
+        # Ultimate fallback
+        detected_ip <- tryCatch(.get_local_ip(), error = function(e) "127.0.0.1")
+        paste0("http://", detected_ip, ":", port)
+      })
+    }
+
+    render_waiting_iframe <- function(port, lang_code_reactive, label, session) {
       shiny::renderUI({
-        shiny::req(url_base, lang_code_reactive())
+        shiny::req(lang_code_reactive())
+        # Dynamically generate URL based on current request hostname
+        url_base <- get_child_url(port, session)
         # Use timestamp reactive to force browser refresh when language changes
         lang_val <- lang_code_reactive()
         timestamp <- suite_lang_timestamp()
@@ -209,10 +255,10 @@ run_easybreedeR_Studio <- function() {
       })
     }
 
-    output$frame_datapreviewer <- render_waiting_iframe(child_apps$datapreviewer, lang_code, "datapreviewR")
-    output$frame_pediviewer   <- render_waiting_iframe(child_apps$pediviewer,   lang_code, "PedivieweR")
-    output$frame_easyblup     <- render_waiting_iframe(child_apps$easyblupf90,  lang_code, "easyblup")
-    output$frame_rnotebook    <- render_waiting_iframe(child_apps$core_tools,   lang_code, "RNotebook")
+    output$frame_datapreviewer <- render_waiting_iframe(8001, lang_code, "datapreviewR", session)
+    output$frame_pediviewer   <- render_waiting_iframe(8002, lang_code, "PedivieweR", session)
+    output$frame_easyblup     <- render_waiting_iframe(8003, lang_code, "easyblup", session)
+    output$frame_rnotebook    <- render_waiting_iframe(8004, lang_code, "RNotebook", session)
 
     session$onSessionEnded(function() {
       if (length(.suite_child_pids$pids) > 0) {
@@ -227,9 +273,5 @@ run_easybreedeR_Studio <- function() {
 
   list(ui = ui, server = server)
 }
-
-# Run the app
-app <- run_easybreedeR_Studio()
-shiny::shinyApp(app$ui, app$server)
 
 
