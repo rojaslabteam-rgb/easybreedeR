@@ -22,17 +22,67 @@ run_easybreedeR <- function(host = "0.0.0.0", port = NULL) {
       stop("easybreedeR_Studio application not found. Please reinstall the package or run from package root.")
     }
   }
-  # Get local IP for display
+  # Get local IP using the shared function from Global.R
+  # Note: This will be available when the app loads Global.R
   local_ip <- tryCatch({
     env_host <- Sys.getenv("EASYBREEDER_HOST", "")
     if (nzchar(env_host)) {
       env_host
-    } else if (.Platform$OS.type == "unix" && Sys.info()["sysname"] == "Darwin") {
-      system("ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo '127.0.0.1'", intern = TRUE)[1]
-    } else if (.Platform$OS.type == "unix") {
-      system("hostname -I 2>/dev/null | awk '{print $1}' || echo '127.0.0.1'", intern = TRUE)[1]
     } else {
-      "127.0.0.1"
+      # Use the same cross-platform detection logic
+      sys_name <- Sys.info()["sysname"]
+      ip <- NULL
+      
+      if (sys_name == "Darwin") {
+        for (iface in c("en0", "en1")) {
+          result <- suppressWarnings(
+            system2("ipconfig", c("getifaddr", iface), stdout = TRUE, stderr = FALSE)
+          )
+          if (length(result) > 0 && nzchar(result[1])) {
+            ip <- trimws(result[1])
+            if (grepl("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", ip)) break
+          }
+        }
+      } else if (sys_name == "Linux") {
+        result <- suppressWarnings(
+          system2("hostname", c("-I"), stdout = TRUE, stderr = FALSE)
+        )
+        if (length(result) > 0 && nzchar(result[1])) {
+          ip <- trimws(strsplit(result[1], "\\s+")[[1]][1])
+          if (!grepl("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", ip)) ip <- NULL
+        }
+      } else if (sys_name == "Windows") {
+        # Try PowerShell first
+        ps_cmd <- "Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*'} | Select-Object -First 1 -ExpandProperty IPAddress"
+        result <- suppressWarnings(
+          system2("powershell", c("-Command", ps_cmd), stdout = TRUE, stderr = FALSE)
+        )
+        if (length(result) > 0 && nzchar(result[1])) {
+          ip <- trimws(result[1])
+          if (!grepl("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", ip)) ip <- NULL
+        }
+        # Fallback to ipconfig
+        if (is.null(ip) || !nzchar(ip)) {
+          result <- suppressWarnings(
+            system2("ipconfig", stdout = TRUE, stderr = FALSE)
+          )
+          if (length(result) > 0) {
+            ip_lines <- grep("IPv4", result, value = TRUE, ignore.case = TRUE)
+            for (line in ip_lines) {
+              matches <- regmatches(line, regexpr("([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})", line))
+              if (length(matches) > 0) {
+                candidate <- matches[1]
+                if (!grepl("^127\\.|^169\\.254\\.", candidate)) {
+                  ip <- candidate
+                  break
+                }
+              }
+            }
+          }
+        }
+      }
+      
+      if (is.null(ip) || !nzchar(ip)) "127.0.0.1" else ip
     }
   }, error = function(e) "127.0.0.1")
   local_ip <- trimws(local_ip)

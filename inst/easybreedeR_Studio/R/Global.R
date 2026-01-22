@@ -84,33 +84,76 @@ language_code <- function(name) {
     return(trimws(env_host))
   }
   
-  # Try to detect IP automatically
+  # Try to detect IP automatically using cross-platform approach
   ip <- NULL
-  if (.Platform$OS.type == "unix") {
+  sys_name <- Sys.info()["sysname"]
+  
+  if (sys_name == "Darwin") {
     # macOS
-    if (Sys.info()["sysname"] == "Darwin") {
-      try({
-        ip <- system("ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || echo ''", intern = TRUE)
-        ip <- trimws(ip[1])
-        if (!nzchar(ip) || ip == "") ip <- NULL
-      }, silent = TRUE)
-    } else {
-      # Linux
-      try({
-        ip <- system("hostname -I 2>/dev/null | awk '{print $1}'", intern = TRUE)
-        ip <- trimws(ip[1])
-        if (!nzchar(ip) || ip == "") ip <- NULL
-      }, silent = TRUE)
-    }
-  } else if (.Platform$OS.type == "windows") {
-    # Windows
     try({
-      ip <- system("ipconfig | findstr /i \"IPv4\" | findstr /v \"127.0.0.1\" | findstr /v \"169.254\"", intern = TRUE)
-      if (length(ip) > 0) {
-        ip <- gsub(".*?([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}).*", "\\1", ip[1])
-        if (!grepl("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", ip)) ip <- NULL
-      } else {
-        ip <- NULL
+      # Try en0 first, then en1
+      for (iface in c("en0", "en1")) {
+        result <- suppressWarnings(
+          system2("ipconfig", c("getifaddr", iface), stdout = TRUE, stderr = FALSE)
+        )
+        if (length(result) > 0 && nzchar(result[1])) {
+          ip <- trimws(result[1])
+          if (grepl("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", ip)) {
+            break
+          }
+        }
+      }
+    }, silent = TRUE)
+  } else if (sys_name == "Linux") {
+    # Linux
+    try({
+      result <- suppressWarnings(
+        system2("hostname", c("-I"), stdout = TRUE, stderr = FALSE)
+      )
+      if (length(result) > 0 && nzchar(result[1])) {
+        # Get first IP address
+        ip <- trimws(strsplit(result[1], "\\s+")[[1]][1])
+        if (!grepl("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", ip)) {
+          ip <- NULL
+        }
+      }
+    }, silent = TRUE)
+  } else if (sys_name == "Windows") {
+    # Windows - use PowerShell for more reliable detection
+    try({
+      # Try PowerShell first (more reliable)
+      ps_cmd <- "Get-NetIPAddress -AddressFamily IPv4 | Where-Object {$_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*'} | Select-Object -First 1 -ExpandProperty IPAddress"
+      result <- suppressWarnings(
+        system2("powershell", c("-Command", ps_cmd), stdout = TRUE, stderr = FALSE)
+      )
+      if (length(result) > 0 && nzchar(result[1])) {
+        ip <- trimws(result[1])
+        if (!grepl("^[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}$", ip)) {
+          ip <- NULL
+        }
+      }
+      
+      # Fallback to ipconfig if PowerShell fails
+      if (is.null(ip) || !nzchar(ip)) {
+        result <- suppressWarnings(
+          system2("ipconfig", stdout = TRUE, stderr = FALSE)
+        )
+        if (length(result) > 0) {
+          # Find IPv4 addresses, exclude loopback and link-local
+          ip_lines <- grep("IPv4", result, value = TRUE, ignore.case = TRUE)
+          for (line in ip_lines) {
+            # Extract IP address using regex
+            matches <- regmatches(line, regexpr("([0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3}\\.[0-9]{1,3})", line))
+            if (length(matches) > 0) {
+              candidate <- matches[1]
+              # Exclude loopback and link-local addresses
+              if (!grepl("^127\\.|^169\\.254\\.", candidate)) {
+                ip <- candidate
+                break
+              }
+            }
+          }
+        }
       }
     }, silent = TRUE)
   }
