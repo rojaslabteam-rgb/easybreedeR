@@ -3,6 +3,8 @@
 #' Main entry point for the easybreedeR Shiny application suite. Provides
 #' access to all sub-applications (easyblup, pedivieweR, dataprevieweR, RCW).
 #'
+#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
+#' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
 #' @name run_easybreedeR
 #' @export
 #' @return A Shiny app object (invisibly returned by `shiny::runApp`).
@@ -96,6 +98,8 @@ run_easybreedeR <- function(host = "0.0.0.0", port = NULL) {
 #' Launches the easyblup application for BLUP/REML parameter generation
 #' with AI assistant features.
 #'
+#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
+#' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
 #' @export
 #' @examples
 #' \dontrun{
@@ -120,6 +124,8 @@ run_easyblup <- function(host = "0.0.0.0", port = NULL) {
 #' Launches the pedivieweR application for pedigree visualization
 #' and quality control.
 #'
+#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
+#' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
 #' @export
 #' @examples
 #' \dontrun{
@@ -143,6 +149,8 @@ run_pedivieweR <- function(host = "0.0.0.0", port = NULL) {
 #' @description
 #' Launches the dataprevieweR application for data preview and exploration.
 #'
+#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
+#' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
 #' @export
 #' @examples
 #' \dontrun{
@@ -166,6 +174,8 @@ run_dataprevieweR <- function(host = "0.0.0.0", port = NULL) {
 #' @description
 #' Launches the RCW application for visual R script pipeline management.
 #'
+#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
+#' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
 #' @export
 #' @examples
 #' \dontrun{

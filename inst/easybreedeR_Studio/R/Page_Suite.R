@@ -69,6 +69,218 @@ Home_UI <- function() {
                   actionButton("open_rnotebook", "Launch", class = "btn-primary")
                 )
               )
+            ),
+            div(class = "section-title", style = "margin-top: 48px;",
+              h2(
+                tags$span(class = "material-symbols-outlined", "extension"),
+                "Optional Dependencies"
+              )
+            ),
+            fluidRow(
+              column(6,
+                div(class = "app-card dependency-card",
+                  div(class = "app-card-header",
+                    div(class = "app-card-icon purple",
+                      tags$span(class = "material-symbols-outlined purple", "code")
+                    ),
+                    div(class = "app-card-title-wrapper",
+                      h3("plinkR"),
+                      p("R wrapper for PLINK/PLINK2 with automatic output capture, genotype reading, and BLUPF90 format conversion")
+                    )
+                  ),
+                  tags$a(
+                    href = "https://github.com/Thymine2001/plinkR",
+                    target = "_blank",
+                    class = "btn btn-primary",
+                    style = "width: 100%; padding: 14px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; text-decoration: none; display: block; text-align: center;",
+                    "View on GitHub"
+                  )
+                )
+              ),
+              column(6,
+                div(class = "app-card dependency-card",
+                  div(class = "app-card-header",
+                    div(class = "app-card-icon teal",
+                      tags$span(class = "material-symbols-outlined teal", "settings")
+                    ),
+                    div(class = "app-card-title-wrapper",
+                      h3("linkbreedeR"),
+                      p("R package for running genetic analysis tools (BLUPF90+, PLINK, RENUMF90) directly from R")
+                    )
+                  ),
+                  tags$a(
+                    href = "https://github.com/Thymine2001/linkbreedeR",
+                    target = "_blank",
+                    class = "btn btn-primary",
+                    style = "width: 100%; padding: 14px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; text-decoration: none; display: block; text-align: center;",
+                    "View on GitHub"
+                  )
+                )
+              )
+            ),
+            div(class = "section-title", style = "margin-top: 48px;",
+              h2(
+                tags$span(class = "material-symbols-outlined", "library_books"),
+                "Required Dependencies"
+              )
+            ),
+            fluidRow(
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/rstudio/shiny",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "shiny")
+                  )
+                )
+              ),
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/rstudio/bslib",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "bslib")
+                  )
+                )
+              ),
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/rstudio/DT",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "DT")
+                  )
+                )
+              ),
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/jeroen/jsonlite",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "jsonlite")
+                  )
+                )
+              )
+            ),
+            fluidRow(
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/ropensci/plotly",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "plotly")
+                  )
+                )
+              ),
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/thomasp85/shinyFiles",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "shinyFiles")
+                  )
+                )
+              ),
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/r-lib/fs",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "fs")
+                  )
+                )
+              ),
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/datastorm-open/visNetwork",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "visNetwork")
+                  )
+                )
+              )
+            ),
+            fluidRow(
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/igraph/igraph",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "igraph")
+                  )
+                )
+              ),
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/tidyverse/readxl",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "readxl")
+                  )
+                )
+              ),
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/rstudio/reticulate",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "reticulate")
+                  )
+                )
+              ),
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/irudnyts/openai",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "openai")
+                  )
+                )
+              )
+            ),
+            fluidRow(
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/jeroen/curl",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "curl")
+                  )
+                )
+              ),
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/r-lib/testthat",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "testthat")
+                  )
+                )
+              ),
+              column(3,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://github.com/Rpedigree/pedigreeTools",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "pedigreeTools")
+                  )
+                )
+              )
             )
           ),
           # Right sidebar for README
@@ -266,6 +478,11 @@ suite_ui <- function() {
   .cards-container .row > [class*="col-"]:last-child {
     padding-right: 0;
   }
+  
+  /* Dependency cards row spacing */
+  .cards-container .row + .row {
+    margin-top: 0;
+  }
   .app-card:hover {
     box-shadow: 0 8px 16px rgba(0,0,0,0.15);
     transform: translateY(-2px);
@@ -289,6 +506,8 @@ suite_ui <- function() {
   .app-card-icon.green { background-color: #E8F5E9; }
   .app-card-icon.red { background-color: #FFEBEE; }
   .app-card-icon.yellow { background-color: #FFFDE7; }
+  .app-card-icon.purple { background-color: #F3E5F5; }
+  .app-card-icon.teal { background-color: #E0F2F1; }
   .material-symbols-outlined {
     font-family: "Material Symbols Outlined";
     font-weight: normal;
@@ -308,6 +527,8 @@ suite_ui <- function() {
   .material-symbols-outlined.green { color: #388E3C; }
   .material-symbols-outlined.red { color: #D32F2F; }
   .material-symbols-outlined.yellow { color: #F57F17; }
+  .material-symbols-outlined.purple { color: #7B1FA2; }
+  .material-symbols-outlined.teal { color: #00796B; }
   .app-card-title-wrapper {
     flex: 1;
     display: flex;
@@ -341,6 +562,56 @@ suite_ui <- function() {
     font-size: 16px;
     font-weight: 600;
     border-radius: 6px;
+  }
+  
+  /* Dependency cards styling */
+  .dependency-card {
+    margin-top: 0;
+  }
+  
+  /* Required Dependencies styling */
+  .dependency-item {
+    padding: 12px 0;
+    margin-bottom: 8px;
+  }
+  
+  .dependency-link {
+    display: flex;
+    align-items: center;
+    padding: 10px 16px;
+    background: #f8f9fa;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    text-decoration: none;
+    color: #333;
+    transition: all 0.2s ease;
+    font-size: 15px;
+    font-weight: 500;
+  }
+  
+  .dependency-link:hover {
+    background: #CEB888;
+    color: #000;
+    border-color: #CEB888;
+    text-decoration: none;
+    transform: translateY(-1px);
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  }
+  
+  .dependency-name {
+    color: inherit;
+  }
+  
+  .dependency-item-no-link .dependency-name {
+    display: inline-block;
+    padding: 10px 16px;
+    background: #f8f9fa;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    color: #999;
+    font-size: 15px;
+    font-weight: 500;
+    width: 100%;
   }
 
   /* Home language button placement */

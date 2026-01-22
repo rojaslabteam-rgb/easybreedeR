@@ -4,7 +4,12 @@
 \alias{run_rcw}
 \title{Launch RCW (R Canvas Workflow) application}
 \usage{
-run_rcw()
+run_rcw(host = "0.0.0.0", port = NULL)
+}
+\arguments{
+\item{host}{The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.}
+
+\item{port}{The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.}
 }
 \description{
 Launches the RCW application for visual R script pipeline management.

@@ -162,54 +162,87 @@ run_easybreedeR_Studio <- function() {
       shiny::tags$span(suite_safe_get_label("rnotebook_app_name", code))
     })
     
-    # Render README content
+    # Render README content from GitHub
     output$readmeContent <- shiny::renderUI({
-      # Try to find README.md file
-      readme_path <- try({
-        app_dir <- try(get("APP_DIR", inherits = TRUE), silent = TRUE)
-        if (inherits(app_dir, "try-error")) app_dir <- getwd()
-        # From Suite dir, go up two levels to package root, then README.md
-        normalizePath(file.path(dirname(dirname(app_dir)), "README.md"), winslash = "/", mustWork = FALSE)
+      # Fetch README from GitHub raw content
+      readme_url <- "https://raw.githubusercontent.com/rojaslabteam-rgb/easybreedeR/main/README.md"
+      
+      # Try to fetch from GitHub
+      readme_text <- try({
+        if (requireNamespace("curl", quietly = TRUE)) {
+          con <- curl::curl(readme_url)
+          on.exit(close(con), add = TRUE)
+          readLines(con, warn = FALSE, encoding = "UTF-8")
+        } else if (requireNamespace("httr", quietly = TRUE)) {
+          response <- httr::GET(readme_url)
+          if (httr::status_code(response) == 200) {
+            content <- httr::content(response, as = "text", encoding = "UTF-8")
+            strsplit(content, "\n", fixed = TRUE)[[1]]
+          } else {
+            stop("Failed to fetch README")
+          }
+        } else {
+          # Fallback: try base R download
+          temp_file <- tempfile(fileext = ".md")
+          download.file(readme_url, temp_file, quiet = TRUE, mode = "wb")
+          on.exit(unlink(temp_file), add = TRUE)
+          readLines(temp_file, warn = FALSE, encoding = "UTF-8")
+        }
       }, silent = TRUE)
       
-      if (!inherits(readme_path, "try-error") && file.exists(readme_path)) {
-        readme_text <- try(readLines(readme_path, warn = FALSE, encoding = "UTF-8"), silent = TRUE)
-        if (!inherits(readme_text, "try-error") && length(readme_text) > 0) {
-          # Convert markdown to HTML
-          # Simple markdown conversion (basic support)
-          html_content <- paste(readme_text, collapse = "\n")
-          
-          # Try to use markdown package if available
-          if (requireNamespace("markdown", quietly = TRUE)) {
-            tryCatch({
-              html_content <- markdown::markdownToHTML(
-                text = html_content,
-                fragment.only = TRUE
-              )
-            }, error = function(e) {
-              # Fallback to basic conversion
-              html_content <- gsub("^# (.+)$", "<h1>\\1</h1>", html_content, perl = TRUE)
-              html_content <- gsub("^## (.+)$", "<h2>\\1</h2>", html_content, perl = TRUE)
-              html_content <- gsub("^### (.+)$", "<h3>\\1</h3>", html_content, perl = TRUE)
-              html_content <- gsub("`([^`]+)`", "<code>\\1</code>", html_content)
-              html_content <- gsub("\n", "<br>", html_content)
-            })
-          } else {
-            # Basic markdown conversion
+      if (!inherits(readme_text, "try-error") && length(readme_text) > 0) {
+        # Convert markdown to HTML
+        html_content <- paste(readme_text, collapse = "\n")
+        
+        # Try to use markdown package if available
+        if (requireNamespace("markdown", quietly = TRUE)) {
+          tryCatch({
+            html_content <- markdown::markdownToHTML(
+              text = html_content,
+              fragment.only = TRUE
+            )
+          }, error = function(e) {
+            # Fallback to basic conversion
             html_content <- gsub("^# (.+)$", "<h1>\\1</h1>", html_content, perl = TRUE)
             html_content <- gsub("^## (.+)$", "<h2>\\1</h2>", html_content, perl = TRUE)
             html_content <- gsub("^### (.+)$", "<h3>\\1</h3>", html_content, perl = TRUE)
             html_content <- gsub("`([^`]+)`", "<code>\\1</code>", html_content)
-            html_content <- gsub("\\*\\*([^*]+)\\*\\*", "<strong>\\1</strong>", html_content)
-            html_content <- gsub("\\[([^\\]]+)\\]\\(([^)]+)\\)", "<a href='\\2'>\\1</a>", html_content)
             html_content <- gsub("\n", "<br>", html_content)
-          }
-          
-          return(shiny::HTML(html_content))
+          })
+        } else {
+          # Basic markdown conversion
+          html_content <- gsub("^# (.+)$", "<h1>\\1</h1>", html_content, perl = TRUE)
+          html_content <- gsub("^## (.+)$", "<h2>\\1</h2>", html_content, perl = TRUE)
+          html_content <- gsub("^### (.+)$", "<h3>\\1</h3>", html_content, perl = TRUE)
+          html_content <- gsub("`([^`]+)`", "<code>\\1</code>", html_content)
+          html_content <- gsub("\\*\\*([^*]+)\\*\\*", "<strong>\\1</strong>", html_content)
+          # Fix relative links to point to GitHub
+          html_content <- gsub("\\[([^\\]]+)\\]\\(([^)]+)\\)", function(m) {
+            link_text <- gsub("\\[([^\\]]+)\\]\\(([^)]+)\\)", "\\1", m, perl = TRUE)
+            link_url <- gsub("\\[([^\\]]+)\\]\\(([^)]+)\\)", "\\2", m, perl = TRUE)
+            if (!grepl("^https?://", link_url)) {
+              link_url <- paste0("https://github.com/rojaslabteam-rgb/easybreedeR/blob/main/", link_url)
+            }
+            paste0("<a href='", link_url, "' target='_blank'>", link_text, "</a>")
+          }, html_content, perl = TRUE)
+          html_content <- gsub("\n", "<br>", html_content)
         }
+        
+        return(shiny::HTML(html_content))
       }
-      # Fallback message
-      shiny::tags$p("README.md file not found.")
+      
+      # Fallback: show message with link to GitHub
+      shiny::tagList(
+        shiny::tags$p("Unable to load README from GitHub."),
+        shiny::tags$p(
+          "Please visit: ",
+          shiny::tags$a(
+            href = "https://github.com/rojaslabteam-rgb/easybreedeR#readme",
+            target = "_blank",
+            "https://github.com/rojaslabteam-rgb/easybreedeR"
+          )
+        )
+      )
     })
 
     # Bottom-right gear language selection handler
