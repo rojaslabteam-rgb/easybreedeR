@@ -161,6 +161,56 @@ run_easybreedeR_Studio <- function() {
       code <- tryCatch(language_code(lang), error = function(e) "en")
       shiny::tags$span(suite_safe_get_label("rnotebook_app_name", code))
     })
+    
+    # Render README content
+    output$readmeContent <- shiny::renderUI({
+      # Try to find README.md file
+      readme_path <- try({
+        app_dir <- try(get("APP_DIR", inherits = TRUE), silent = TRUE)
+        if (inherits(app_dir, "try-error")) app_dir <- getwd()
+        # From Suite dir, go up two levels to package root, then README.md
+        normalizePath(file.path(dirname(dirname(app_dir)), "README.md"), winslash = "/", mustWork = FALSE)
+      }, silent = TRUE)
+      
+      if (!inherits(readme_path, "try-error") && file.exists(readme_path)) {
+        readme_text <- try(readLines(readme_path, warn = FALSE, encoding = "UTF-8"), silent = TRUE)
+        if (!inherits(readme_text, "try-error") && length(readme_text) > 0) {
+          # Convert markdown to HTML
+          # Simple markdown conversion (basic support)
+          html_content <- paste(readme_text, collapse = "\n")
+          
+          # Try to use markdown package if available
+          if (requireNamespace("markdown", quietly = TRUE)) {
+            tryCatch({
+              html_content <- markdown::markdownToHTML(
+                text = html_content,
+                fragment.only = TRUE
+              )
+            }, error = function(e) {
+              # Fallback to basic conversion
+              html_content <- gsub("^# (.+)$", "<h1>\\1</h1>", html_content, perl = TRUE)
+              html_content <- gsub("^## (.+)$", "<h2>\\1</h2>", html_content, perl = TRUE)
+              html_content <- gsub("^### (.+)$", "<h3>\\1</h3>", html_content, perl = TRUE)
+              html_content <- gsub("`([^`]+)`", "<code>\\1</code>", html_content)
+              html_content <- gsub("\n", "<br>", html_content)
+            })
+          } else {
+            # Basic markdown conversion
+            html_content <- gsub("^# (.+)$", "<h1>\\1</h1>", html_content, perl = TRUE)
+            html_content <- gsub("^## (.+)$", "<h2>\\1</h2>", html_content, perl = TRUE)
+            html_content <- gsub("^### (.+)$", "<h3>\\1</h3>", html_content, perl = TRUE)
+            html_content <- gsub("`([^`]+)`", "<code>\\1</code>", html_content)
+            html_content <- gsub("\\*\\*([^*]+)\\*\\*", "<strong>\\1</strong>", html_content)
+            html_content <- gsub("\\[([^\\]]+)\\]\\(([^)]+)\\)", "<a href='\\2'>\\1</a>", html_content)
+            html_content <- gsub("\n", "<br>", html_content)
+          }
+          
+          return(shiny::HTML(html_content))
+        }
+      }
+      # Fallback message
+      shiny::tags$p("README.md file not found.")
+    })
 
     # Bottom-right gear language selection handler
     shiny::observeEvent(input$lang_select_bottom, ignoreInit = TRUE, {
