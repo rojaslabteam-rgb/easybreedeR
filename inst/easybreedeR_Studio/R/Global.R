@@ -172,6 +172,7 @@ language_code <- function(name) {
 child_apps <- list(
   datapreviewer = paste0("http://", .local_ip, ":8001"),
   pediviewer   = paste0("http://", .local_ip, ":8002"),
+  genoviewer   = paste0("http://", .local_ip, ":8005"),
   easyblupf90  = paste0("http://", .local_ip, ":8003"),
   core_tools   = paste0("http://", .local_ip, ":8004")
 )
@@ -193,6 +194,7 @@ suite_log_path <- normalizePath(file.path(suite_dir, "suite_diagnostics.log"), w
 child_paths <- list(
   datapreviewer = normalizePath(file.path(apps_base_dir, "dataprevieweR"), winslash = "/", mustWork = FALSE),
   pediviewer   = normalizePath(file.path(apps_base_dir, "pedivieweR"), winslash = "/", mustWork = FALSE),
+  genoviewer   = normalizePath(file.path(apps_base_dir, "genovieweR"), winslash = "/", mustWork = FALSE),
   easyblupf90  = normalizePath(file.path(apps_base_dir, "easyblup"), winslash = "/", mustWork = FALSE),
   core_tools   = normalizePath(file.path(apps_base_dir, "RCW"), winslash = "/", mustWork = FALSE)
 )

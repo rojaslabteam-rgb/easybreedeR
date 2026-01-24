@@ -44,6 +44,20 @@ Home_UI <- function() {
               column(3,
                 div(class = "app-card",
                   div(class = "app-card-header",
+                    div(class = "app-card-icon orange",
+                      tags$span(class = "material-symbols-outlined orange", "scatter_plot")
+                    ),
+                    div(class = "app-card-title-wrapper",
+                      h3("genovieweR"),
+                      p("Genotype visualization and analysis")
+                    )
+                  ),
+                  actionButton("open_genoviewer", "Launch", class = "btn-primary")
+                )
+              ),
+              column(3,
+                div(class = "app-card",
+                  div(class = "app-card-header",
                     div(class = "app-card-icon red",
                       tags$span(class = "material-symbols-outlined red", "show_chart")
                     ),
@@ -54,7 +68,9 @@ Home_UI <- function() {
                   ),
                   actionButton("open_easyblup", "Launch", class = "btn-primary")
                 )
-              ),
+              )
+            ),
+            fluidRow(
               column(3,
                 div(class = "app-card",
                   div(class = "app-card-header",
@@ -281,6 +297,34 @@ Home_UI <- function() {
                   )
                 )
               )
+            ),
+            div(class = "section-title", style = "margin-top: 48px;",
+              h2(
+                tags$span(class = "material-symbols-outlined", "computer"),
+                "Related Software"
+              )
+            ),
+            fluidRow(
+              column(6,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "https://www.cog-genomics.org/plink/",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "PLINK")
+                  )
+                )
+              ),
+              column(6,
+                div(class = "dependency-item",
+                  tags$a(
+                    href = "http://nce.ads.uga.edu/wiki/doku.php?id=readme.blupf90",
+                    target = "_blank",
+                    class = "dependency-link",
+                    tags$span(class = "dependency-name", "BLUPF90")
+                  )
+                )
+              )
             )
           ),
           # Right sidebar for README
@@ -460,28 +504,43 @@ suite_ui <- function() {
     height: 100%;
   }
   
-  /* Remove padding from columns to fill full width */
+  /* Grid alignment for 2x4 layout */
   .cards-container .row {
     margin-left: 0;
     margin-right: 0;
   }
   
-  .cards-container .row > [class*="col-"] {
+  /* Ensure columns align perfectly in grid - consistent padding for all columns */
+  .cards-container .row > [class*="col-3"] {
     padding-left: 12px;
     padding-right: 12px;
   }
   
-  .cards-container .row > [class*="col-"]:first-child {
+  /* First column in each row: no left padding */
+  .cards-container .row > [class*="col-3"]:first-child {
     padding-left: 0;
   }
   
-  .cards-container .row > [class*="col-"]:last-child {
+  /* Last column in each row: no right padding */
+  .cards-container .row > [class*="col-3"]:last-child {
     padding-right: 0;
   }
   
-  /* Dependency cards row spacing */
+  /* Ensure cards fill column height and align */
+  .cards-container .row > [class*="col-3"] {
+    display: flex;
+    flex-direction: column;
+  }
+  
+  .cards-container .row > [class*="col-3"] > .app-card {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  
+  /* Row spacing */
   .cards-container .row + .row {
-    margin-top: 0;
+    margin-top: 24px;
   }
   .app-card:hover {
     box-shadow: 0 8px 16px rgba(0,0,0,0.15);
@@ -506,6 +565,7 @@ suite_ui <- function() {
   .app-card-icon.green { background-color: #E8F5E9; }
   .app-card-icon.red { background-color: #FFEBEE; }
   .app-card-icon.yellow { background-color: #FFFDE7; }
+  .app-card-icon.orange { background-color: #FFF3E0; }
   .app-card-icon.purple { background-color: #F3E5F5; }
   .app-card-icon.teal { background-color: #E0F2F1; }
   .material-symbols-outlined {
@@ -527,6 +587,7 @@ suite_ui <- function() {
   .material-symbols-outlined.green { color: #388E3C; }
   .material-symbols-outlined.red { color: #D32F2F; }
   .material-symbols-outlined.yellow { color: #F57F17; }
+  .material-symbols-outlined.orange { color: #F57C00; }
   .material-symbols-outlined.purple { color: #7B1FA2; }
   .material-symbols-outlined.teal { color: #00796B; }
   .app-card-title-wrapper {
@@ -980,6 +1041,7 @@ suite_ui <- function() {
     # react to language changes while the tab 'value' stays constant.
     tabPanel(uiOutput("tab_datapreviewer"), uiOutput("frame_datapreviewer"), value = "datapreviewR"),
     tabPanel(uiOutput("tab_pediviewer"), uiOutput("frame_pediviewer"), value = "pediviewer"),
+    tabPanel(uiOutput("tab_genoviewer"), uiOutput("frame_genoviewer"), value = "genoviewer"),
     tabPanel(uiOutput("tab_easyblup"), uiOutput("frame_easyblup"), value = "easyblup"),
     tabPanel(uiOutput("tab_rnotebook"), uiOutput("frame_rnotebook"), value = "rnotebook"),
     # (Removed bottom-right gear; using top-right gear aligned with title)

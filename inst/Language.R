@@ -99,6 +99,11 @@ TRANSLATIONS <- list(
     zh = "系谱质量控制、近交分析与交互可视化",
     pt = "Controle de Qualidade de Pedigree, Análise de Endogamia e Visualização Interativa"
   ),
+  genoviewer_app_name = list(
+    en = "genovieweR",
+    zh = "genovieweR",
+    pt = "genovieweR"
+  ),
   pediviewer_tab_network = list(
     en = "Network Visualization",
     zh = "关系网络可视化",

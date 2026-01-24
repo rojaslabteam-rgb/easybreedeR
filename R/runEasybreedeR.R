@@ -144,6 +144,31 @@ run_pedivieweR <- function(host = "0.0.0.0", port = NULL) {
   shiny::runApp(app_dir, host = host, port = port, launch.browser = TRUE)
 }
 
+#' Launch genovieweR application
+#'
+#' @description
+#' Launches the genovieweR application for genotype visualization and analysis.
+#'
+#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
+#' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
+#' @export
+#' @examples
+#' \dontrun{
+#'   run_genovieweR()
+#' }
+run_genovieweR <- function(host = "0.0.0.0", port = NULL) {
+  app_dir <- system.file("genovieweR", package = "easybreedeR")
+  if (app_dir == "") {
+    dev_dir <- file.path(getwd(), "inst", "genovieweR")
+    if (dir.exists(dev_dir)) {
+      app_dir <- dev_dir
+    } else {
+      stop("genovieweR application not found. Please reinstall the package or run from package root.")
+    }
+  }
+  shiny::runApp(app_dir, host = host, port = port, launch.browser = TRUE)
+}
+
 #' Launch dataprevieweR application
 #'
 #' @description

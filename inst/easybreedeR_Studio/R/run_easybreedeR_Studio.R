@@ -57,6 +57,10 @@ run_easybreedeR_Studio <- function() {
         pid <- start_child(child_paths$pediviewer, 8002)
         if (!is.na(pid)) .suite_child_pids$pids <- c(.suite_child_pids$pids, pid)
       }
+      if (!is_alive(paste0("http://", check_ip, ":8005"))) {
+        pid <- start_child(child_paths$genoviewer, 8005)
+        if (!is.na(pid)) .suite_child_pids$pids <- c(.suite_child_pids$pids, pid)
+      }
       if (!is_alive(paste0("http://", check_ip, ":8003"))) {
         pid <- start_child(child_paths$easyblupf90, 8003)
         if (!is.na(pid)) .suite_child_pids$pids <- c(.suite_child_pids$pids, pid)
@@ -150,6 +154,11 @@ run_easybreedeR_Studio <- function() {
       lang <- suite_language()
       code <- tryCatch(language_code(lang), error = function(e) "en")
       shiny::tags$span(suite_safe_get_label("pediviewer_app_name", code))
+    })
+    output$tab_genoviewer <- shiny::renderUI({
+      lang <- suite_language()
+      code <- tryCatch(language_code(lang), error = function(e) "en")
+      shiny::tags$span(suite_safe_get_label("genoviewer_app_name", code))
     })
     output$tab_easyblup <- shiny::renderUI({
       lang <- suite_language()
@@ -276,6 +285,9 @@ run_easybreedeR_Studio <- function() {
     shiny::observeEvent(input$open_pediviewer, ignoreInit = TRUE, {
       shiny::updateNavbarPage(session, "main_nav", selected = "pediviewer")
     })
+    shiny::observeEvent(input$open_genoviewer, ignoreInit = TRUE, {
+      shiny::updateNavbarPage(session, "main_nav", selected = "genoviewer")
+    })
     shiny::observeEvent(input$open_easyblup, ignoreInit = TRUE, {
       shiny::updateNavbarPage(session, "main_nav", selected = "easyblup")
     })
@@ -340,6 +352,7 @@ run_easybreedeR_Studio <- function() {
 
     output$frame_datapreviewer <- render_waiting_iframe(8001, lang_code, "datapreviewR", session)
     output$frame_pediviewer   <- render_waiting_iframe(8002, lang_code, "PedivieweR", session)
+    output$frame_genoviewer   <- render_waiting_iframe(8005, lang_code, "genovieweR", session)
     output$frame_easyblup     <- render_waiting_iframe(8003, lang_code, "easyblup", session)
     output$frame_rnotebook    <- render_waiting_iframe(8004, lang_code, "RNotebook", session)
 
