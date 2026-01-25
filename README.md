@@ -10,7 +10,8 @@ easybreedeR combines multiple Shiny applications into a unified suite, offering:
 
 - **dataprevieweR** A dedicated tool for phenotype visualization and basic phenotype quality control.
 - **pediviweR** An interactive pedigree viewer supporting visualization, validation, and essential pedigree QC procedures.
-- **easyblup** A streamlined generator for blupf90 parameter cards, designed to work seamlessly with cleaned data produced by the previous two tools or by user-provided datasets.
+- **genovieweR** A comprehensive genotype viewer and quality control tool for genotype data visualization, analysis, and format conversion.
+- **easyblup** A streamlined generator for blupf90 parameter cards, designed to work seamlessly with cleaned data produced by the previous tools or by user-provided datasets.
 - **RCW(R canvas workflow)** A mind-map–style workflow organizer that helps structure, connect, and manage R scripts visually.
 
 
@@ -41,7 +42,7 @@ For enhanced functionality, we recommend installing the following optional packa
 # Install linkbreedeR for extended pedigree analysis features in pedivieweR
 remotes::install_github("Thymine2001/linkbreedeR")
 
-# Install plinkR for genotype format conversion features in easyblup
+# Install plinkR for genotype format conversion features in easyblup and genovieweR
 remotes::install_github("Thymine2001/plinkR")
 ```
 
@@ -70,6 +71,7 @@ You can also launch specific applications directly:
 ```r
 run_dataprevieweR()  # Phenotype preview and exploration
 run_pedivieweR()     # Pedigree viewer and pedigree quality control
+run_genovieweR()     # Genotype viewer and quality control
 run_easyblup()       # blupf90 parameter cards generator
 run_rcw()            # Visual pipeline builder (R Canvas Workflow)
 ```
@@ -96,6 +98,17 @@ The main launcher providing unified access to all applications in the suite.
 - Export pedigree data with metadata
 - Extended pedigree analysis features - requires optional `linkbreedeR` package
 
+### 🧬 genovieweR
+**Genotype Viewer and Quality Control**
+
+- Support for PLINK and BLUPF90 genotype formats
+- Interactive genotype data visualization and exploration
+- Per-individual quality metrics: missing rate, relatedness analysis
+- Per-marker quality metrics: SNP missing rate, Minor Allele Frequency (MAF), Hardy-Weinberg Equilibrium (HWE)
+- Genotype format conversion (PLINK ↔ BLUPF90) - requires optional `plinkR` package
+- Comprehensive QC reports and filtered data export
+- Extended analysis features - requires optional `linkbreedeR` package
+
 ### 📊 easyblup
 **blupf90 Parameter card Generator**
 
@@ -121,6 +134,7 @@ inst/
 ├── easybreedeR_Studio/    # Main suite application (launcher)
 ├── easyblup/              # BLUP/REML parameter generator with AI assistant
 ├── pedivieweR/            # Pedigree viewer and quality control
+├── genovieweR/            # Genotype viewer and quality control
 ├── dataprevieweR/         # Data preview and exploration
 ├── RCW/                   # R Canvas Workflow (visual pipeline builder)
 └── Language.R             # Shared multilingual translation framework

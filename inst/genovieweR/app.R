@@ -73,6 +73,19 @@ tryCatch({
   use_data_table <- FALSE
 })
 
+# Check if plotly is available for interactive plots
+use_plotly <- FALSE
+tryCatch({
+  if (requireNamespace("plotly", quietly = TRUE)) {
+    library(plotly)
+    use_plotly <- TRUE
+    cat("✓ plotly available - will use for interactive plots\n")
+  }
+}, error = function(e) {
+  cat("Note: plotly not available, using static ggplot2 plots\n")
+  use_plotly <- FALSE
+})
+
 # Rcpp removed - using base R functions only
 
 # Suppress SASS color contrast warnings from bslib
@@ -376,7 +389,7 @@ ui <- page_fillable(
               ),
               br(),
               conditionalPanel(
-                condition = paste0("", use_plinkR),
+                condition = if (use_plinkR) "true" else "false",
                 div(style = "margin-top: 10px;",
                     actionLink("format_convert_help", "🔄 Format Conversion Help ?",
                              style = "font-size: 0.9rem; color: #CEB888; text-decoration: none;")
@@ -428,7 +441,29 @@ ui <- page_fillable(
                   h4("Per-Individual Plots"),
                   p("Visualization of individual-level metrics: Sample missing rate and Sample relatedness."),
                   br(),
-                  plotOutput("per_individual_plots", height = "800px"),
+                  if (use_plotly) {
+                    tagList(
+                      div(style = "margin-bottom: 30px;",
+                          h5("Sample Missing Rate Distribution"),
+                          plotlyOutput("per_individual_plot_missing", height = "400px")
+                      ),
+                      div(style = "margin-bottom: 30px;",
+                          h5("Sample Relatedness Distribution"),
+                          plotlyOutput("per_individual_plot_relatedness", height = "400px")
+                      )
+                    )
+                  } else {
+                    tagList(
+                      div(style = "margin-bottom: 30px;",
+                          h5("Sample Missing Rate Distribution"),
+                          plotOutput("per_individual_plot_missing", height = "400px")
+                      ),
+                      div(style = "margin-bottom: 30px;",
+                          h5("Sample Relatedness Distribution"),
+                          plotOutput("per_individual_plot_relatedness", height = "400px")
+                      )
+                    )
+                  },
                   br(),
                   downloadButton("download_per_individual_plots", "Download Plots", 
                                class = "btn btn-primary")
@@ -441,9 +476,65 @@ ui <- page_fillable(
                   h4("Per-Marker Plots"),
                   p("Visualization of marker-level metrics: SNP missing rate, Minor allele frequency (MAF), and Hardy-Weinberg equilibrium (HWE)."),
                   br(),
-                  plotOutput("per_marker_plots", height = "800px"),
+                  if (use_plotly) {
+                    tagList(
+                      div(style = "margin-bottom: 30px;",
+                          h5("SNP Missing Rate Distribution"),
+                          plotlyOutput("per_marker_plot_missing", height = "400px")
+                      ),
+                      div(style = "margin-bottom: 30px;",
+                          h5("Minor Allele Frequency (MAF) Distribution"),
+                          plotlyOutput("per_marker_plot_maf", height = "400px")
+                      ),
+                      div(style = "margin-bottom: 30px;",
+                          h5("Hardy-Weinberg Equilibrium (HWE) Distribution"),
+                          plotlyOutput("per_marker_plot_hwe", height = "400px")
+                      )
+                    )
+                  } else {
+                    tagList(
+                      div(style = "margin-bottom: 30px;",
+                          h5("SNP Missing Rate Distribution"),
+                          plotOutput("per_marker_plot_missing", height = "400px")
+                      ),
+                      div(style = "margin-bottom: 30px;",
+                          h5("Minor Allele Frequency (MAF) Distribution"),
+                          plotOutput("per_marker_plot_maf", height = "400px")
+                      ),
+                      div(style = "margin-bottom: 30px;",
+                          h5("Hardy-Weinberg Equilibrium (HWE) Distribution"),
+                          plotOutput("per_marker_plot_hwe", height = "400px")
+                      )
+                    )
+                  },
                   br(),
                   downloadButton("download_per_marker_plots", "Download Plots", 
+                               class = "btn btn-primary")
+              )
+            ),
+            nav_panel(
+              "PCA Plots",
+              value = "pca_plots",
+              div(style = "margin-top: 20px;",
+                  h4("Principal Component Analysis (PCA)"),
+                  p("Visualization of population structure using PCA. Supports both 2D and 3D visualization."),
+                  br(),
+                  div(style = "margin-bottom: 15px;",
+                      radioButtons("pca_dimension", "Visualization Dimension:",
+                                 choices = list("2D" = "2d", "3D" = "3d"),
+                                 selected = "2d",
+                                 inline = TRUE)
+                  ),
+                  if (use_plotly) {
+                    plotlyOutput("pca_plots", height = "800px")
+                  } else {
+                    div(class = "alert alert-warning",
+                        p("plotly package is required for PCA visualization. Please install it:"),
+                        tags$code("install.packages('plotly')")
+                    )
+                  },
+                  br(),
+                  downloadButton("download_pca_plots", "Download Plots", 
                                class = "btn btn-primary")
               )
             ),
@@ -827,6 +918,12 @@ server <- function(input, output, session) {
             basic_stats$marker_call_rate <- plink_stats$marker_call_rate
             basic_stats$marker_missing_rate <- plink_stats$marker_missing_rate
             basic_stats$hwe_pvalues <- plink_stats$hwe_pvalues
+            # Add PCA results if available
+            if (!is.null(plink_stats$pca_scores)) {
+              basic_stats$pca_scores <- plink_stats$pca_scores
+              basic_stats$pca_variance <- plink_stats$pca_variance
+              basic_stats$pca_sample_ids <- plink_stats$pca_sample_ids
+            }
           } else {
             # PLINK calculation failed - show error and return
             showNotification(
@@ -1423,253 +1520,949 @@ server <- function(input, output, session) {
     }
   })
   
-  # Per-individual plots: Sample missing rate and Sample relatedness
-  output$per_individual_plots <- renderPlot({
-    req(geno_data())
-    data <- geno_data()
-    
-    # Use summary_stats if available, otherwise use qc_results
-    stats <- if (summary_generated() && !is.null(summary_stats())) {
-      summary_stats()
-    } else if (!is.null(qc_results())) {
-      qc_results()
-    } else {
-      return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
-                                 label = "Please click 'Show Summary & Plots' or run QC first", size = 5) +
-               theme_void())
-    }
-    
-    if (!is.list(data) || !all(c("samples", "genotypes") %in% names(data))) {
-      return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
-                                 label = "Please load PLINK format data first", size = 5) +
-               theme_void())
-    }
-    
-    plots <- list()
-    
+  # Per-individual plots: Sample missing rate and Sample relatedness (Interactive with plotly)
+  if (use_plotly) {
     # Plot 1: Sample missing rate distribution
-    if (!is.null(stats$individual_missing_rate)) {
-      miss_df <- data.frame(MissingRate = stats$individual_missing_rate)
-      p_miss <- ggplot(miss_df, aes_string(x = "MissingRate")) +
-        geom_histogram(bins = 30, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
-        labs(title = "Sample Missing Rate Distribution",
-             x = "Missing Rate",
-             y = "Number of Samples") +
-        theme_bw() +
-        theme(plot.title = element_text(hjust = 0.5, size = 14))
+    output$per_individual_plot_missing <- renderPlotly({
+      req(geno_data())
+      data <- geno_data()
       
+      # Use summary_stats if available, otherwise use qc_results
+      stats <- if (summary_generated() && !is.null(summary_stats())) {
+        summary_stats()
+      } else if (!is.null(qc_results())) {
+        qc_results()
+      } else {
+        return(plotly_empty() %>% 
+               add_annotations(text = "Please click 'Show Summary & Plots' or run QC first",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
+      }
       
-      plots$missing_rate <- p_miss
-    }
+      if (!is.list(data) || !all(c("samples", "genotypes") %in% names(data))) {
+        return(plotly_empty() %>% 
+               add_annotations(text = "Please load PLINK format data first",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
+      }
+      
+      # Plot 1: Sample missing rate distribution
+      if (!is.null(stats$individual_missing_rate)) {
+        miss_df <- data.frame(MissingRate = stats$individual_missing_rate)
+        p_miss <- plot_ly() %>%
+          add_histogram(data = miss_df, x = ~MissingRate, 
+                       nbinsx = 30,
+                       marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
+                       name = "Missing Rate") %>%
+          layout(title = list(text = "Sample Missing Rate Distribution", font = list(size = 16)),
+                xaxis = list(title = list(text = "Missing Rate", font = list(size = 14))),
+                yaxis = list(title = list(text = "Number of Samples", font = list(size = 14))),
+                showlegend = FALSE,
+                margin = list(t = 60, b = 60, l = 80, r = 40))
+        p_miss
+      } else {
+        plotly_empty() %>% 
+          add_annotations(text = "Sample missing rate data not available",
+                        x = 0.5, y = 0.5, showarrow = FALSE)
+      }
+    })
     
     # Plot 2: Sample relatedness
-    if (!is.null(stats$individual_relatedness)) {
-      relatedness_df <- stats$individual_relatedness
+    output$per_individual_plot_relatedness <- renderPlotly({
+      req(geno_data())
+      data <- geno_data()
       
-      if (is.data.frame(relatedness_df) && nrow(relatedness_df) > 0) {
-        # Create histogram of PI_HAT values (relatedness coefficients)
-        p_relatedness <- ggplot(relatedness_df, aes_string(x = "PI_HAT")) +
-          geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
-          labs(title = "Sample Relatedness Distribution",
-               x = "PI_HAT (Proportion IBD)",
-               y = "Number of Sample Pairs") +
-          theme_bw() +
-          theme(plot.title = element_text(hjust = 0.5, size = 14))
-        
-        plots$relatedness <- p_relatedness
+      stats <- if (summary_generated() && !is.null(summary_stats())) {
+        summary_stats()
+      } else if (!is.null(qc_results())) {
+        qc_results()
       } else {
-        # If no relatedness data, show message
-        plots$relatedness <- ggplot() + 
-          annotate("text", x = 0.5, y = 0.5, 
-                  label = "Relatedness calculation in progress or no related pairs found", size = 4) +
-          theme_void()
-      }
-    }
-    
-    # Arrange plots
-    if (length(plots) > 0) {
-      if (requireNamespace("gridExtra", quietly = TRUE)) {
-        do.call(gridExtra::grid.arrange, c(plots, ncol = 1))
-      } else if (requireNamespace("cowplot", quietly = TRUE)) {
-        do.call(cowplot::plot_grid, c(plots, ncol = 1))
-      } else {
-        print(plots[[1]])
-      }
-    } else {
-      ggplot() + annotate("text", x = 0.5, y = 0.5, 
-                         label = "Please click 'Show Summary & Plots' to generate per-individual plots", size = 5) +
-        theme_void()
-    }
-  })
-  
-  # Per-marker QC plots (inspired by plinkQC::perMarkerQC)
-  # Can work with either summary_stats (from Show Summary) or qc_results (from Run QC)
-  output$per_marker_plots <- renderPlot({
-    req(geno_data())
-    data <- geno_data()
-    
-    # Use summary_stats if available, otherwise use qc_results
-    stats <- if (summary_generated() && !is.null(summary_stats())) {
-      summary_stats()
-    } else if (!is.null(qc_results())) {
-      qc_results()
-    } else {
-      return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
-                                 label = "Please click 'Show Summary & Plots' or run QC first", size = 5) +
-               theme_void())
-    }
-    
-    if (!is.list(data) || !all(c("genotypes", "map") %in% names(data))) {
-      return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
-                                 label = "Please load PLINK format data first", size = 5) +
-               theme_void())
-    }
-    
-    plots <- list()
-    
-    # Plot 1: SNP missing rate distribution
-    if (!is.null(stats$marker_missing_rate)) {
-      miss_df <- data.frame(MissingRate = stats$marker_missing_rate)
-      p_miss <- ggplot(miss_df, aes_string(x = "MissingRate")) +
-        geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
-        labs(title = "SNP Missing Rate Distribution",
-             x = "Missing Rate",
-             y = "Number of SNPs") +
-        theme_bw() +
-        theme(plot.title = element_text(hjust = 0.5, size = 14))
-      
-      
-      plots$snp_missing <- p_miss
-    } else if (!is.null(stats$call_rate)) {
-      # Fallback: use call_rate if marker_missing_rate not available
-      marker_miss <- 1 - stats$call_rate
-      miss_df <- data.frame(MissingRate = marker_miss)
-      p_miss <- ggplot(miss_df, aes_string(x = "MissingRate")) +
-        geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
-        labs(title = "SNP Missing Rate Distribution",
-             x = "Missing Rate",
-             y = "Number of SNPs") +
-        theme_bw() +
-        theme(plot.title = element_text(hjust = 0.5, size = 14))
-      
-      if (!is.null(qc_results())) {
+        return(plotly_empty() %>% 
+               add_annotations(text = "Please click 'Show Summary & Plots' or run QC first",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
       }
       
-      plots$snp_missing <- p_miss
-    }
-    
-    # Plot 2: Minor allele frequency (MAF) distribution
-    if (!is.null(stats$maf)) {
-      maf_df <- data.frame(MAF = stats$maf)
-      p_maf <- ggplot(maf_df, aes_string(x = "MAF")) +
-        geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
-        labs(title = "Minor Allele Frequency (MAF) Distribution",
-             x = "Minor Allele Frequency",
-             y = "Number of SNPs") +
-        theme_bw() +
-        theme(plot.title = element_text(hjust = 0.5, size = 14))
-      
-      # Add threshold line if QC has been run
-      if (!is.null(qc_results())) {
-          geom_vline(xintercept = input$maf_threshold, linetype = "dashed", color = "red", linewidth = 1)
+      if (!is.list(data) || !all(c("samples", "genotypes") %in% names(data))) {
+        return(plotly_empty() %>% 
+               add_annotations(text = "Please load PLINK format data first",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
       }
       
-      plots$maf <- p_maf
-    }
-    
-    # Plot 3: Hardy-Weinberg equilibrium (HWE) p-value distribution
-    # x-axis: -log10(HWE exact test p-value), y-axis: Number of SNPs
-    if (!is.null(stats$hwe_pvalues)) {
-      hwe_df <- data.frame(HWE_pvalue = stats$hwe_pvalues)
-      # Remove NA values
-      hwe_df <- hwe_df[!is.na(hwe_df$HWE_pvalue), , drop = FALSE]
-      
-      if (nrow(hwe_df) > 0) {
-        # Filter out invalid p-values (NA, <= 0, > 1, or non-finite)
-        hwe_df <- hwe_df[hwe_df$HWE_pvalue > 0 & hwe_df$HWE_pvalue <= 1 & 
-                         !is.na(hwe_df$HWE_pvalue) & is.finite(hwe_df$HWE_pvalue), , drop = FALSE]
+      if (!is.null(stats$individual_relatedness)) {
+        relatedness_df <- stats$individual_relatedness
         
-        if (nrow(hwe_df) > 0) {
-          # Calculate -log10(p-value) for x-axis
-          hwe_df$minus_log10_p <- -log10(hwe_df$HWE_pvalue)
+        # Check for required columns: Z0, Z1, and EXPECTED (or RT for relationship type)
+        if (is.data.frame(relatedness_df) && nrow(relatedness_df) > 0) {
+          # PLINK --genome output typically has RT (relationship type) column
+          # Map RT to EXPECTED if needed, or use RT directly
+          if ("RT" %in% names(relatedness_df) && !"EXPECTED" %in% names(relatedness_df)) {
+            relatedness_df$EXPECTED <- as.factor(relatedness_df$RT)
+          }
           
-          # Remove any infinite or invalid values after log transformation
-          hwe_df <- hwe_df[is.finite(hwe_df$minus_log10_p) & !is.na(hwe_df$minus_log10_p) & 
-                           hwe_df$minus_log10_p >= 0, , drop = FALSE]
-          
-          if (nrow(hwe_df) > 0) {
-            # Determine HWE threshold (default 1e-5, or from QC if available)
-            hwe_threshold <- if (!is.null(qc_results())) {
-              # Could add HWE threshold input in future
-              1e-5
+          # Ensure Z0 and Z1 columns exist
+          if ("Z0" %in% names(relatedness_df) && "Z1" %in% names(relatedness_df) && "EXPECTED" %in% names(relatedness_df)) {
+            # Filter valid data points
+            valid_idx <- is.finite(relatedness_df$Z0) & is.finite(relatedness_df$Z1) & 
+                        !is.na(relatedness_df$Z0) & !is.na(relatedness_df$Z1) &
+                        relatedness_df$Z0 >= 0 & relatedness_df$Z0 <= 1 &
+                        relatedness_df$Z1 >= 0 & relatedness_df$Z1 <= 1
+            
+            if (sum(valid_idx) > 0) {
+              plot_df <- relatedness_df[valid_idx, ]
+              plot_df$EXPECTED <- as.factor(plot_df$EXPECTED)
+              
+              # Create Z0-Z1 IBD relationship plot
+              p_relatedness <- plot_ly(plot_df, x = ~Z0, y = ~Z1, 
+                                      color = ~EXPECTED,
+                                      type = "scatter", mode = "markers",
+                                      marker = list(size = 4, opacity = 0.6),
+                                      text = ~paste("Pair:", if("IID1" %in% names(plot_df)) paste(IID1, IID2, sep="-") else "N/A",
+                                                   "<br>Z0:", round(Z0, 3),
+                                                   "<br>Z1:", round(Z1, 3),
+                                                   "<br>Expected:", EXPECTED),
+                                      hoverinfo = "text") %>%
+                layout(title = list(text = "Checking Relationships", font = list(size = 16)),
+                      xaxis = list(title = list(text = "Z0", font = list(size = 14)), 
+                                  range = c(0, 1)),
+                      yaxis = list(title = list(text = "Z1", font = list(size = 14)), 
+                                  range = c(0, 1)),
+                      legend = list(title = list(text = "EXPECTED")),
+                      margin = list(t = 60, b = 60, l = 80, r = 40))
+              p_relatedness
             } else {
-              1e-5
+              plotly_empty() %>% 
+                add_annotations(text = "No valid Z0/Z1 data points found",
+                              x = 0.5, y = 0.5, showarrow = FALSE)
             }
-            hwe_threshold_log10 <- -log10(hwe_threshold)
-            
-            # Plot HWE histogram with -log10(p-value) on x-axis
-            p_hwe <- ggplot(hwe_df, aes_string(x = "minus_log10_p")) +
-              geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
-              labs(title = "Histogram HWE",
-                   x = expression(-log[10](HWE~exact~test~p-value)),
-                   y = "Number of SNPs") +
-              scale_x_continuous(limits = c(0, NA)) +  # x-axis starts from 0
-              theme_bw() +
-              theme(plot.title = element_text(hjust = 0.5, size = 14))
-            
-            # Add significance threshold line
-            p_hwe <- p_hwe +
-              geom_vline(xintercept = hwe_threshold_log10, linetype = "dashed", color = "red", linewidth = 1)
-            
-            plots$hwe <- p_hwe
           } else {
-            # No valid data after filtering
-            plots$hwe <- ggplot() + 
-              annotate("text", x = 0.5, y = 0.5, 
-                      label = "No valid HWE p-values to plot\n(all values are invalid)", size = 4) +
-              theme_void()
+            # Fallback to PI_HAT histogram if Z0/Z1 not available
+            if ("PI_HAT" %in% names(relatedness_df)) {
+              p_relatedness <- plot_ly() %>%
+                add_histogram(data = relatedness_df, x = ~PI_HAT,
+                             nbinsx = 50,
+                             marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
+                             name = "Relatedness") %>%
+                layout(title = list(text = "Sample Relatedness Distribution", font = list(size = 16)),
+                      xaxis = list(title = list(text = "PI_HAT (Proportion IBD)", font = list(size = 14))),
+                      yaxis = list(title = list(text = "Number of Sample Pairs", font = list(size = 14))),
+                      showlegend = FALSE,
+                      margin = list(t = 60, b = 60, l = 80, r = 40))
+              p_relatedness
+            } else {
+              plotly_empty() %>% 
+                add_annotations(text = "Relatedness data missing Z0/Z1 or PI_HAT columns",
+                              x = 0.5, y = 0.5, showarrow = FALSE)
+            }
           }
         } else {
-          # No valid p-values
-          plots$hwe <- ggplot() + 
+          plotly_empty() %>% 
+            add_annotations(text = "Relatedness calculation in progress or no related pairs found",
+                          x = 0.5, y = 0.5, showarrow = FALSE)
+        }
+      } else {
+        plotly_empty() %>% 
+          add_annotations(text = "Sample relatedness data not available",
+                        x = 0.5, y = 0.5, showarrow = FALSE)
+      }
+    })
+  } else {
+    # Fallback to static plots if plotly not available
+    # Plot 1: Sample missing rate distribution
+    output$per_individual_plot_missing <- renderPlot({
+      req(geno_data())
+      data <- geno_data()
+      
+      stats <- if (summary_generated() && !is.null(summary_stats())) {
+        summary_stats()
+      } else if (!is.null(qc_results())) {
+        qc_results()
+      } else {
+        return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                                 label = "Please click 'Show Summary & Plots' or run QC first", size = 5) +
+               theme_void())
+      }
+      
+      if (!is.list(data) || !all(c("samples", "genotypes") %in% names(data))) {
+        return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                                 label = "Please load PLINK format data first", size = 5) +
+               theme_void())
+      }
+      
+      if (!is.null(stats$individual_missing_rate)) {
+        miss_df <- data.frame(MissingRate = stats$individual_missing_rate)
+        ggplot(miss_df, aes_string(x = "MissingRate")) +
+          geom_histogram(bins = 30, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+          labs(title = "Sample Missing Rate Distribution",
+               x = "Missing Rate",
+               y = "Number of Samples") +
+          theme_bw() +
+          theme(plot.title = element_text(hjust = 0.5, size = 14))
+      } else {
+        ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                           label = "Sample missing rate data not available", size = 5) +
+          theme_void()
+      }
+    })
+    
+    # Plot 2: Sample relatedness
+    output$per_individual_plot_relatedness <- renderPlot({
+      req(geno_data())
+      data <- geno_data()
+      
+      stats <- if (summary_generated() && !is.null(summary_stats())) {
+        summary_stats()
+      } else if (!is.null(qc_results())) {
+        qc_results()
+      } else {
+        return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                                 label = "Please click 'Show Summary & Plots' or run QC first", size = 5) +
+               theme_void())
+      }
+      
+      if (!is.list(data) || !all(c("samples", "genotypes") %in% names(data))) {
+        return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                                 label = "Please load PLINK format data first", size = 5) +
+               theme_void())
+      }
+      
+      if (!is.null(stats$individual_relatedness)) {
+        relatedness_df <- stats$individual_relatedness
+        
+        # Check for required columns: Z0, Z1, and EXPECTED (or RT for relationship type)
+        if (is.data.frame(relatedness_df) && nrow(relatedness_df) > 0) {
+          # PLINK --genome output typically has RT (relationship type) column
+          # Map RT to EXPECTED if needed, or use RT directly
+          if ("RT" %in% names(relatedness_df) && !"EXPECTED" %in% names(relatedness_df)) {
+            relatedness_df$EXPECTED <- as.factor(relatedness_df$RT)
+          }
+          
+          # Ensure Z0 and Z1 columns exist
+          if ("Z0" %in% names(relatedness_df) && "Z1" %in% names(relatedness_df) && "EXPECTED" %in% names(relatedness_df)) {
+            # Filter valid data points
+            valid_idx <- is.finite(relatedness_df$Z0) & is.finite(relatedness_df$Z1) & 
+                        !is.na(relatedness_df$Z0) & !is.na(relatedness_df$Z1) &
+                        relatedness_df$Z0 >= 0 & relatedness_df$Z0 <= 1 &
+                        relatedness_df$Z1 >= 0 & relatedness_df$Z1 <= 1
+            
+            if (sum(valid_idx) > 0) {
+              plot_df <- relatedness_df[valid_idx, ]
+              plot_df$EXPECTED <- as.factor(plot_df$EXPECTED)
+              
+              # Create Z0-Z1 IBD relationship plot using ggplot2
+              ggplot(plot_df, aes_string(x = "Z0", y = "Z1", color = "EXPECTED")) +
+                geom_point(alpha = 0.6, size = 2) +
+                labs(title = "Checking Relationships",
+                     x = "Z0",
+                     y = "Z1",
+                     color = "EXPECTED") +
+                xlim(0, 1) +
+                ylim(0, 1) +
+                theme_gray() +
+                theme(plot.title = element_text(hjust = 0.5, size = 14),
+                      legend.title = element_text(size = 12),
+                      legend.text = element_text(size = 10))
+            } else {
+              ggplot() + 
+                annotate("text", x = 0.5, y = 0.5, 
+                        label = "No valid Z0/Z1 data points found", size = 4) +
+                theme_void()
+            }
+          } else {
+            # Fallback to PI_HAT histogram if Z0/Z1 not available
+            if ("PI_HAT" %in% names(relatedness_df)) {
+              ggplot(relatedness_df, aes_string(x = "PI_HAT")) +
+                geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+                labs(title = "Sample Relatedness Distribution",
+                     x = "PI_HAT (Proportion IBD)",
+                     y = "Number of Sample Pairs") +
+                theme_bw() +
+                theme(plot.title = element_text(hjust = 0.5, size = 14))
+            } else {
+              ggplot() + 
+                annotate("text", x = 0.5, y = 0.5, 
+                        label = "Relatedness data missing Z0/Z1 or PI_HAT columns", size = 4) +
+                theme_void()
+            }
+          }
+        } else {
+          ggplot() + 
             annotate("text", x = 0.5, y = 0.5, 
-                    label = "No valid HWE p-values\n(all NA, <= 0, or > 1)", size = 4) +
+                    label = "Relatedness calculation in progress or no related pairs found", size = 4) +
             theme_void()
         }
       } else {
-        # No HWE data (all NA)
-        plots$hwe <- ggplot() + 
-          annotate("text", x = 0.5, y = 0.5, 
-                  label = "No HWE data available\n(all values are NA)", size = 4) +
+        ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                           label = "Sample relatedness data not available", size = 5) +
           theme_void()
       }
-    } else {
-      # HWE p-values not calculated
-      plots$hwe <- ggplot() + 
-        annotate("text", x = 0.5, y = 0.5, 
-                label = "HWE p-values not calculated\nPlease run PLINK statistics first", size = 4) +
-        theme_void()
-    }
-    
-    # Arrange plots
-    if (length(plots) > 0) {
-      if (requireNamespace("gridExtra", quietly = TRUE)) {
-        do.call(gridExtra::grid.arrange, c(plots, ncol = 1))
-      } else if (requireNamespace("cowplot", quietly = TRUE)) {
-        do.call(cowplot::plot_grid, c(plots, ncol = 1))
+    })
+  }
+  
+  # Per-marker QC plots (Interactive with plotly)
+  if (use_plotly) {
+    # Plot 1: SNP missing rate distribution
+    output$per_marker_plot_missing <- renderPlotly({
+      req(geno_data())
+      data <- geno_data()
+      
+      stats <- if (summary_generated() && !is.null(summary_stats())) {
+        summary_stats()
+      } else if (!is.null(qc_results())) {
+        qc_results()
       } else {
-        print(plots[[1]])
+        return(plotly_empty() %>% 
+               add_annotations(text = "Please click 'Show Summary & Plots' or run QC first",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
       }
-    } else {
-      ggplot() + annotate("text", x = 0.5, y = 0.5, 
-                         label = "Please run QC first to generate per-marker plots", size = 5) +
-        theme_void()
-    }
-  })
+      
+      if (!is.list(data) || !all(c("genotypes", "map") %in% names(data))) {
+        return(plotly_empty() %>% 
+               add_annotations(text = "Please load PLINK format data first",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
+      }
+      
+      # Plot 1: SNP missing rate distribution
+      if (!is.null(stats$marker_missing_rate)) {
+        miss_df <- data.frame(MissingRate = stats$marker_missing_rate)
+        p_miss <- plot_ly() %>%
+          add_histogram(data = miss_df, x = ~MissingRate,
+                       nbinsx = 50,
+                       marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
+                       name = "SNP Missing Rate") %>%
+          layout(title = list(text = "SNP Missing Rate Distribution", font = list(size = 16)),
+                xaxis = list(title = list(text = "Missing Rate", font = list(size = 14))),
+                yaxis = list(title = list(text = "Number of SNPs", font = list(size = 14))),
+                showlegend = FALSE,
+                margin = list(t = 60, b = 60, l = 80, r = 40))
+        p_miss
+      } else if (!is.null(stats$call_rate)) {
+        marker_miss <- 1 - stats$call_rate
+        miss_df <- data.frame(MissingRate = marker_miss)
+        p_miss <- plot_ly() %>%
+          add_histogram(data = miss_df, x = ~MissingRate,
+                       nbinsx = 50,
+                       marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
+                       name = "SNP Missing Rate") %>%
+          layout(title = list(text = "SNP Missing Rate Distribution", font = list(size = 16)),
+                xaxis = list(title = list(text = "Missing Rate", font = list(size = 14))),
+                yaxis = list(title = list(text = "Number of SNPs", font = list(size = 14))),
+                showlegend = FALSE,
+                margin = list(t = 60, b = 60, l = 80, r = 40))
+        p_miss
+      } else {
+        plotly_empty() %>% 
+          add_annotations(text = "SNP missing rate data not available",
+                        x = 0.5, y = 0.5, showarrow = FALSE)
+      }
+    })
+    
+    # Plot 2: Minor allele frequency (MAF) distribution
+    output$per_marker_plot_maf <- renderPlotly({
+      req(geno_data())
+      data <- geno_data()
+      
+      stats <- if (summary_generated() && !is.null(summary_stats())) {
+        summary_stats()
+      } else if (!is.null(qc_results())) {
+        qc_results()
+      } else {
+        return(plotly_empty() %>% 
+               add_annotations(text = "Please click 'Show Summary & Plots' or run QC first",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
+      }
+      
+      if (!is.list(data) || !all(c("genotypes", "map") %in% names(data))) {
+        return(plotly_empty() %>% 
+               add_annotations(text = "Please load PLINK format data first",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
+      }
+      
+      if (!is.null(stats$maf)) {
+        maf_df <- data.frame(MAF = stats$maf)
+        p_maf <- plot_ly() %>%
+          add_histogram(data = maf_df, x = ~MAF,
+                      nbinsx = 50,
+                      marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
+                      name = "MAF") %>%
+          layout(title = list(text = "Minor Allele Frequency (MAF) Distribution", font = list(size = 16)),
+                xaxis = list(title = list(text = "Minor Allele Frequency", font = list(size = 14))),
+                yaxis = list(title = list(text = "Number of SNPs", font = list(size = 14))),
+                showlegend = FALSE,
+                margin = list(t = 60, b = 60, l = 80, r = 40))
+        
+        # Add threshold line if QC has been run
+        if (!is.null(qc_results()) && exists("input") && !is.null(input$maf_threshold)) {
+          threshold <- input$maf_threshold
+          maf_hist <- hist(maf_df$MAF, breaks = 50, plot = FALSE)
+          y_max <- max(maf_hist$counts)
+          p_maf <- p_maf %>% 
+            add_lines(x = rep(threshold, 2), y = c(0, y_max), 
+                     line = list(dash = "dash", color = "red", width = 2), 
+                     showlegend = FALSE, hoverinfo = "skip")
+        }
+        
+        p_maf
+      } else {
+        plotly_empty() %>% 
+          add_annotations(text = "MAF data not available",
+                        x = 0.5, y = 0.5, showarrow = FALSE)
+      }
+    })
+    
+    # Plot 3: Hardy-Weinberg equilibrium (HWE) p-value distribution
+    output$per_marker_plot_hwe <- renderPlotly({
+      req(geno_data())
+      data <- geno_data()
+      
+      stats <- if (summary_generated() && !is.null(summary_stats())) {
+        summary_stats()
+      } else if (!is.null(qc_results())) {
+        qc_results()
+      } else {
+        return(plotly_empty() %>% 
+               add_annotations(text = "Please click 'Show Summary & Plots' or run QC first",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
+      }
+      
+      if (!is.list(data) || !all(c("genotypes", "map") %in% names(data))) {
+        return(plotly_empty() %>% 
+               add_annotations(text = "Please load PLINK format data first",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
+      }
+      
+      if (!is.null(stats$hwe_pvalues)) {
+        hwe_df <- data.frame(HWE_pvalue = stats$hwe_pvalues)
+        hwe_df <- hwe_df[!is.na(hwe_df$HWE_pvalue), , drop = FALSE]
+        
+        if (nrow(hwe_df) > 0) {
+          hwe_df <- hwe_df[hwe_df$HWE_pvalue > 0 & hwe_df$HWE_pvalue <= 1 & 
+                          !is.na(hwe_df$HWE_pvalue) & is.finite(hwe_df$HWE_pvalue), , drop = FALSE]
+          
+          if (nrow(hwe_df) > 0) {
+            hwe_df$minus_log10_p <- -log10(hwe_df$HWE_pvalue)
+            hwe_df <- hwe_df[is.finite(hwe_df$minus_log10_p) & !is.na(hwe_df$minus_log10_p) & 
+                            hwe_df$minus_log10_p >= 0, , drop = FALSE]
+            
+            if (nrow(hwe_df) > 0) {
+              hwe_threshold <- 1e-5
+              hwe_threshold_log10 <- -log10(hwe_threshold)
+              
+              # Get histogram data for y-axis range
+              hwe_hist <- hist(hwe_df$minus_log10_p, breaks = 50, plot = FALSE)
+              y_max <- max(hwe_hist$counts)
+              
+              p_hwe <- plot_ly() %>%
+                add_histogram(data = hwe_df, x = ~minus_log10_p,
+                            nbinsx = 50,
+                            marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
+                            name = "HWE") %>%
+                add_lines(x = rep(hwe_threshold_log10, 2), y = c(0, y_max),
+                         line = list(dash = "dash", color = "red", width = 2),
+                         showlegend = FALSE, hoverinfo = "skip") %>%
+                layout(title = list(text = "Hardy-Weinberg Equilibrium (HWE) Distribution", font = list(size = 16)),
+                      xaxis = list(title = list(text = "-log10(HWE exact test p-value)", font = list(size = 14))),
+                      yaxis = list(title = list(text = "Number of SNPs", font = list(size = 14))),
+                      showlegend = FALSE,
+                      margin = list(t = 60, b = 60, l = 80, r = 40))
+              
+              p_hwe
+            } else {
+              plotly_empty() %>% 
+                add_annotations(text = "No valid HWE p-values to plot\n(all values are invalid)",
+                              x = 0.5, y = 0.5, showarrow = FALSE)
+            }
+          } else {
+            plotly_empty() %>% 
+              add_annotations(text = "No valid HWE p-values\n(all NA, <= 0, or > 1)",
+                            x = 0.5, y = 0.5, showarrow = FALSE)
+          }
+        } else {
+          plotly_empty() %>% 
+            add_annotations(text = "No HWE data available\n(all values are NA)",
+                          x = 0.5, y = 0.5, showarrow = FALSE)
+        }
+      } else {
+        plotly_empty() %>% 
+          add_annotations(text = "HWE p-values not calculated\nPlease run PLINK statistics first",
+                        x = 0.5, y = 0.5, showarrow = FALSE)
+      }
+    })
+  } else {
+    # Fallback to static plots if plotly not available
+    # Plot 1: SNP missing rate distribution
+    output$per_marker_plot_missing <- renderPlot({
+      req(geno_data())
+      data <- geno_data()
+      
+      stats <- if (summary_generated() && !is.null(summary_stats())) {
+        summary_stats()
+      } else if (!is.null(qc_results())) {
+        qc_results()
+      } else {
+        return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                                 label = "Please click 'Show Summary & Plots' or run QC first", size = 5) +
+               theme_void())
+      }
+      
+      if (!is.list(data) || !all(c("genotypes", "map") %in% names(data))) {
+        return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                                 label = "Please load PLINK format data first", size = 5) +
+               theme_void())
+      }
+      
+      if (!is.null(stats$marker_missing_rate)) {
+        miss_df <- data.frame(MissingRate = stats$marker_missing_rate)
+        ggplot(miss_df, aes_string(x = "MissingRate")) +
+          geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+          labs(title = "SNP Missing Rate Distribution",
+               x = "Missing Rate",
+               y = "Number of SNPs") +
+          theme_bw() +
+          theme(plot.title = element_text(hjust = 0.5, size = 14))
+      } else if (!is.null(stats$call_rate)) {
+        marker_miss <- 1 - stats$call_rate
+        miss_df <- data.frame(MissingRate = marker_miss)
+        ggplot(miss_df, aes_string(x = "MissingRate")) +
+          geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+          labs(title = "SNP Missing Rate Distribution",
+               x = "Missing Rate",
+               y = "Number of SNPs") +
+          theme_bw() +
+          theme(plot.title = element_text(hjust = 0.5, size = 14))
+      } else {
+        ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                           label = "SNP missing rate data not available", size = 5) +
+          theme_void()
+      }
+    })
+    
+    # Plot 2: Minor allele frequency (MAF) distribution
+    output$per_marker_plot_maf <- renderPlot({
+      req(geno_data())
+      data <- geno_data()
+      
+      stats <- if (summary_generated() && !is.null(summary_stats())) {
+        summary_stats()
+      } else if (!is.null(qc_results())) {
+        qc_results()
+      } else {
+        return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                                 label = "Please click 'Show Summary & Plots' or run QC first", size = 5) +
+               theme_void())
+      }
+      
+      if (!is.list(data) || !all(c("genotypes", "map") %in% names(data))) {
+        return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                                 label = "Please load PLINK format data first", size = 5) +
+               theme_void())
+      }
+      
+      if (!is.null(stats$maf)) {
+        maf_df <- data.frame(MAF = stats$maf)
+        p_maf <- ggplot(maf_df, aes_string(x = "MAF")) +
+          geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+          labs(title = "Minor Allele Frequency (MAF) Distribution",
+               x = "Minor Allele Frequency",
+               y = "Number of SNPs") +
+          theme_bw() +
+          theme(plot.title = element_text(hjust = 0.5, size = 14))
+        if (!is.null(qc_results())) {
+          p_maf <- p_maf + geom_vline(xintercept = input$maf_threshold, linetype = "dashed", color = "red", linewidth = 1)
+        }
+        p_maf
+      } else {
+        ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                           label = "MAF data not available", size = 5) +
+          theme_void()
+      }
+    })
+    
+    # Plot 3: Hardy-Weinberg equilibrium (HWE) p-value distribution
+    output$per_marker_plot_hwe <- renderPlot({
+      req(geno_data())
+      data <- geno_data()
+      
+      stats <- if (summary_generated() && !is.null(summary_stats())) {
+        summary_stats()
+      } else if (!is.null(qc_results())) {
+        qc_results()
+      } else {
+        return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                                 label = "Please click 'Show Summary & Plots' or run QC first", size = 5) +
+               theme_void())
+      }
+      
+      if (!is.list(data) || !all(c("genotypes", "map") %in% names(data))) {
+        return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
+                                 label = "Please load PLINK format data first", size = 5) +
+               theme_void())
+      }
+      
+      if (!is.null(stats$hwe_pvalues)) {
+        hwe_df <- data.frame(HWE_pvalue = stats$hwe_pvalues)
+        hwe_df <- hwe_df[!is.na(hwe_df$HWE_pvalue), , drop = FALSE]
+        
+        if (nrow(hwe_df) > 0) {
+          hwe_df <- hwe_df[hwe_df$HWE_pvalue > 0 & hwe_df$HWE_pvalue <= 1 & 
+                          !is.na(hwe_df$HWE_pvalue) & is.finite(hwe_df$HWE_pvalue), , drop = FALSE]
+          
+          if (nrow(hwe_df) > 0) {
+            hwe_df$minus_log10_p <- -log10(hwe_df$HWE_pvalue)
+            hwe_df <- hwe_df[is.finite(hwe_df$minus_log10_p) & !is.na(hwe_df$minus_log10_p) & 
+                            hwe_df$minus_log10_p >= 0, , drop = FALSE]
+            
+            if (nrow(hwe_df) > 0) {
+              hwe_threshold <- 1e-5
+              hwe_threshold_log10 <- -log10(hwe_threshold)
+              
+              ggplot(hwe_df, aes_string(x = "minus_log10_p")) +
+                geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+                labs(title = "Hardy-Weinberg Equilibrium (HWE) Distribution",
+                     x = expression(-log[10](HWE~exact~test~p-value)),
+                     y = "Number of SNPs") +
+                scale_x_continuous(limits = c(0, NA)) +
+                geom_vline(xintercept = hwe_threshold_log10, linetype = "dashed", color = "red", linewidth = 1) +
+                theme_bw() +
+                theme(plot.title = element_text(hjust = 0.5, size = 14))
+            } else {
+              ggplot() + 
+                annotate("text", x = 0.5, y = 0.5, 
+                        label = "No valid HWE p-values to plot\n(all values are invalid)", size = 4) +
+                theme_void()
+            }
+          } else {
+            ggplot() + 
+              annotate("text", x = 0.5, y = 0.5, 
+                      label = "No valid HWE p-values\n(all NA, <= 0, or > 1)", size = 4) +
+              theme_void()
+          }
+        } else {
+          ggplot() + 
+            annotate("text", x = 0.5, y = 0.5, 
+                    label = "No HWE data available\n(all values are NA)", size = 4) +
+            theme_void()
+        }
+      } else {
+        ggplot() + 
+          annotate("text", x = 0.5, y = 0.5, 
+                  label = "HWE p-values not calculated\nPlease run PLINK statistics first", size = 4) +
+          theme_void()
+      }
+    })
+  }
   
   # Store plots for download
   per_individual_plot_obj <- reactiveVal(NULL)
   per_marker_plot_obj <- reactiveVal(NULL)
+  pca_result <- reactiveVal(NULL)
+  pca_plot_obj <- reactiveVal(NULL)
+  
+  # Compute PCA from summary_stats (from PLINK --pca) or genotype data
+  compute_pca <- function(geno_data, summary_stats = NULL) {
+    # First, try to get PCA from summary_stats (PLINK output)
+    if (!is.null(summary_stats) && 
+        !is.null(summary_stats$pca_scores) && 
+        !is.null(summary_stats$pca_variance)) {
+      tryCatch({
+        pca_scores <- summary_stats$pca_scores
+        pca_variance <- summary_stats$pca_variance
+        sample_ids <- if (!is.null(summary_stats$pca_sample_ids)) {
+          summary_stats$pca_sample_ids
+        } else if (!is.null(geno_data$samples)) {
+          geno_data$samples$Sample_ID
+        } else {
+          paste0("Sample_", 1:nrow(pca_scores))
+        }
+        
+        # Remove rows with all NA
+        valid_rows <- rowSums(!is.na(pca_scores)) > 0
+        if (sum(valid_rows) > 0) {
+          return(list(
+            scores = pca_scores[valid_rows, , drop = FALSE],
+            variance = pca_variance,
+            samples = sample_ids[valid_rows],
+            n_components = min(10, ncol(pca_scores))
+          ))
+        }
+      }, error = function(e) {
+        cat("Error reading PCA from summary_stats:", e$message, "\n")
+      })
+    }
+    
+    # Fallback: compute PCA from genotype data (if PLINK PCA not available)
+    if (!is.list(geno_data) || !all(c("genotypes", "samples") %in% names(geno_data))) {
+      return(NULL)
+    }
+    
+    tryCatch({
+      # Get genotype matrix (samples x markers)
+      geno_matrix <- geno_data$genotypes
+      
+      # Convert to numeric if needed
+      if (!is.numeric(geno_matrix)) {
+        geno_matrix <- apply(geno_matrix, 2, function(x) {
+          as.numeric(as.character(x))
+        })
+      }
+      
+      # Remove markers with all missing values
+      missing_by_marker <- colSums(is.na(geno_matrix))
+      valid_markers <- missing_by_marker < nrow(geno_matrix)
+      
+      if (sum(valid_markers) < 2) {
+        return(NULL)
+      }
+      
+      geno_matrix <- geno_matrix[, valid_markers, drop = FALSE]
+      
+      # Remove samples with all missing values
+      missing_by_sample <- rowSums(is.na(geno_matrix))
+      valid_samples <- missing_by_sample < ncol(geno_matrix)
+      
+      if (sum(valid_samples) < 2) {
+        return(NULL)
+      }
+      
+      geno_matrix <- geno_matrix[valid_samples, , drop = FALSE]
+      
+      # Impute missing values with mean (simple imputation)
+      for (i in 1:ncol(geno_matrix)) {
+        col_mean <- mean(geno_matrix[, i], na.rm = TRUE)
+        if (!is.na(col_mean) && is.finite(col_mean)) {
+          geno_matrix[is.na(geno_matrix[, i]), i] <- col_mean
+        }
+      }
+      
+      # Center and scale the data
+      geno_scaled <- scale(geno_matrix, center = TRUE, scale = TRUE)
+      
+      # Perform PCA
+      pca <- prcomp(geno_scaled, center = FALSE, scale. = FALSE)
+      
+      # Extract PC scores and variance explained
+      pc_scores <- pca$x
+      variance_explained <- summary(pca)$importance[2, ] * 100  # Percentage
+      
+      # Get sample IDs
+      sample_ids <- if (!is.null(geno_data$samples) && is.data.frame(geno_data$samples) && 
+                       "Sample_ID" %in% names(geno_data$samples)) {
+        geno_data$samples$Sample_ID[valid_samples]
+      } else {
+        paste0("Sample_", 1:nrow(pc_scores))
+      }
+      
+      list(
+        scores = pc_scores,
+        variance = variance_explained,
+        samples = sample_ids,
+        n_components = min(10, ncol(pc_scores))
+      )
+    }, error = function(e) {
+      cat("Error computing PCA:", e$message, "\n")
+      NULL
+    })
+  }
+  
+  # Compute PCA when data or stats change (separate from rendering)
+  observe({
+    req(geno_data())
+    data <- geno_data()
+    
+    if (!is.list(data) || !all(c("genotypes", "samples") %in% names(data))) {
+      pca_result(NULL)
+      return()
+    }
+    
+    # Get summary_stats for PCA (from PLINK --pca)
+    stats <- if (summary_generated() && !is.null(summary_stats())) {
+      summary_stats()
+    } else if (!is.null(qc_results())) {
+      qc_results()
+    } else {
+      pca_result(NULL)
+      return()
+    }
+    
+    # Compute PCA
+    pca <- compute_pca(data, summary_stats = stats)
+    if (!is.null(pca) && !is.null(pca$scores) && nrow(pca$scores) > 0) {
+      pca_result(pca)
+      cat("PCA computed successfully:", nrow(pca$scores), "samples,", ncol(pca$scores), "components\n")
+    } else {
+      pca_result(NULL)
+      cat("PCA computation returned NULL or empty result\n")
+    }
+  })
+  
+  # PCA Plots (2D and 3D) - requires plotly
+  if (use_plotly) {
+    output$pca_plots <- renderPlotly({
+      req(geno_data(), input$pca_dimension)
+      data <- geno_data()
+      
+      if (!is.list(data) || !all(c("genotypes", "samples") %in% names(data))) {
+        return(plotly_empty() %>% 
+               add_annotations(text = "Please load PLINK format data first",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
+      }
+      
+      # Get summary_stats for PCA (from PLINK --pca)
+      stats <- if (summary_generated() && !is.null(summary_stats())) {
+        summary_stats()
+      } else if (!is.null(qc_results())) {
+        qc_results()
+      } else {
+        return(plotly_empty() %>% 
+               add_annotations(text = "Please click 'Show Summary & Plots' or run QC first to compute PCA",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
+      }
+      
+      # Get PCA result (compute if not available)
+      pca <- pca_result()
+      if (is.null(pca) || is.null(pca$scores) || nrow(pca$scores) == 0) {
+        # Try to compute PCA now if not already computed
+        pca <- compute_pca(data, summary_stats = stats)
+        if (!is.null(pca) && !is.null(pca$scores) && nrow(pca$scores) > 0) {
+          pca_result(pca)
+        } else {
+          return(plotly_empty() %>% 
+                 add_annotations(text = "PCA computation failed. Please check your data and ensure PLINK is available.",
+                               x = 0.5, y = 0.5, showarrow = FALSE))
+        }
+      }
+      
+      # Re-validate after computation
+      pca <- pca_result()
+      if (is.null(pca) || is.null(pca$scores) || nrow(pca$scores) == 0) {
+        return(plotly_empty() %>% 
+               add_annotations(text = "PCA computation returned empty result. Please check your data.",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
+      }
+      
+      # Validate PCA data
+      if (ncol(pca$scores) < 2) {
+        return(plotly_empty() %>% 
+               add_annotations(text = "Insufficient PCA components. Need at least 2 components for 2D plot.",
+                             x = 0.5, y = 0.5, showarrow = FALSE))
+      }
+      
+      # Get dimension selection
+      dimension <- input$pca_dimension
+      
+      if (dimension == "2d") {
+        # 2D PCA plot (PC1 vs PC2)
+        # Ensure we have valid data
+        if (length(pca$samples) != nrow(pca$scores)) {
+          pca$samples <- paste0("Sample_", 1:nrow(pca$scores))
+        }
+        
+        pca_df <- data.frame(
+          PC1 = as.numeric(pca$scores[, 1]),
+          PC2 = as.numeric(pca$scores[, 2]),
+          Sample = as.character(pca$samples)
+        )
+        
+        # Remove any rows with invalid data
+        pca_df <- pca_df[is.finite(pca_df$PC1) & is.finite(pca_df$PC2), ]
+        
+        if (nrow(pca_df) == 0) {
+          return(plotly_empty() %>% 
+                 add_annotations(text = "No valid PCA data to display.",
+                               x = 0.5, y = 0.5, showarrow = FALSE))
+        }
+        
+        p <- plot_ly(pca_df, x = ~PC1, y = ~PC2, 
+                    text = ~Sample, hoverinfo = "text",
+                    type = "scatter", mode = "markers",
+                    marker = list(size = 8, color = "#CEB888", 
+                                line = list(color = "#333333", width = 1))) %>%
+          layout(
+            title = list(text = paste0("PCA Plot (2D)<br>",
+                          "PC1: ", round(pca$variance[1], 2), "% variance, ",
+                          "PC2: ", round(pca$variance[2], 2), "% variance"), 
+                        font = list(size = 16)),
+            xaxis = list(title = list(text = paste0("PC1 (", round(pca$variance[1], 2), "%)"), 
+                                     font = list(size = 14))),
+            yaxis = list(title = list(text = paste0("PC2 (", round(pca$variance[2], 2), "%)"), 
+                                     font = list(size = 14))),
+            hovermode = "closest",
+            margin = list(t = 80, b = 60, l = 80, r = 40)
+          )
+        
+        pca_plot_obj(p)
+        p
+      } else {
+        # 3D PCA plot (PC1 vs PC2 vs PC3)
+        if (ncol(pca$scores) >= 3) {
+          # Ensure we have valid data
+          if (length(pca$samples) != nrow(pca$scores)) {
+            pca$samples <- paste0("Sample_", 1:nrow(pca$scores))
+          }
+          
+          pca_df <- data.frame(
+            PC1 = as.numeric(pca$scores[, 1]),
+            PC2 = as.numeric(pca$scores[, 2]),
+            PC3 = as.numeric(pca$scores[, 3]),
+            Sample = as.character(pca$samples)
+          )
+          
+          # Remove any rows with invalid data
+          pca_df <- pca_df[is.finite(pca_df$PC1) & is.finite(pca_df$PC2) & is.finite(pca_df$PC3), ]
+          
+          if (nrow(pca_df) == 0) {
+            return(plotly_empty() %>% 
+                   add_annotations(text = "No valid PCA data to display.",
+                                 x = 0.5, y = 0.5, showarrow = FALSE))
+          }
+          
+          p <- plot_ly(pca_df, x = ~PC1, y = ~PC2, z = ~PC3,
+                      text = ~Sample, hoverinfo = "text",
+                      type = "scatter3d", mode = "markers",
+                      marker = list(size = 5, color = "#CEB888",
+                                  line = list(color = "#333333", width = 1))) %>%
+            layout(
+              title = list(text = paste0("PCA Plot (3D)<br>",
+                            "PC1: ", round(pca$variance[1], 2), "%, ",
+                            "PC2: ", round(pca$variance[2], 2), "%, ",
+                            "PC3: ", round(pca$variance[3], 2), "% variance"),
+                        font = list(size = 16)),
+              scene = list(
+                xaxis = list(title = list(text = paste0("PC1 (", round(pca$variance[1], 2), "%)"), 
+                                         font = list(size = 14))),
+                yaxis = list(title = list(text = paste0("PC2 (", round(pca$variance[2], 2), "%)"), 
+                                         font = list(size = 14))),
+                zaxis = list(title = list(text = paste0("PC3 (", round(pca$variance[3], 2), "%)"), 
+                                         font = list(size = 14)))
+              ),
+              margin = list(t = 80, b = 40, l = 40, r = 40)
+            )
+          
+          pca_plot_obj(p)
+          p
+        } else {
+          plotly_empty() %>% 
+            add_annotations(text = "Insufficient dimensions for 3D plot. Need at least 3 principal components.",
+                          x = 0.5, y = 0.5, showarrow = FALSE)
+        }
+      }
+    })
+  } else {
+    # Fallback if plotly not available
+    output$pca_plots <- renderUI({
+      div(class = "alert alert-warning", style = "padding: 20px; margin: 20px;",
+          h4("plotly Package Required"),
+          p("The PCA visualization feature requires the plotly package."),
+          p("Please install it:"),
+          tags$code("install.packages('plotly')"),
+          br(), br(),
+          p("After installation, please refresh the application.")
+      )
+    })
+  }
+  
+  # Reset PCA when data changes
+  observeEvent(geno_data(), {
+    pca_result(NULL)
+    pca_plot_obj(NULL)
+  })
   
   # Update plot objects when plots are rendered
   # Update plot objects for download (supports both summary_stats and qc_results)
@@ -1706,20 +2499,57 @@ server <- function(input, output, session) {
         plots$missing_rate <- p_miss
       }
       
-      # Plot 2: Sample relatedness
+      # Plot 2: Sample relatedness (Z0-Z1 IBD relationship plot)
       if (!is.null(stats$individual_relatedness)) {
         relatedness_df <- stats$individual_relatedness
         
-        if (is.data.frame(relatedness_df) && nrow(relatedness_df) > 0 && "PI_HAT" %in% names(relatedness_df)) {
-          p_relatedness <- ggplot(relatedness_df, aes_string(x = "PI_HAT")) +
-            geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
-            labs(title = "Sample Relatedness Distribution",
-                 x = "PI_HAT (Proportion IBD)",
-                 y = "Number of Sample Pairs") +
-            theme_bw() +
-            theme(plot.title = element_text(hjust = 0.5, size = 14))
+        if (is.data.frame(relatedness_df) && nrow(relatedness_df) > 0) {
+          # PLINK --genome output typically has RT (relationship type) column
+          # Map RT to EXPECTED if needed, or use RT directly
+          if ("RT" %in% names(relatedness_df) && !"EXPECTED" %in% names(relatedness_df)) {
+            relatedness_df$EXPECTED <- as.factor(relatedness_df$RT)
+          }
           
-          plots$relatedness <- p_relatedness
+          # Check for Z0 and Z1 columns for IBD relationship plot
+          if ("Z0" %in% names(relatedness_df) && "Z1" %in% names(relatedness_df) && "EXPECTED" %in% names(relatedness_df)) {
+            # Filter valid data points
+            valid_idx <- is.finite(relatedness_df$Z0) & is.finite(relatedness_df$Z1) & 
+                        !is.na(relatedness_df$Z0) & !is.na(relatedness_df$Z1) &
+                        relatedness_df$Z0 >= 0 & relatedness_df$Z0 <= 1 &
+                        relatedness_df$Z1 >= 0 & relatedness_df$Z1 <= 1
+            
+            if (sum(valid_idx) > 0) {
+              plot_df <- relatedness_df[valid_idx, ]
+              plot_df$EXPECTED <- as.factor(plot_df$EXPECTED)
+              
+              # Create Z0-Z1 IBD relationship plot using ggplot2
+              p_relatedness <- ggplot(plot_df, aes_string(x = "Z0", y = "Z1", color = "EXPECTED")) +
+                geom_point(alpha = 0.6, size = 2) +
+                labs(title = "Checking Relationships",
+                     x = "Z0",
+                     y = "Z1",
+                     color = "EXPECTED") +
+                xlim(0, 1) +
+                ylim(0, 1) +
+                theme_gray() +
+                theme(plot.title = element_text(hjust = 0.5, size = 14),
+                      legend.title = element_text(size = 12),
+                      legend.text = element_text(size = 10))
+              
+              plots$relatedness <- p_relatedness
+            }
+          } else if ("PI_HAT" %in% names(relatedness_df)) {
+            # Fallback to PI_HAT histogram if Z0/Z1 not available
+            p_relatedness <- ggplot(relatedness_df, aes_string(x = "PI_HAT")) +
+              geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+              labs(title = "Sample Relatedness Distribution",
+                   x = "PI_HAT (Proportion IBD)",
+                   y = "Number of Sample Pairs") +
+              theme_bw() +
+              theme(plot.title = element_text(hjust = 0.5, size = 14))
+            
+            plots$relatedness <- p_relatedness
+          }
         }
       }
       
@@ -1828,7 +2658,7 @@ server <- function(input, output, session) {
               # Plot HWE histogram with -log10(p-value) on x-axis
               p_hwe <- ggplot(hwe_df, aes_string(x = "minus_log10_p")) +
                 geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
-                labs(title = "Histogram HWE",
+                labs(title = "Hardy-Weinberg Equilibrium (HWE) Distribution",
                      x = expression(-log[10](HWE~exact~test~p-value)),
                      y = "Number of SNPs") +
                 scale_x_continuous(limits = c(0, NA)) +  # x-axis starts from 0
@@ -1898,6 +2728,24 @@ server <- function(input, output, session) {
         print(per_marker_plot_obj())
       }
       dev.off()
+    }
+  )
+  
+  # Download PCA plots
+  output$download_pca_plots <- downloadHandler(
+    filename = function() {
+      dimension <- if (!is.null(input$pca_dimension)) input$pca_dimension else "2d"
+      paste0("pca_plots_", dimension, "_", Sys.Date(), ".html")
+    },
+    content = function(file) {
+      req(pca_plot_obj())
+      if (use_plotly) {
+        # Export plotly plot as HTML
+        htmlwidgets::saveWidget(pca_plot_obj(), file, selfcontained = TRUE)
+      } else {
+        # Fallback: create a simple message file
+        writeLines("plotly package is required to download PCA plots", file)
+      }
     }
   )
   
@@ -2432,8 +3280,8 @@ calculate_all_stats_plink <- function(data, skip_relatedness = FALSE) {
     
     stats_output <- paste0(prefix, "_stats")
     
-    # Run plink --missing --freq --hardy --het together (combined for efficiency)
-    # This combines four commands into one to reduce file I/O and startup overhead
+    # Run plink --missing --freq --hardy --het --pca together (combined for efficiency)
+    # This combines five commands into one to reduce file I/O and startup overhead
     # Add timeout to prevent hanging
     plink_start_time <- Sys.time()
     plink_success <- FALSE
@@ -2449,6 +3297,7 @@ calculate_all_stats_plink <- function(data, skip_relatedness = FALSE) {
               "--freq",
               "--hardy",
               "--het",
+              "--pca",
               "--out", stats_output
             ),
             stdout = FALSE,
@@ -2471,6 +3320,7 @@ calculate_all_stats_plink <- function(data, skip_relatedness = FALSE) {
           "--freq",
           "--hardy",
           "--het",
+          "--pca",
           "--out", stats_output
         ),
         stdout = FALSE,
@@ -2484,7 +3334,7 @@ calculate_all_stats_plink <- function(data, skip_relatedness = FALSE) {
       }
     }
     
-    # Check if PLINK output files were created
+    # Check if PLINK output files were created (PCA files are optional)
     if (!plink_success || 
         !file.exists(paste0(stats_output, ".imiss")) ||
         !file.exists(paste0(stats_output, ".lmiss")) ||
@@ -2496,66 +3346,100 @@ calculate_all_stats_plink <- function(data, skip_relatedness = FALSE) {
       return(NULL)
     }
     
+    # Read PCA results if available (--pca generates .eigenvec and .eigenval files)
+    pca_scores <- NULL
+    pca_variance <- NULL
+    sample_ids_eigenvec <- NULL
+    eigenvec_file <- paste0(stats_output, ".eigenvec")
+    eigenval_file <- paste0(stats_output, ".eigenval")
+    
+    if (file.exists(eigenvec_file) && file.exists(eigenval_file)) {
+      tryCatch({
+        # Read .eigenvec file: FID IID PC1 PC2 PC3 ...
+        eigenvec_data <- read.table(eigenvec_file, header = FALSE, stringsAsFactors = FALSE, sep = "")
+        if (nrow(eigenvec_data) > 0 && ncol(eigenvec_data) >= 4) {
+          # Extract sample IDs and PC scores
+          sample_ids_eigenvec <- eigenvec_data[, 2]  # IID column
+          pca_scores <- as.matrix(eigenvec_data[, 3:ncol(eigenvec_data), drop = FALSE])
+          colnames(pca_scores) <- paste0("PC", 1:ncol(pca_scores))
+          
+          # Read .eigenval file: one eigenvalue per line
+          eigenval_data <- read.table(eigenval_file, header = FALSE, stringsAsFactors = FALSE, sep = "")
+          if (nrow(eigenval_data) > 0) {
+            eigenvalues <- eigenval_data[, 1]
+            # Calculate variance explained (percentage)
+            total_var <- sum(eigenvalues)
+            pca_variance <- (eigenvalues / total_var) * 100
+            names(pca_variance) <- paste0("PC", 1:length(pca_variance))
+          }
+        }
+      }, error = function(e) {
+        cat("Error reading PCA files:", e$message, "\n")
+        pca_scores <- NULL
+        pca_variance <- NULL
+        sample_ids_eigenvec <- NULL
+      })
+    }
+    
     # Note: --hardy output will be in stats_output.hwe (not stats_output_hwe.hwe)
     # We'll adjust the file reading accordingly
     
-    # Run plink --genome (for relatedness) - with LD pruning first and timeout
+    # Run plink --genome (for relatedness) - directly without LD pruning
+    # Note: Pruning step is commented out as it may not be necessary for all datasets
+    # and can be time-consuming. Direct --genome calculation uses all markers.
     if (!skip_relatedness) {
       relatedness_start_time <- Sys.time()
-      prune_output <- paste0(prefix, "_pruned")
-      system2(
-        plink_path,
-        args = c(
-          "--file", prefix,
-          "--allow-extra-chr",
-          "--indep-pairwise", "50", "5", "0.2",
-          "--out", prune_output
-        ),
-        stdout = FALSE,
-        stderr = FALSE
-      )
       
-      elapsed_time <- as.numeric(difftime(Sys.time(), relatedness_start_time, units = "secs"))
-      if (elapsed_time >= 40) {
-        cat("Skipping relatedness calculation: timeout\n")
-      } else if (file.exists(paste0(prune_output, ".prune.in"))) {
-        remaining_time <- 40 - elapsed_time
-        if (requireNamespace("R.utils", quietly = TRUE)) {
-          tryCatch({
-            R.utils::withTimeout({
-              system2(
-                plink_path,
-                args = c(
-                  "--file", prefix,
-                  "--allow-extra-chr",
-                  "--extract", paste0(prune_output, ".prune.in"),
-                  "--genome",
-                  "--out", paste0(stats_output, "_genome")
-                ),
-                stdout = FALSE,
-                stderr = FALSE
-              )
-            }, timeout = remaining_time)
-          }, TimeoutException = function(e) {
-            cat("Relatedness calculation timed out after", remaining_time, "seconds\n")
-          })
-        } else {
-          genome_start <- Sys.time()
-          system2(
-            plink_path,
-            args = c(
-              "--file", prefix,
-              "--allow-extra-chr",
-              "--extract", paste0(prune_output, ".prune.in"),
-              "--genome",
-              "--out", paste0(stats_output, "_genome")
-            ),
-            stdout = FALSE,
-            stderr = FALSE
-          )
-          if (as.numeric(difftime(Sys.time(), genome_start, units = "secs")) > remaining_time) {
-            cat("Relatedness calculation exceeded timeout\n")
-          }
+      # LD pruning step - COMMENTED OUT
+      # prune_output <- paste0(prefix, "_pruned")
+      # system2(
+      #   plink_path,
+      #   args = c(
+      #     "--file", prefix,
+      #     "--allow-extra-chr",
+      #     "--indep-pairwise", "50", "5", "0.2",
+      #     "--out", prune_output
+      #   ),
+      #   stdout = FALSE,
+      #   stderr = FALSE
+      # )
+      
+      # Run --genome directly on all markers (no pruning)
+      remaining_time <- 60  # Increased timeout since we're using all markers
+      if (requireNamespace("R.utils", quietly = TRUE)) {
+        tryCatch({
+          R.utils::withTimeout({
+            system2(
+              plink_path,
+              args = c(
+                "--file", prefix,
+                "--allow-extra-chr",
+                "--genome",
+                "--out", paste0(stats_output, "_genome")
+              ),
+              stdout = FALSE,
+              stderr = FALSE
+            )
+          }, timeout = remaining_time)
+        }, TimeoutException = function(e) {
+          cat("Relatedness calculation timed out after", remaining_time, "seconds\n")
+        })
+      } else {
+        genome_start <- Sys.time()
+        system2(
+          plink_path,
+          args = c(
+            "--file", prefix,
+            "--allow-extra-chr",
+            "--genome",
+            "--out", paste0(stats_output, "_genome")
+          ),
+          stdout = FALSE,
+          stderr = FALSE
+        )
+        elapsed_genome <- as.numeric(difftime(Sys.time(), genome_start, units = "secs"))
+        if (elapsed_genome > remaining_time) {
+          cat("Relatedness calculation exceeded timeout\n")
         }
       }
     }
@@ -2764,6 +3648,23 @@ calculate_all_stats_plink <- function(data, skip_relatedness = FALSE) {
       results$hwe_pvalues <- rep(NA, nrow(data$map))
     }
     # relatedness can be NULL if skipped or failed
+    
+    # Add PCA results if available
+    if (!is.null(pca_scores) && !is.null(pca_variance)) {
+      # Match sample IDs from eigenvec to data$samples
+      sample_idx <- match(sample_ids_eigenvec, data$samples$Sample_ID)
+      valid_idx <- !is.na(sample_idx)
+      
+      if (sum(valid_idx) > 0) {
+        # Create full PCA scores matrix aligned with original data
+        full_pca_scores <- matrix(NA, nrow = nrow(data$samples), ncol = ncol(pca_scores))
+        full_pca_scores[sample_idx[valid_idx], ] <- pca_scores[valid_idx, , drop = FALSE]
+        
+        results$pca_scores <- full_pca_scores
+        results$pca_variance <- pca_variance
+        results$pca_sample_ids <- data$samples$Sample_ID
+      }
+    }
     
     return(results)
     
