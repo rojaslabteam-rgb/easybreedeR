@@ -1605,26 +1605,46 @@ server <- function(input, output, session) {
                         relatedness_df$Z0 >= 0 & relatedness_df$Z0 <= 1 &
                         relatedness_df$Z1 >= 0 & relatedness_df$Z1 <= 1
             
+            # Filter by PI_HAT > 0.1 if PI_HAT column exists
+            if ("PI_HAT" %in% names(relatedness_df)) {
+              valid_idx <- valid_idx & !is.na(relatedness_df$PI_HAT) & 
+                          is.finite(relatedness_df$PI_HAT) & relatedness_df$PI_HAT > 0.1
+            }
+            
             if (sum(valid_idx) > 0) {
               plot_df <- relatedness_df[valid_idx, ]
               plot_df$EXPECTED <- as.factor(plot_df$EXPECTED)
               
-              # Create Z0-Z1 IBD relationship plot
-              p_relatedness <- plot_ly(plot_df, x = ~Z0, y = ~Z1, 
-                                      color = ~EXPECTED,
-                                      type = "scatter", mode = "markers",
-                                      marker = list(size = 4, opacity = 0.6),
-                                      text = ~paste("Pair:", if("IID1" %in% names(plot_df)) paste(IID1, IID2, sep="-") else "N/A",
-                                                   "<br>Z0:", round(Z0, 3),
-                                                   "<br>Z1:", round(Z1, 3),
-                                                   "<br>Expected:", EXPECTED),
-                                      hoverinfo = "text") %>%
-                layout(title = list(text = "Checking Relationships", font = list(size = 16)),
+              # Create Z0-Z1 IBD relationship plot with golden color
+              # Build hover text with PI_HAT if available
+              if ("PI_HAT" %in% names(plot_df)) {
+                p_relatedness <- plot_ly(plot_df, x = ~Z0, y = ~Z1, 
+                                        type = "scatter", mode = "markers",
+                                        marker = list(size = 4, opacity = 0.6, color = "#CEB888"),
+                                        text = ~paste("Pair:", if("IID1" %in% names(plot_df)) paste(IID1, IID2, sep="-") else "N/A",
+                                                     "<br>Z0:", round(Z0, 3),
+                                                     "<br>Z1:", round(Z1, 3),
+                                                     "<br>PI_HAT:", round(PI_HAT, 4),
+                                                     "<br>Expected:", EXPECTED),
+                                        hoverinfo = "text")
+              } else {
+                p_relatedness <- plot_ly(plot_df, x = ~Z0, y = ~Z1, 
+                                        type = "scatter", mode = "markers",
+                                        marker = list(size = 4, opacity = 0.6, color = "#CEB888"),
+                                        text = ~paste("Pair:", if("IID1" %in% names(plot_df)) paste(IID1, IID2, sep="-") else "N/A",
+                                                     "<br>Z0:", round(Z0, 3),
+                                                     "<br>Z1:", round(Z1, 3),
+                                                     "<br>Expected:", EXPECTED),
+                                        hoverinfo = "text")
+              }
+              
+              p_relatedness <- p_relatedness %>%
+                layout(title = list(text = "Sample Relatedness Distribution", font = list(size = 16)),
                       xaxis = list(title = list(text = "Z0", font = list(size = 14)), 
                                   range = c(0, 1)),
                       yaxis = list(title = list(text = "Z1", font = list(size = 14)), 
                                   range = c(0, 1)),
-                      legend = list(title = list(text = "EXPECTED")),
+                      showlegend = FALSE,
                       margin = list(t = 60, b = 60, l = 80, r = 40))
               p_relatedness
             } else {
@@ -1742,23 +1762,26 @@ server <- function(input, output, session) {
                         relatedness_df$Z0 >= 0 & relatedness_df$Z0 <= 1 &
                         relatedness_df$Z1 >= 0 & relatedness_df$Z1 <= 1
             
+            # Filter by PI_HAT > 0.1 if PI_HAT column exists
+            if ("PI_HAT" %in% names(relatedness_df)) {
+              valid_idx <- valid_idx & !is.na(relatedness_df$PI_HAT) & 
+                          is.finite(relatedness_df$PI_HAT) & relatedness_df$PI_HAT > 0.1
+            }
+            
             if (sum(valid_idx) > 0) {
               plot_df <- relatedness_df[valid_idx, ]
               plot_df$EXPECTED <- as.factor(plot_df$EXPECTED)
               
-              # Create Z0-Z1 IBD relationship plot using ggplot2
-              ggplot(plot_df, aes_string(x = "Z0", y = "Z1", color = "EXPECTED")) +
-                geom_point(alpha = 0.6, size = 2) +
-                labs(title = "Checking Relationships",
+              # Create Z0-Z1 IBD relationship plot using ggplot2 with golden color
+              ggplot(plot_df, aes_string(x = "Z0", y = "Z1")) +
+                geom_point(alpha = 0.6, size = 2, color = "#CEB888") +
+                labs(title = "Sample Relatedness Distribution",
                      x = "Z0",
-                     y = "Z1",
-                     color = "EXPECTED") +
+                     y = "Z1") +
                 xlim(0, 1) +
                 ylim(0, 1) +
                 theme_gray() +
-                theme(plot.title = element_text(hjust = 0.5, size = 14),
-                      legend.title = element_text(size = 12),
-                      legend.text = element_text(size = 10))
+                theme(plot.title = element_text(hjust = 0.5, size = 14))
             } else {
               ggplot() + 
                 annotate("text", x = 0.5, y = 0.5, 
@@ -2518,23 +2541,26 @@ server <- function(input, output, session) {
                         relatedness_df$Z0 >= 0 & relatedness_df$Z0 <= 1 &
                         relatedness_df$Z1 >= 0 & relatedness_df$Z1 <= 1
             
+            # Filter by PI_HAT > 0.1 if PI_HAT column exists
+            if ("PI_HAT" %in% names(relatedness_df)) {
+              valid_idx <- valid_idx & !is.na(relatedness_df$PI_HAT) & 
+                          is.finite(relatedness_df$PI_HAT) & relatedness_df$PI_HAT > 0.1
+            }
+            
             if (sum(valid_idx) > 0) {
               plot_df <- relatedness_df[valid_idx, ]
               plot_df$EXPECTED <- as.factor(plot_df$EXPECTED)
               
-              # Create Z0-Z1 IBD relationship plot using ggplot2
-              p_relatedness <- ggplot(plot_df, aes_string(x = "Z0", y = "Z1", color = "EXPECTED")) +
-                geom_point(alpha = 0.6, size = 2) +
-                labs(title = "Checking Relationships",
+              # Create Z0-Z1 IBD relationship plot using ggplot2 with golden color
+              p_relatedness <- ggplot(plot_df, aes_string(x = "Z0", y = "Z1")) +
+                geom_point(alpha = 0.6, size = 2, color = "#CEB888") +
+                labs(title = "Sample Relatedness Distribution",
                      x = "Z0",
-                     y = "Z1",
-                     color = "EXPECTED") +
+                     y = "Z1") +
                 xlim(0, 1) +
                 ylim(0, 1) +
                 theme_gray() +
-                theme(plot.title = element_text(hjust = 0.5, size = 14),
-                      legend.title = element_text(size = 12),
-                      legend.text = element_text(size = 10))
+                theme(plot.title = element_text(hjust = 0.5, size = 14))
               
               plots$relatedness <- p_relatedness
             }
