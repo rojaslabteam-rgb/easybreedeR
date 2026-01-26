@@ -1010,12 +1010,23 @@ output$app_subtitle_ui <- renderUI({
   detect_qc_issues <- function(df) {
     issues <- list(
       duplicates = list(),
+      missing_ids = list(),
       missing_parents = list(),
       self_parenting = list(),
       loops = list(),
       birth_date_order = list(),
       has_errors = FALSE
     )
+    
+    # Missing or empty ID rows (cannot be used as pedigree nodes)
+    missing_id_mask <- is.na(df$ID) | df$ID == "" | trimws(df$ID) == ""
+    if (any(missing_id_mask)) {
+      issues$missing_ids <- list(
+        count = sum(missing_id_mask),
+        rows = which(missing_id_mask)
+      )
+      issues$has_errors <- TRUE
+    }
     
     # Try to use fast Rcpp version if available
     if (exists("use_rcpp") && use_rcpp && exists("fast_pedigree_qc") && exists("fast_detect_loops")) {
@@ -1346,6 +1357,14 @@ output$app_subtitle_ui <- renderUI({
   # Auto-fix QC issues function
   fix_qc_issues <- function(df, issues) {
     fixed_summary <- list()
+    
+    # Fix 0: Remove rows with missing/empty IDs
+    missing_id_mask <- is.na(df$ID) | df$ID == "" | trimws(df$ID) == ""
+    if (any(missing_id_mask)) {
+      removed_count <- sum(missing_id_mask)
+      df <- df[!missing_id_mask, , drop = FALSE]
+      fixed_summary$missing_ids <- paste0("Removed ", removed_count, " row(s) with missing or empty ID")
+    }
     
     # Fix 1: Remove duplicate IDs (keep first occurrence)
     if (length(issues$duplicates) > 0 && issues$duplicates$count > 0) {
@@ -2132,7 +2151,7 @@ output$app_subtitle_ui <- renderUI({
     validation_errors <- validate_data_format(raw_data(), input$id_col, input$sire_col, input$dam_col)
     if (length(validation_errors) > 0) {
       # Filter out missing parent reference errors - these will be handled by QC auto-fix
-      critical_errors <- validation_errors[!grepl("Sire column references.*individuals not found|Dam column references.*individuals not found", validation_errors)]
+      critical_errors <- validation_errors[!grepl("Sire column references.*individuals not found|Dam column references.*individuals not found|ID column contains missing or empty values", validation_errors)]
       if (length(critical_errors) > 0) {
         data_validation_status(list(valid = FALSE, errors = validation_errors, warnings = c()))
         showNotification(paste("❌ Data validation failed:", paste(critical_errors, collapse = "; ")), 
@@ -2796,7 +2815,7 @@ output$app_subtitle_ui <- renderUI({
       basic_validation_errors <- validate_data_format(raw_data(), input$id_col, input$sire_col, input$dam_col)
       if (length(basic_validation_errors) > 0) {
         # Filter out missing parent reference errors - these will be handled by QC auto-fix
-        critical_errors <- basic_validation_errors[!grepl("Sire column references.*individuals not found|Dam column references.*individuals not found", basic_validation_errors)]
+        critical_errors <- basic_validation_errors[!grepl("Sire column references.*individuals not found|Dam column references.*individuals not found|ID column contains missing or empty values", basic_validation_errors)]
         if (length(critical_errors) > 0) {
           showNotification(paste("❌ Data validation failed:", paste(critical_errors, collapse = "; ")), type = "error", duration = 8)
           return(NULL)
@@ -2904,6 +2923,30 @@ output$app_subtitle_ui <- renderUI({
             tags$p(
               style = "margin-bottom: 0; font-size: 0.9em;",
               "Auto-fix will keep the first occurrence of each ID."
+            )
+          )
+        },
+        
+        # Missing/empty ID rows section
+        if (length(detected_issues$missing_ids) > 0 && detected_issues$missing_ids$count > 0) {
+          tags$div(
+            class = "alert alert-danger",
+            style = "margin: 10px 0;",
+            tags$h5(
+              style = "margin-top: 0;",
+              "❌ Missing/Empty IDs: ", detected_issues$missing_ids$count, " row(s)"
+            ),
+            tags$p(
+              "Rows with missing or empty IDs cannot be used in the pedigree."
+            ),
+            tags$p(
+              "Example row indices: ",
+              tags$code(paste(head(detected_issues$missing_ids$rows, 5), collapse = ", ")),
+              if (detected_issues$missing_ids$count > 5) "..."
+            ),
+            tags$p(
+              style = "margin-bottom: 0; font-size: 0.9em;",
+              "Auto-fix will remove these rows."
             )
           )
         },
