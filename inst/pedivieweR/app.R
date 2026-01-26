@@ -1890,6 +1890,7 @@ output$app_subtitle_ui <- renderUI({
   
   # Cache for F values to avoid repeated calculations
   f_values_cache <- reactiveVal(NULL)
+  f_values_cache_hash <- reactiveVal(NULL)
   
   # Track whether the Inbreeding Trend tab is currently inserted
   inb_trend_tab_inserted <- reactiveVal(FALSE)
@@ -2132,6 +2133,7 @@ output$app_subtitle_ui <- renderUI({
   observeEvent(input$file, {
     raw_data_storage(NULL)
     f_values_cache(NULL)  # Clear inbreeding cache when new file uploaded
+    f_values_cache_hash(NULL)
     analysis_started(FALSE)  # Reset analysis started flag
   })
   
@@ -2187,8 +2189,19 @@ output$app_subtitle_ui <- renderUI({
         !is.null(validation_status) && 
         isTRUE(validation_status$valid) && 
         auto_enabled) {
-      # Clear cache to force recalculation
-      f_values_cache(NULL)
+      # Clear cache only if pedigree actually changed
+      ped <- isolate(ped_data())
+      if (!is.null(ped) && all(c("ID", "Sire", "Dam") %in% names(ped))) {
+        current_hash <- digest::digest(ped[, c("ID", "Sire", "Dam")], algo = "xxhash64")
+        cached_hash <- f_values_cache_hash()
+        if (!is.null(cached_hash) && !identical(current_hash, cached_hash)) {
+          f_values_cache(NULL)
+          f_values_cache_hash(NULL)
+        }
+      } else {
+        f_values_cache(NULL)
+        f_values_cache_hash(NULL)
+      }
     }
   })
   
@@ -2240,7 +2253,8 @@ output$app_subtitle_ui <- renderUI({
       data_validation_status(list(valid = TRUE, errors = c(), warnings = c()))
       
       # Clear inbreeding cache to trigger recalculation with fixed data
-      f_values_cache(NULL)
+    f_values_cache(NULL)
+    f_values_cache_hash(NULL)
       
       # If auto_process is enabled, data will be automatically reprocessed
       # and inbreeding will be recalculated
@@ -4205,9 +4219,12 @@ output$app_subtitle_ui <- renderUI({
                   "0.75 < F <= 0.80", "0.80 < F <= 0.85", "0.85 < F <= 0.90",
                   "0.90 < F <= 0.95", "0.95 < F <= 1.00")
       
-      f_cut <- cut(f_numeric, breaks = breaks, labels = labels, include.lowest = TRUE)
+      f_zero <- sum(f_numeric == 0, na.rm = TRUE)
+      f_numeric_pos <- f_numeric[f_numeric > 0]
+      f_cut <- cut(f_numeric_pos, breaks = breaks, labels = labels, include.lowest = FALSE)
       f_table <- table(f_cut)
       
+      cat(sprintf("%30s %20s\n", "F = 0", format(f_zero, big.mark = ",")))
       for (i in seq_along(labels)) {
         count <- if (labels[i] %in% names(f_table)) f_table[labels[i]] else 0
         cat(sprintf("%30s %20s\n", labels[i], format(count, big.mark = ",")))
@@ -4249,9 +4266,7 @@ output$app_subtitle_ui <- renderUI({
         
         # Determine sample size
         sample_size <- if (n > 10000) min(5000, n) else n
-        if (n > 10000) {
-          cat("(Calculating LAP for sample of", format(sample_size, big.mark = ","), "individuals)\n")
-        }
+        
         
         # Call Rcpp function
         lap_distribution <- fast_lap_distribution(ids_char, sires_char, dams_char, sample_size, 20)
@@ -4260,7 +4275,6 @@ output$app_subtitle_ui <- renderUI({
         if (n > 10000) {
           sample_size <- min(5000, n)
           sample_ids <- sample(ped$ID, sample_size)
-          cat("(Calculating LAP for sample of", format(sample_size, big.mark = ","), "individuals)\n")
         } else {
           sample_ids <- ped$ID
           sample_size <- n
@@ -4479,9 +4493,12 @@ output$app_subtitle_ui <- renderUI({
                       "0.75 < F <= 0.80", "0.80 < F <= 0.85", "0.85 < F <= 0.90",
                       "0.90 < F <= 0.95", "0.95 < F <= 1.00")
           
-          f_cut <- cut(f_numeric, breaks = breaks, labels = labels, include.lowest = TRUE)
+          f_zero <- sum(f_numeric == 0, na.rm = TRUE)
+          f_numeric_pos <- f_numeric[f_numeric > 0]
+          f_cut <- cut(f_numeric_pos, breaks = breaks, labels = labels, include.lowest = FALSE)
           f_table <- table(f_cut)
           
+          cat(sprintf("%30s %20s\n", "F = 0", format(f_zero, big.mark = ",")))
           for (i in seq_along(labels)) {
             count <- if (labels[i] %in% names(f_table)) f_table[labels[i]] else 0
             cat(sprintf("%30s %20s\n", labels[i], format(count, big.mark = ",")))
@@ -4516,9 +4533,7 @@ output$app_subtitle_ui <- renderUI({
             
             # Determine sample size
             sample_size <- if (n > 10000) min(5000, n) else n
-            if (n > 10000) {
-              cat("(Calculating LAP for sample of", format(sample_size, big.mark = ","), "individuals)\n")
-            }
+            
             
             # Call Rcpp function
             lap_distribution <- fast_lap_distribution(ids_char, sires_char, dams_char, sample_size, 20)
@@ -4527,7 +4542,6 @@ output$app_subtitle_ui <- renderUI({
             if (n > 10000) {
               sample_size <- min(5000, n)
               sample_ids <- sample(ped$ID, sample_size)
-              cat("(Calculating LAP for sample of", format(sample_size, big.mark = ","), "individuals)\n")
             } else {
               sample_ids <- ped$ID
               sample_size <- n
@@ -4799,10 +4813,14 @@ output$app_subtitle_ui <- renderUI({
     req(ped_data())
     ped <- ped_data()
     
-    # Check if we have cached values
+    # Check if we have cached values for this exact pedigree
     cached_f <- f_values_cache()
-    if (!is.null(cached_f)) {
-      return(cached_f)
+    cached_hash <- f_values_cache_hash()
+    if (!is.null(cached_f) && all(c("ID", "Sire", "Dam") %in% names(ped))) {
+      current_hash <- digest::digest(ped[, c("ID", "Sire", "Dam")], algo = "xxhash64")
+      if (!is.null(cached_hash) && identical(current_hash, cached_hash)) {
+        return(cached_f)
+      }
     }
     
     # Check if ped_data returned NULL (due to column mapping errors or validation failure)
@@ -5099,6 +5117,11 @@ output$app_subtitle_ui <- renderUI({
         
         # Cache the result
         f_values_cache(result)
+        if (all(c("ID", "Sire", "Dam") %in% names(ped))) {
+          f_values_cache_hash(digest::digest(ped[, c("ID", "Sire", "Dam")], algo = "xxhash64"))
+        } else {
+          f_values_cache_hash(NULL)
+        }
         
         # Hide progress bar after a short delay
         later::later(function() {

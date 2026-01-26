@@ -457,7 +457,7 @@ List check_birth_date_order(CharacterVector ids,
 NumericVector fast_lap_distribution(CharacterVector ids,
                                     CharacterVector sires,
                                     CharacterVector dams,
-                                    int sample_size = 5000,
+                                    int sample_size = 10000,
                                     int max_depth = 20) {
   
   int n = ids.size();
@@ -474,14 +474,14 @@ NumericVector fast_lap_distribution(CharacterVector ids,
     all_ids.push_back(id);
   }
   
-  // Second pass: build parent map (now we can check if parents exist in id_set)
+  // Second pass: build parent map (treat non-empty parents as valid)
   for (int i = 0; i < n; i++) {
     std::string id = Rcpp::as<std::string>(ids[i]);
     std::string sire = Rcpp::as<std::string>(sires[i]);
     std::string dam = Rcpp::as<std::string>(dams[i]);
     
-    bool has_sire = (sire != "NA" && sire != "0" && sire != "" && id_set.find(sire) != id_set.end());
-    bool has_dam = (dam != "NA" && dam != "0" && dam != "" && id_set.find(dam) != id_set.end());
+    bool has_sire = (sire != "NA" && sire != "0" && sire != "");
+    bool has_dam = (dam != "NA" && dam != "0" && dam != "");
     
     if (has_sire || has_dam) {
       parent_map[id] = std::make_pair(
@@ -493,11 +493,13 @@ NumericVector fast_lap_distribution(CharacterVector ids,
   
   // Determine sample IDs
   std::vector<std::string> sample_ids;
-  if (n > sample_size) {
-    // Random sampling using R's sample function
+  // Only sample for very large datasets (> 1000k); use 10k samples
+  const int sample_threshold = 1000000;
+  const int sample_target = 10000;
+  if (n > sample_threshold) {
     Function sample("sample");
-    IntegerVector indices = sample(n, sample_size, false);
-    for (int i = 0; i < sample_size; i++) {
+    IntegerVector indices = sample(n, sample_target, false);
+    for (int i = 0; i < sample_target; i++) {
       int idx = indices[i] - 1; // R indices are 1-based
       if (idx >= 0 && idx < n) {
         sample_ids.push_back(all_ids[idx]);
@@ -560,9 +562,9 @@ NumericVector fast_lap_distribution(CharacterVector ids,
     visited.erase(id);
     
     int depth = max_parent_depth + 1;
-    // Cap depth at max_depth
-    if (depth > max_depth) {
-      depth = max_depth;
+    // Cap depth at max_depth - 1 to fit distribution range
+    if (depth >= max_depth) {
+      depth = max_depth - 1;
     }
     depth_cache[id] = depth;
     return depth;
