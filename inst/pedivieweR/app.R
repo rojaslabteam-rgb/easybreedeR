@@ -1006,11 +1006,145 @@ output$app_subtitle_ui <- renderUI({
     )
   }
   
+  # Helper: treat NA/""/"0" as missing parent
+  is_missing_parent <- function(x) {
+    x_char <- as.character(x)
+    is.na(x) | x_char == "" | x_char == "0"
+  }
+
+  # Helper: get basic pedigree stats (prefer Rcpp if available)
+  get_basic_stats <- function(ped) {
+    n <- nrow(ped)
+    if (exists("use_rcpp") && use_rcpp && exists("fast_pedigree_qc", mode = "function")) {
+      ids_char <- as.character(ped$ID)
+      sires_char <- as.character(ifelse(is.na(ped$Sire), "NA", ped$Sire))
+      dams_char <- as.character(ifelse(is.na(ped$Dam), "NA", ped$Dam))
+      if ("Sex" %in% names(ped) && exists("fast_pedigree_qc_sex", mode = "function")) {
+        qc <- fast_pedigree_qc_sex(ids_char, sires_char, dams_char, as.character(ped$Sex))
+      } else {
+        qc <- fast_pedigree_qc(ids_char, sires_char, dams_char)
+      }
+      if (!is.null(qc$founders) && !is.null(qc$with_both_parents) &&
+          !is.null(qc$only_sire) && !is.null(qc$only_dam)) {
+        founders <- as.integer(qc$founders)
+        both_parents <- as.integer(qc$with_both_parents)
+        only_sire <- as.integer(qc$only_sire)
+        only_dam <- as.integer(qc$only_dam)
+        return(list(
+          founders = founders,
+          non_founders = n - founders,
+          both_parents = both_parents,
+          only_sire = only_sire,
+          only_dam = only_dam
+        ))
+      }
+    }
+
+    sire_missing <- is_missing_parent(ped$Sire)
+    dam_missing <- is_missing_parent(ped$Dam)
+    founders <- sum(sire_missing & dam_missing)
+    list(
+      founders = founders,
+      non_founders = n - founders,
+      both_parents = sum(!sire_missing & !dam_missing),
+      only_sire = sum(!sire_missing & dam_missing),
+      only_dam = sum(sire_missing & !dam_missing)
+    )
+  }
+
+  # Helper: get extended stats (prefer Rcpp if available)
+  get_extended_stats <- function(ped) {
+    n <- nrow(ped)
+    if (exists("use_rcpp") && use_rcpp && exists("fast_pedigree_qc", mode = "function")) {
+      ids_char <- as.character(ped$ID)
+      sires_char <- as.character(ifelse(is.na(ped$Sire), "NA", ped$Sire))
+      dams_char <- as.character(ifelse(is.na(ped$Dam), "NA", ped$Dam))
+      if ("Sex" %in% names(ped) && exists("fast_pedigree_qc_sex", mode = "function")) {
+        qc <- fast_pedigree_qc_sex(ids_char, sires_char, dams_char, as.character(ped$Sex))
+      } else {
+        qc <- fast_pedigree_qc(ids_char, sires_char, dams_char)
+      }
+      if (!is.null(qc$unique_sires)) {
+        return(list(
+          unique_sires = as.integer(qc$unique_sires),
+          unique_dams = as.integer(qc$unique_dams),
+          total_sire_progeny = as.numeric(qc$total_sire_progeny),
+          total_dam_progeny = as.numeric(qc$total_dam_progeny),
+          individuals_with_progeny = as.integer(qc$individuals_with_progeny),
+          individuals_without_progeny = as.integer(qc$individuals_without_progeny),
+          founder_sires = as.integer(qc$founder_sires),
+          founder_dams = as.integer(qc$founder_dams),
+          founder_sire_progeny = as.numeric(qc$founder_sire_progeny),
+          founder_dam_progeny = as.numeric(qc$founder_dam_progeny),
+          founder_total_progeny = as.numeric(qc$founder_total_progeny),
+          founder_no_progeny = as.integer(qc$founder_no_progeny),
+          non_founder_sires = as.integer(qc$non_founder_sires),
+          non_founder_dams = as.integer(qc$non_founder_dams),
+          non_founder_sire_progeny = as.numeric(qc$non_founder_sire_progeny),
+          non_founder_dam_progeny = as.numeric(qc$non_founder_dam_progeny)
+        ))
+      }
+    }
+
+    # Fallback to R calculations
+    unique_sires <- unique(ped$Sire[!is.na(ped$Sire) & ped$Sire != "" & ped$Sire != "0"])
+    unique_dams <- unique(ped$Dam[!is.na(ped$Dam) & ped$Dam != "" & ped$Dam != "0"])
+    sire_progeny <- ped %>%
+      filter(!is.na(Sire), Sire != "", Sire != "0") %>%
+      count(Sire, name = "progeny_count")
+    dam_progeny <- ped %>%
+      filter(!is.na(Dam), Dam != "", Dam != "0") %>%
+      count(Dam, name = "progeny_count")
+    total_sire_progeny <- sum(sire_progeny$progeny_count)
+    total_dam_progeny <- sum(dam_progeny$progeny_count)
+    all_ids <- unique(ped$ID)
+    individuals_with_progeny <- length(unique(c(unique_sires, unique_dams))[unique(c(unique_sires, unique_dams)) %in% all_ids])
+    individuals_without_progeny <- n - individuals_with_progeny
+
+    sire_missing <- is_missing_parent(ped$Sire)
+    dam_missing <- is_missing_parent(ped$Dam)
+    founder_ids <- ped$ID[sire_missing & dam_missing]
+    founder_ped <- ped %>% filter(ID %in% founder_ids)
+    founder_sires <- founder_ped %>% filter(ID %in% unique_sires) %>% pull(ID)
+    founder_dams <- founder_ped %>% filter(ID %in% unique_dams) %>% pull(ID)
+    founder_sire_progeny <- ped %>% filter(Sire %in% founder_ids) %>% nrow()
+    founder_dam_progeny <- ped %>% filter(Dam %in% founder_ids) %>% nrow()
+    founder_total_progeny <- ped %>% filter(Sire %in% founder_ids | Dam %in% founder_ids) %>% nrow()
+    founder_no_progeny <- sum(sire_missing & dam_missing) - length(unique(c(founder_sires, founder_dams)))
+
+    non_founder_ids <- ped$ID[!(sire_missing & dam_missing)]
+    non_founder_sires <- unique_sires[unique_sires %in% non_founder_ids]
+    non_founder_dams <- unique_dams[unique_dams %in% non_founder_ids]
+    non_founder_sire_progeny <- ped %>% filter(Sire %in% non_founder_ids) %>% nrow()
+    non_founder_dam_progeny <- ped %>% filter(Dam %in% non_founder_ids) %>% nrow()
+
+    list(
+      unique_sires = length(unique_sires),
+      unique_dams = length(unique_dams),
+      total_sire_progeny = total_sire_progeny,
+      total_dam_progeny = total_dam_progeny,
+      individuals_with_progeny = individuals_with_progeny,
+      individuals_without_progeny = individuals_without_progeny,
+      founder_sires = length(founder_sires),
+      founder_dams = length(founder_dams),
+      founder_sire_progeny = founder_sire_progeny,
+      founder_dam_progeny = founder_dam_progeny,
+      founder_total_progeny = founder_total_progeny,
+      founder_no_progeny = founder_no_progeny,
+      non_founder_sires = length(non_founder_sires),
+      non_founder_dams = length(non_founder_dams),
+      non_founder_sire_progeny = non_founder_sire_progeny,
+      non_founder_dam_progeny = non_founder_dam_progeny
+    )
+  }
+
   # Comprehensive QC issue detection function with Rcpp acceleration
   detect_qc_issues <- function(df) {
     issues <- list(
       duplicates = list(),
       missing_ids = list(),
+      dual_parent_role = list(),
+      sex_mismatch = list(),
       missing_parents = list(),
       self_parenting = list(),
       loops = list(),
@@ -1035,9 +1169,14 @@ output$app_subtitle_ui <- renderUI({
         ids_char <- as.character(df$ID)
         sires_char <- as.character(ifelse(is.na(df$Sire), "NA", df$Sire))
         dams_char <- as.character(ifelse(is.na(df$Dam), "NA", df$Dam))
+        sex_char <- if ("Sex" %in% names(df)) as.character(df$Sex) else NULL
         
-        # Call fast C++ QC function
-        qc_result <- fast_pedigree_qc(ids_char, sires_char, dams_char)
+        # Call fast C++ QC function (sex-aware if available)
+        if (!is.null(sex_char) && exists("fast_pedigree_qc_sex", mode = "function")) {
+          qc_result <- fast_pedigree_qc_sex(ids_char, sires_char, dams_char, sex_char)
+        } else {
+          qc_result <- fast_pedigree_qc(ids_char, sires_char, dams_char)
+        }
         
         # Extract duplicates
         if (length(qc_result$duplicate_ids) > 0) {
@@ -1068,6 +1207,30 @@ output$app_subtitle_ui <- renderUI({
             total = length(qc_result$missing_sires) + length(qc_result$missing_dams)
           )
           issues$has_errors <- TRUE
+        }
+
+        # Check for individuals appearing as both sire and dam
+        dual_role_ids <- qc_result$dual_role_ids
+        if (length(dual_role_ids) > 0) {
+          issues$dual_parent_role <- list(
+            count = length(dual_role_ids),
+            ids = dual_role_ids
+          )
+          issues$has_errors <- TRUE
+        }
+
+        # Check sex mismatch if Sex column exists
+        if (!is.null(sex_char) && !is.null(qc_result$sex_mismatch_sire_count) &&
+            (!is.null(qc_result$sex_mismatch_dam_count))) {
+          if (qc_result$sex_mismatch_sire_count > 0 || qc_result$sex_mismatch_dam_count > 0) {
+            issues$sex_mismatch <- list(
+              sire_count = qc_result$sex_mismatch_sire_count,
+              dam_count = qc_result$sex_mismatch_dam_count,
+              sire_ids = qc_result$sex_mismatch_sire_ids,
+              dam_ids = qc_result$sex_mismatch_dam_ids
+            )
+            issues$has_errors <- TRUE
+          }
         }
         
         # Fast loop detection
@@ -1182,6 +1345,39 @@ output$app_subtitle_ui <- renderUI({
         total = length(missing_sires) + length(missing_dams)
       )
       issues$has_errors <- TRUE
+    }
+
+    # 3b. Check for individuals appearing as both sire and dam
+    dual_role_ids <- intersect(sires_mentioned, dams_mentioned)
+    if (length(dual_role_ids) > 0) {
+      issues$dual_parent_role <- list(
+        count = length(dual_role_ids),
+        ids = dual_role_ids
+      )
+      issues$has_errors <- TRUE
+    }
+
+    # 3c. Check sex mismatch if Sex column exists
+    if ("Sex" %in% names(df)) {
+      normalize_sex <- function(x) {
+        x <- tolower(trimws(as.character(x)))
+        ifelse(x %in% c("m", "male", "1"), "M",
+               ifelse(x %in% c("f", "female", "2"), "F", NA_character_))
+      }
+      sex_map <- setNames(normalize_sex(df$Sex), df$ID)
+      sire_sex <- sex_map[as.character(df$Sire)]
+      dam_sex <- sex_map[as.character(df$Dam)]
+      mismatch_sire <- !is.na(df$Sire) & df$Sire != "" & !is.na(sire_sex) & sire_sex != "M"
+      mismatch_dam <- !is.na(df$Dam) & df$Dam != "" & !is.na(dam_sex) & dam_sex != "F"
+      if (any(mismatch_sire) || any(mismatch_dam)) {
+        issues$sex_mismatch <- list(
+          sire_count = sum(mismatch_sire),
+          dam_count = sum(mismatch_dam),
+          sire_ids = unique(df$Sire[mismatch_sire]),
+          dam_ids = unique(df$Dam[mismatch_dam])
+        )
+        issues$has_errors <- TRUE
+      }
     }
     
     # 4. Check for loops (R version - simplified for speed)
@@ -1364,6 +1560,38 @@ output$app_subtitle_ui <- renderUI({
       removed_count <- sum(missing_id_mask)
       df <- df[!missing_id_mask, , drop = FALSE]
       fixed_summary$missing_ids <- paste0("Removed ", removed_count, " row(s) with missing or empty ID")
+    }
+
+    # Fix 0b: Remove parent IDs that appear as both sire and dam
+    sires_mentioned <- unique(df$Sire[!is.na(df$Sire) & df$Sire != ""])
+    dams_mentioned <- unique(df$Dam[!is.na(df$Dam) & df$Dam != ""])
+    dual_role_ids <- intersect(sires_mentioned, dams_mentioned)
+    if (length(dual_role_ids) > 0) {
+      df$Sire[df$Sire %in% dual_role_ids] <- NA
+      df$Dam[df$Dam %in% dual_role_ids] <- NA
+      fixed_summary$dual_parent_role <- paste0("Set ", length(dual_role_ids), " dual-role parent ID(s) to NA")
+    }
+
+    # Fix 0c: Enforce sex roles if Sex column exists
+    if ("Sex" %in% names(df)) {
+      normalize_sex <- function(x) {
+        x <- tolower(trimws(as.character(x)))
+        ifelse(x %in% c("m", "male", "1"), "M",
+               ifelse(x %in% c("f", "female", "2"), "F", NA_character_))
+      }
+      sex_map <- setNames(normalize_sex(df$Sex), df$ID)
+      sire_sex <- sex_map[as.character(df$Sire)]
+      dam_sex <- sex_map[as.character(df$Dam)]
+      mismatch_sire <- !is.na(df$Sire) & df$Sire != "" & !is.na(sire_sex) & sire_sex != "M"
+      mismatch_dam <- !is.na(df$Dam) & df$Dam != "" & !is.na(dam_sex) & dam_sex != "F"
+      if (any(mismatch_sire) || any(mismatch_dam)) {
+        df$Sire[mismatch_sire] <- NA
+        df$Dam[mismatch_dam] <- NA
+        fixed_summary$sex_mismatch <- paste0(
+          "Set ", sum(mismatch_sire) + sum(mismatch_dam),
+          " parent reference(s) with sex mismatch to NA"
+        )
+      }
     }
     
     # Fix 1: Remove duplicate IDs (keep first occurrence)
@@ -2396,6 +2624,18 @@ output$app_subtitle_ui <- renderUI({
           ""
         )
       }
+
+      # Dual-role parents section
+      if (length(issues$dual_parent_role) > 0 && issues$dual_parent_role$count > 0) {
+        report_lines <- c(
+          report_lines,
+          "--- DUAL-ROLE PARENTS (SIRE & DAM) ---",
+          paste("Total IDs:", issues$dual_parent_role$count),
+          "Affected IDs:",
+          paste("  ", issues$dual_parent_role$ids),
+          ""
+        )
+      }
       
       # Missing parents section
       if (length(issues$missing_parents) > 0 && issues$missing_parents$total > 0) {
@@ -2423,6 +2663,25 @@ output$app_subtitle_ui <- renderUI({
           )
         }
         
+        report_lines <- c(report_lines, "")
+      }
+
+      # Sex mismatch section
+      if (length(issues$sex_mismatch) > 0 &&
+          ((issues$sex_mismatch$sire_count %||% 0) > 0 ||
+           (issues$sex_mismatch$dam_count %||% 0) > 0)) {
+        report_lines <- c(
+          report_lines,
+          "--- SEX MISMATCH ---",
+          paste("Sire mismatches:", issues$sex_mismatch$sire_count %||% 0),
+          paste("Dam mismatches:", issues$sex_mismatch$dam_count %||% 0)
+        )
+        if ((issues$sex_mismatch$sire_count %||% 0) > 0) {
+          report_lines <- c(report_lines, "Sire IDs:", paste("  ", issues$sex_mismatch$sire_ids))
+        }
+        if ((issues$sex_mismatch$dam_count %||% 0) > 0) {
+          report_lines <- c(report_lines, "Dam IDs:", paste("  ", issues$sex_mismatch$dam_ids))
+        }
         report_lines <- c(report_lines, "")
       }
       
@@ -2504,8 +2763,9 @@ output$app_subtitle_ui <- renderUI({
       
       # Basic statistics
       n <- nrow(ped)
-      founders <- sum(is.na(ped$Sire) & is.na(ped$Dam))
-      both_parents <- sum(!is.na(ped$Sire) & !is.na(ped$Dam))
+      stats <- get_basic_stats(ped)
+      founders <- stats$founders
+      both_parents <- stats$both_parents
       
       report_lines <- c(
         "========================================",
@@ -2985,6 +3245,64 @@ output$app_subtitle_ui <- renderUI({
           )
         },
         
+        # Dual-role parent section (same ID used as both sire and dam)
+        if (length(detected_issues$dual_parent_role) > 0 && detected_issues$dual_parent_role$count > 0) {
+          tags$div(
+            class = "alert alert-danger",
+            style = "margin: 10px 0;",
+            tags$h5(
+              style = "margin-top: 0;",
+              "❌ Dual-Role Parents: ", detected_issues$dual_parent_role$count, " ID(s)"
+            ),
+            tags$p(
+              "These IDs appear as both Sire and Dam."
+            ),
+            tags$p(
+              "Examples: ",
+              tags$code(paste(head(detected_issues$dual_parent_role$ids, 5), collapse = ", ")),
+              if (detected_issues$dual_parent_role$count > 5) "..."
+            ),
+            tags$p(
+              style = "margin-bottom: 0; font-size: 0.9em;",
+              "Auto-fix will set these parent references to NA."
+            )
+          )
+        },
+        
+        # Sex mismatch section (requires Sex column)
+        if (length(detected_issues$sex_mismatch) > 0 &&
+            ((detected_issues$sex_mismatch$sire_count %||% 0) > 0 ||
+             (detected_issues$sex_mismatch$dam_count %||% 0) > 0)) {
+          tags$div(
+            class = "alert alert-warning",
+            style = "margin: 10px 0;",
+            tags$h5(
+              style = "margin-top: 0;",
+              "⚠️ Sex Mismatch: ",
+              (detected_issues$sex_mismatch$sire_count %||% 0) + (detected_issues$sex_mismatch$dam_count %||% 0),
+              " reference(s)"
+            ),
+            if ((detected_issues$sex_mismatch$sire_count %||% 0) > 0) {
+              tags$p(
+                "Sire sex mismatches (", detected_issues$sex_mismatch$sire_count, "): ",
+                tags$code(paste(head(detected_issues$sex_mismatch$sire_ids, 5), collapse = ", ")),
+                if (length(detected_issues$sex_mismatch$sire_ids) > 5) "..."
+              )
+            },
+            if ((detected_issues$sex_mismatch$dam_count %||% 0) > 0) {
+              tags$p(
+                "Dam sex mismatches (", detected_issues$sex_mismatch$dam_count, "): ",
+                tags$code(paste(head(detected_issues$sex_mismatch$dam_ids, 5), collapse = ", ")),
+                if (length(detected_issues$sex_mismatch$dam_ids) > 5) "..."
+              )
+            },
+            tags$p(
+              style = "margin-bottom: 0; font-size: 0.9em;",
+              "Auto-fix will set these parent references to NA."
+            )
+          )
+        },
+        
         # Missing parents section
         if (length(detected_issues$missing_parents) > 0 && detected_issues$missing_parents$total > 0) {
           tags$div(
@@ -3226,9 +3544,10 @@ output$app_subtitle_ui <- renderUI({
       return()
     }
     
+    stats <- get_basic_stats(ped)
     cat("Total individuals:", nrow(ped), "\n")
-    cat("Founders:", sum(is.na(ped$Sire) & is.na(ped$Dam)), "\n")
-    cat("Non-founders:", sum(!is.na(ped$Sire) | !is.na(ped$Dam)), "\n")
+    cat("Founders:", stats$founders, "\n")
+    cat("Non-founders:", stats$non_founders, "\n")
   })
   
   # Auto-switch to visualization tab when data is processed (with delay for large datasets)
@@ -3928,8 +4247,9 @@ output$app_subtitle_ui <- renderUI({
     qc_results <- detect_qc_issues(ped)
     
     # Basic statistics
-    founders <- sum(is.na(ped$Sire) & is.na(ped$Dam))
-    both_parents <- sum(!is.na(ped$Sire) & !is.na(ped$Dam))
+    stats <- get_basic_stats(ped)
+    founders <- stats$founders
+    both_parents <- stats$both_parents
     
     cat("Total individuals:", format(n, big.mark = ","), "\n")
     cat("Founders:", format(founders, big.mark = ","), "\n")
@@ -4072,20 +4392,22 @@ output$app_subtitle_ui <- renderUI({
     cat("Individuals in total:", format(n, big.mark = ","), "\n")
     
     # Founders and non-founders
-    founders <- sum(is.na(ped$Sire) & is.na(ped$Dam))
-    non_founders <- n - founders
+    stats <- get_basic_stats(ped)
+    founders <- stats$founders
+    non_founders <- stats$non_founders
     cat("Founders:", format(founders, big.mark = ","), "\n")
     cat("Non-founders:", format(non_founders, big.mark = ","), "\n")
     
     # Individuals with both parents
-    both_parents <- sum(!is.na(ped$Sire) & !is.na(ped$Dam))
-    only_sire <- sum(!is.na(ped$Sire) & is.na(ped$Dam))
-    only_dam <- sum(is.na(ped$Sire) & !is.na(ped$Dam))
+    both_parents <- stats$both_parents
+    only_sire <- stats$only_sire
+    only_dam <- stats$only_dam
     cat("With both parents:", format(both_parents, big.mark = ","), "\n")
     cat("Only with known sire:", format(only_sire, big.mark = ","), "\n")
     cat("Only with known dam:", format(only_dam, big.mark = ","), "\n\n")
     
-    # Parent statistics
+  # Parent statistics
+  stats_ext <- get_extended_stats(ped)
     cat("--- PARENT STATISTICS ---\n")
     # Get unique sires and dams
     all_ids <- unique(ped$ID)
@@ -4104,21 +4426,23 @@ output$app_subtitle_ui <- renderUI({
       count(Dam, name = "progeny_count")
     total_dam_progeny <- sum(dam_progeny$progeny_count)
     
-    cat("Sires in total:", format(length(unique_sires), big.mark = ","), "\n")
-    cat("   -Progeny:", format(total_sire_progeny, big.mark = ","), "\n")
-    cat("Dams in total:", format(length(unique_dams), big.mark = ","), "\n")
-    cat("   -Progeny:", format(total_dam_progeny, big.mark = ","), "\n")
+  cat("Sires in total:", format(stats_ext$unique_sires, big.mark = ","), "\n")
+  cat("   -Progeny:", format(stats_ext$total_sire_progeny, big.mark = ","), "\n")
+  cat("Dams in total:", format(stats_ext$unique_dams, big.mark = ","), "\n")
+  cat("   -Progeny:", format(stats_ext$total_dam_progeny, big.mark = ","), "\n")
     
     # Individuals with progeny
     individuals_with_progeny <- unique(c(unique_sires, unique_dams))
     individuals_with_progeny <- individuals_with_progeny[individuals_with_progeny %in% all_ids]
     individuals_without_progeny <- n - length(individuals_with_progeny)
-    cat("Individuals with progeny:", format(length(individuals_with_progeny), big.mark = ","), "\n")
-    cat("Individuals with no progeny:", format(individuals_without_progeny, big.mark = ","), "\n\n")
+  cat("Individuals with progeny:", format(stats_ext$individuals_with_progeny, big.mark = ","), "\n")
+  cat("Individuals with no progeny:", format(stats_ext$individuals_without_progeny, big.mark = ","), "\n\n")
     
     # Founder statistics
     cat("--- FOUNDER STATISTICS ---\n")
-    founder_ids <- ped$ID[is.na(ped$Sire) & is.na(ped$Dam)]
+    sire_missing <- is_missing_parent(ped$Sire)
+    dam_missing <- is_missing_parent(ped$Dam)
+    founder_ids <- ped$ID[sire_missing & dam_missing]
     founder_ped <- ped %>% filter(ID %in% founder_ids)
     
     # Founder sires and dams
@@ -4142,13 +4466,13 @@ output$app_subtitle_ui <- renderUI({
     
     founder_no_progeny <- founders - length(unique(c(founder_sires, founder_dams)))
     
-    cat("Founders:", format(founders, big.mark = ","), "\n")
-    cat("   -Progeny:", format(founder_total_progeny, big.mark = ","), "\n")
-    cat("   -Sires:", format(length(founder_sires), big.mark = ","), "\n")
-    cat("       -Progeny:", format(founder_sire_progeny, big.mark = ","), "\n")
-    cat("   -Dams:", format(length(founder_dams), big.mark = ","), "\n")
-    cat("       -Progeny:", format(founder_dam_progeny, big.mark = ","), "\n")
-    cat("   -With no progeny:", format(founder_no_progeny, big.mark = ","), "\n\n")
+  cat("Founders:", format(founders, big.mark = ","), "\n")
+  cat("   -Progeny:", format(stats_ext$founder_total_progeny, big.mark = ","), "\n")
+  cat("   -Sires:", format(stats_ext$founder_sires, big.mark = ","), "\n")
+  cat("       -Progeny:", format(stats_ext$founder_sire_progeny, big.mark = ","), "\n")
+  cat("   -Dams:", format(stats_ext$founder_dams, big.mark = ","), "\n")
+  cat("       -Progeny:", format(stats_ext$founder_dam_progeny, big.mark = ","), "\n")
+  cat("   -With no progeny:", format(stats_ext$founder_no_progeny, big.mark = ","), "\n\n")
     
     # Non-founder statistics
     cat("--- NON-FOUNDER STATISTICS ---\n")
@@ -4169,11 +4493,11 @@ output$app_subtitle_ui <- renderUI({
       filter(Dam %in% non_founder_ped$ID) %>%
       nrow()
     
-    cat("Non-founders:", format(non_founders, big.mark = ","), "\n")
-    cat("   -Sires:", format(length(non_founder_sires), big.mark = ","), "\n")
-    cat("       -Progeny:", format(non_founder_sire_progeny, big.mark = ","), "\n")
-    cat("   -Dams:", format(length(non_founder_dams), big.mark = ","), "\n")
-    cat("       -Progeny:", format(non_founder_dam_progeny, big.mark = ","), "\n")
+  cat("Non-founders:", format(non_founders, big.mark = ","), "\n")
+  cat("   -Sires:", format(stats_ext$non_founder_sires, big.mark = ","), "\n")
+  cat("       -Progeny:", format(stats_ext$non_founder_sire_progeny, big.mark = ","), "\n")
+  cat("   -Dams:", format(stats_ext$non_founder_dams, big.mark = ","), "\n")
+  cat("       -Progeny:", format(stats_ext$non_founder_dam_progeny, big.mark = ","), "\n")
     cat("   -Only with known sire:", format(only_sire, big.mark = ","), "\n")
     cat("   -Only with known dam:", format(only_dam, big.mark = ","), "\n")
     cat("   -With known sire and dam:", format(both_parents, big.mark = ","), "\n\n")
@@ -4347,7 +4671,7 @@ output$app_subtitle_ui <- renderUI({
     }, error = function(e) {
       cat("LAP calculation error:", e$message, "\n")
       # Fallback: show founders only
-      founders_count <- sum(is.na(ped$Sire) & is.na(ped$Dam))
+      founders_count <- sum(is_missing_parent(ped$Sire) & is_missing_parent(ped$Dam))
       cat("Founders (LAP = 0):", format(founders_count, big.mark = ","), "\n")
     })
   })
@@ -4370,11 +4694,13 @@ output$app_subtitle_ui <- renderUI({
       report_lines <- capture.output({
         # Basic statistics
         n <- nrow(ped)
-        founders <- sum(is.na(ped$Sire) & is.na(ped$Dam))
-        non_founders <- n - founders
-        both_parents <- sum(!is.na(ped$Sire) & !is.na(ped$Dam))
-        only_sire <- sum(!is.na(ped$Sire) & is.na(ped$Dam))
-        only_dam <- sum(is.na(ped$Sire) & !is.na(ped$Dam))
+        stats <- get_basic_stats(ped)
+        founders <- stats$founders
+        non_founders <- stats$non_founders
+        both_parents <- stats$both_parents
+        only_sire <- stats$only_sire
+        only_dam <- stats$only_dam
+        stats_ext <- get_extended_stats(ped)
         
         cat("========================================\n")
         cat("PEDIGREE STRUCTURE REPORT\n")
@@ -4390,6 +4716,8 @@ output$app_subtitle_ui <- renderUI({
         cat("Only with known dam:", format(only_dam, big.mark = ","), "\n\n")
         
         # Parent statistics
+        sire_missing <- is_missing_parent(ped$Sire)
+        dam_missing <- is_missing_parent(ped$Dam)
         all_ids <- unique(ped$ID)
         unique_sires <- unique(ped$Sire[!is.na(ped$Sire) & ped$Sire != "" & ped$Sire != "0"])
         unique_dams <- unique(ped$Dam[!is.na(ped$Dam) & ped$Dam != "" & ped$Dam != "0"])
@@ -4409,15 +4737,15 @@ output$app_subtitle_ui <- renderUI({
         individuals_without_progeny <- n - length(individuals_with_progeny)
         
         cat("--- PARENT STATISTICS ---\n")
-        cat("Sires in total:", format(length(unique_sires), big.mark = ","), "\n")
-        cat("   -Progeny:", format(total_sire_progeny, big.mark = ","), "\n")
-        cat("Dams in total:", format(length(unique_dams), big.mark = ","), "\n")
-        cat("   -Progeny:", format(total_dam_progeny, big.mark = ","), "\n")
-        cat("Individuals with progeny:", format(length(individuals_with_progeny), big.mark = ","), "\n")
-        cat("Individuals with no progeny:", format(individuals_without_progeny, big.mark = ","), "\n\n")
+        cat("Sires in total:", format(stats_ext$unique_sires, big.mark = ","), "\n")
+        cat("   -Progeny:", format(stats_ext$total_sire_progeny, big.mark = ","), "\n")
+        cat("Dams in total:", format(stats_ext$unique_dams, big.mark = ","), "\n")
+        cat("   -Progeny:", format(stats_ext$total_dam_progeny, big.mark = ","), "\n")
+        cat("Individuals with progeny:", format(stats_ext$individuals_with_progeny, big.mark = ","), "\n")
+        cat("Individuals with no progeny:", format(stats_ext$individuals_without_progeny, big.mark = ","), "\n\n")
         
         # Founder statistics
-        founder_ids <- ped$ID[is.na(ped$Sire) & is.na(ped$Dam)]
+    founder_ids <- ped$ID[sire_missing & dam_missing]
         founder_ped <- ped %>% filter(ID %in% founder_ids)
         founder_sires <- founder_ped %>% filter(ID %in% unique_sires) %>% pull(ID)
         founder_dams <- founder_ped %>% filter(ID %in% unique_dams) %>% pull(ID)
@@ -4429,12 +4757,12 @@ output$app_subtitle_ui <- renderUI({
         
         cat("--- FOUNDER STATISTICS ---\n")
         cat("Founders:", format(founders, big.mark = ","), "\n")
-        cat("   -Progeny:", format(founder_total_progeny, big.mark = ","), "\n")
-        cat("   -Sires:", format(length(founder_sires), big.mark = ","), "\n")
-        cat("       -Progeny:", format(founder_sire_progeny, big.mark = ","), "\n")
-        cat("   -Dams:", format(length(founder_dams), big.mark = ","), "\n")
-        cat("       -Progeny:", format(founder_dam_progeny, big.mark = ","), "\n")
-        cat("   -With no progeny:", format(founder_no_progeny, big.mark = ","), "\n\n")
+        cat("   -Progeny:", format(stats_ext$founder_total_progeny, big.mark = ","), "\n")
+        cat("   -Sires:", format(stats_ext$founder_sires, big.mark = ","), "\n")
+        cat("       -Progeny:", format(stats_ext$founder_sire_progeny, big.mark = ","), "\n")
+        cat("   -Dams:", format(stats_ext$founder_dams, big.mark = ","), "\n")
+        cat("       -Progeny:", format(stats_ext$founder_dam_progeny, big.mark = ","), "\n")
+        cat("   -With no progeny:", format(stats_ext$founder_no_progeny, big.mark = ","), "\n\n")
         
         # Non-founder statistics
         non_founder_ped <- ped %>% filter(!ID %in% founder_ids)
@@ -4445,10 +4773,10 @@ output$app_subtitle_ui <- renderUI({
         
         cat("--- NON-FOUNDER STATISTICS ---\n")
         cat("Non-founders:", format(non_founders, big.mark = ","), "\n")
-        cat("   -Sires:", format(length(non_founder_sires), big.mark = ","), "\n")
-        cat("       -Progeny:", format(non_founder_sire_progeny, big.mark = ","), "\n")
-        cat("   -Dams:", format(length(non_founder_dams), big.mark = ","), "\n")
-        cat("       -Progeny:", format(non_founder_dam_progeny, big.mark = ","), "\n")
+        cat("   -Sires:", format(stats_ext$non_founder_sires, big.mark = ","), "\n")
+        cat("       -Progeny:", format(stats_ext$non_founder_sire_progeny, big.mark = ","), "\n")
+        cat("   -Dams:", format(stats_ext$non_founder_dams, big.mark = ","), "\n")
+        cat("       -Progeny:", format(stats_ext$non_founder_dam_progeny, big.mark = ","), "\n")
         cat("   -Only with known sire:", format(only_sire, big.mark = ","), "\n")
         cat("   -Only with known dam:", format(only_dam, big.mark = ","), "\n")
         cat("   -With known sire and dam:", format(both_parents, big.mark = ","), "\n\n")
@@ -4864,8 +5192,10 @@ output$app_subtitle_ui <- renderUI({
       
       tryCatch({
         # Check if we have enough individuals with parent information
-        n_with_parents <- sum(!is.na(ped$Sire) | !is.na(ped$Dam))
-        n_founders <- sum(is.na(ped$Sire) & is.na(ped$Dam))
+        sire_missing <- is_missing_parent(ped$Sire)
+        dam_missing <- is_missing_parent(ped$Dam)
+        n_with_parents <- sum(!sire_missing | !dam_missing)
+        n_founders <- sum(sire_missing & dam_missing)
         
         if (n_with_parents == 0) {
           stop("No individuals have parent information (Sire or Dam). Cannot calculate inbreeding coefficients.")
@@ -5297,8 +5627,10 @@ output$app_subtitle_ui <- renderUI({
       cat("Possible reasons:\n")
       cat("1. All individuals are founders (no parents)\n")
       if (!is.null(ped)) {
-        n_founders <- sum(is.na(ped$Sire) & is.na(ped$Dam))
-        n_with_parents <- sum(!is.na(ped$Sire) | !is.na(ped$Dam))
+        sire_missing <- is_missing_parent(ped$Sire)
+        dam_missing <- is_missing_parent(ped$Dam)
+        n_founders <- sum(sire_missing & dam_missing)
+        n_with_parents <- sum(!sire_missing | !dam_missing)
         cat("   - Founders in your data:", n_founders, "\n")
         cat("   - Individuals with parents:", n_with_parents, "\n")
       }
@@ -5331,12 +5663,30 @@ output$app_subtitle_ui <- renderUI({
       return()
     }
     
-    cat("n =", length(f_vals), "\n")
-    cat("Mean:", round(mean(f_vals, na.rm = TRUE), 4), "\n")
-    cat("Median:", round(median(f_vals, na.rm = TRUE), 4), "\n")
-    cat("Min:", round(min(f_vals, na.rm = TRUE), 4), "\n")
-    cat("Max:", round(max(f_vals, na.rm = TRUE), 4), "\n")
-    cat("\nInbred (F>0):", sum(f_vals > 0, na.rm = TRUE))
+    f_all <- f_vals[!is.na(f_vals)]
+    # Treat very small values as zero to avoid precision artifacts
+    f_pos <- f_all[f_all > .Machine$double.eps]
+    
+    cat("All individuals (F including 0)\n")
+    cat("n =", length(f_all), "\n")
+    cat("Mean:", round(mean(f_all, na.rm = TRUE), 4), "\n")
+    cat("SD:", round(stats::sd(f_all, na.rm = TRUE), 4), "\n")
+    cat("Min:", round(min(f_all, na.rm = TRUE), 4), "\n")
+    cat("Max:", round(max(f_all, na.rm = TRUE), 4), "\n\n")
+    
+    cat("Inbred individuals (F > 0)\n")
+    cat("n =", length(f_pos), "\n")
+    if (length(f_pos) > 0) {
+      cat("Mean:", round(mean(f_pos, na.rm = TRUE), 4), "\n")
+      cat("SD:", round(stats::sd(f_pos, na.rm = TRUE), 4), "\n")
+      cat("Min:", signif(min(f_pos, na.rm = TRUE), 1), "\n")
+      cat("Max:", round(max(f_pos, na.rm = TRUE), 4), "\n\n")
+    } else {
+      cat("Mean: N/A\n")
+      cat("SD: N/A\n")
+      cat("Min: N/A\n")
+      cat("Max: N/A\n")
+    }
   })
   
   # Top 10 table
