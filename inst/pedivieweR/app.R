@@ -498,7 +498,11 @@ ui <- page_fillable(
               hr(),
               h5(textOutput("top10_inbred_title"), style = "font-size: 0.95rem; font-weight: 600;"),
               DTOutput("f_table_top"),
-              uiOutput("download_all_f_button")
+              uiOutput("download_all_f_button"),
+              hr(),
+              h5(textOutput("top_sires_title"), style = "font-size: 0.95rem; font-weight: 600;"),
+              DTOutput("top_sires_table"),
+              uiOutput("download_all_sire_progeny_button")
           ),
           
           div(class = "panel-section",
@@ -896,6 +900,16 @@ output$app_subtitle_ui <- renderUI({
   output$download_all_f_button <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
     downloadButton("download_f", get_label_local("download_all_f", lang), class = "btn-sm btn-secondary mt-2 w-100")
+  })
+
+  output$top_sires_title <- renderText({
+    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+    get_label_local("top_impact_sires", lang)
+  })
+
+  output$download_all_sire_progeny_button <- renderUI({
+    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+    downloadButton("download_sire_progeny", get_label_local("download_all_sire_progeny", lang), class = "btn-sm btn-secondary mt-2 w-100")
   })
 
   output$selected_animal_export_title <- renderText({
@@ -5707,7 +5721,49 @@ output$app_subtitle_ui <- renderUI({
       rownames = FALSE
     ) %>% formatRound("F", 4)
   })
-  
+
+  sire_progeny_counts <- reactive({
+    req(ped_data())
+    ped <- ped_data()
+    if (is.null(ped) || !"Sire" %in% names(ped)) {
+      return(tibble(Sire = character(), progeny_count = integer()))
+    }
+    ped %>%
+      filter(!is.na(Sire), Sire != "", Sire != "0") %>%
+      count(Sire, name = "progeny_count") %>%
+      arrange(desc(progeny_count))
+  })
+
+  output$top_sires_table <- renderDT({
+    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+    counts <- sire_progeny_counts()
+    if (nrow(counts) == 0) {
+      return(datatable(
+        data.frame(Message = get_label_local("no_sire_progeny_data", lang)),
+        options = list(dom = 't'),
+        rownames = FALSE
+      ))
+    }
+
+    top_n <- min(10, nrow(counts))
+    total_progeny <- sum(counts$progeny_count, na.rm = TRUE)
+    counts <- counts %>%
+      mutate(progeny_percent = ifelse(total_progeny > 0, progeny_count / total_progeny, 0))
+
+    display_counts <- counts %>% head(top_n)
+    colnames(display_counts) <- c(
+      get_label_local("sire_column", lang),
+      get_label_local("progeny_count_column", lang),
+      get_label_local("progeny_percent_column", lang)
+    )
+
+    datatable(
+      display_counts,
+      options = list(pageLength = 10, dom = 't'),
+      rownames = FALSE
+    ) %>% formatPercentage(3, 1)
+  })
+
   # Download F
   output$download_f <- downloadHandler(
     filename = function() { paste0("inbreeding_", Sys.Date(), ".csv") },
@@ -5718,6 +5774,22 @@ output$app_subtitle_ui <- renderUI({
       } else {
         # Create empty file with headers
         write.csv(data.frame(ID = character(), F = numeric()), file, row.names = FALSE)
+      }
+    }
+  )
+
+  output$download_sire_progeny <- downloadHandler(
+    filename = function() { paste0("sire_progeny_", Sys.Date(), ".csv") },
+    content = function(file) {
+      counts <- sire_progeny_counts()
+      if (nrow(counts) > 0) {
+        total_progeny <- sum(counts$progeny_count, na.rm = TRUE)
+        counts <- counts %>%
+          mutate(progeny_percent = ifelse(total_progeny > 0, progeny_count / total_progeny, 0))
+        write.csv(counts, file, row.names = FALSE)
+      } else {
+        write.csv(data.frame(Sire = character(), progeny_count = integer(), progeny_percent = numeric()),
+                  file, row.names = FALSE)
       }
     }
   )
@@ -6217,6 +6289,10 @@ output$app_subtitle_ui <- renderUI({
     
     # Get search depth from user input (for both ancestors and descendants)
     search_depth <- input$search_depth %||% 5
+    # Aggregation thresholds for large sibships
+    agg_total_threshold <- 500
+    agg_sib_threshold <- 50
+    agg_sib_threshold_when_large <- 20
     
     # Get all related individuals
     ancestors <- get_ancestors(ped, target_id, max_depth = search_depth)
@@ -6249,6 +6325,168 @@ output$app_subtitle_ui <- renderUI({
         borderWidth = 2
       )
     
+    # Build edges
+    edges <- bind_rows(
+      related_ped %>% filter(!is.na(Sire)) %>% transmute(from = as.character(Sire), to = as.character(ID)),
+      related_ped %>% filter(!is.na(Dam)) %>% transmute(from = as.character(Dam), to = as.character(ID))
+    ) %>%
+      # Only keep edges where both nodes exist in the related_ped
+      filter(from %in% related_ped$ID & to %in% related_ped$ID)
+    
+    # Aggregate large sibships when the network is big or sibships are huge
+    # Only aggregate leaf nodes (no descendants) to avoid collapsing internal structure
+    parent_ids <- unique(c(related_ped$Sire, related_ped$Dam))
+    parent_ids <- parent_ids[!is.na(parent_ids) & parent_ids != ""]
+    leaf_ids <- setdiff(related_ped$ID, parent_ids)
+    
+    if (nrow(nodes) > 0) {
+      sib_groups <- related_ped %>%
+        filter(!is.na(Sire), Sire != "", !is.na(Dam), Dam != "") %>%
+        mutate(sib_key = paste0(Sire, "||", Dam)) %>%
+        group_by(sib_key, Sire, Dam) %>%
+        summarize(children = list(unique(ID)), n = n_distinct(ID), .groups = "drop")
+      
+      use_threshold <- if (nrow(nodes) > agg_total_threshold) agg_sib_threshold_when_large else agg_sib_threshold
+      
+      if (nrow(sib_groups) > 0) {
+        agg_nodes <- list()
+        agg_edges <- list()
+        remove_ids <- character(0)
+        
+        for (i in seq_len(nrow(sib_groups))) {
+          sib <- sib_groups[i, ]
+          kids <- unlist(sib$children)
+          eligible_kids <- intersect(kids, leaf_ids)
+          eligible_kids <- setdiff(eligible_kids, target_id)
+          
+          if (length(eligible_kids) >= use_threshold) {
+            agg_id <- paste0("sib_", digest::digest(as.character(sib$sib_key), algo = "xxhash64"))
+            agg_label <- if (input$show_labels) paste0("Sibship (n=", length(eligible_kids), ")") else ""
+            agg_title <- paste0(
+              "Sibship group\n",
+              "Sire: ", as.character(sib$Sire), "\n",
+              "Dam: ", as.character(sib$Dam), "\n",
+              "Count: ", length(eligible_kids)
+            )
+            agg_value <- pmax(input$node_size, input$node_size * (1 + log1p(length(eligible_kids)) / 2))
+            
+            agg_nodes[[length(agg_nodes) + 1]] <- tibble(
+              id = agg_id,
+              label = agg_label,
+              group = "Sibship",
+              title = agg_title,
+              value = agg_value,
+              level = "sibship",
+              color = "#F5DEB3",
+              borderWidth = 2,
+              shape = "square"
+            )
+            
+            # Connect parents to aggregated node if present in current graph
+            if (as.character(sib$Sire) %in% nodes$id) {
+              agg_edges[[length(agg_edges) + 1]] <- tibble(from = as.character(sib$Sire), to = agg_id)
+            }
+            if (as.character(sib$Dam) %in% nodes$id) {
+              agg_edges[[length(agg_edges) + 1]] <- tibble(from = as.character(sib$Dam), to = agg_id)
+            }
+            
+            remove_ids <- c(remove_ids, eligible_kids)
+          }
+        }
+        
+        if (length(remove_ids) > 0) {
+          nodes <- nodes %>% filter(!id %in% remove_ids)
+          if (length(agg_nodes) > 0) {
+            nodes <- bind_rows(nodes, bind_rows(agg_nodes))
+          }
+          # Remove edges to aggregated children
+          edges <- edges %>%
+            filter(!(to %in% remove_ids)) %>%
+            filter(from %in% nodes$id & to %in% nodes$id)
+          
+          if (length(agg_edges) > 0) {
+            edges <- bind_rows(edges, bind_rows(agg_edges)) %>%
+              distinct(from, to, .keep_all = TRUE)
+          }
+        }
+      }
+
+      # Half-sib aggregation: group by Sire or Dam only (remaining leaf nodes)
+      remaining_leaf_ids <- intersect(leaf_ids, nodes$id)
+      half_threshold <- if (nrow(nodes) > agg_total_threshold) agg_sib_threshold_when_large else agg_sib_threshold
+
+      half_groups_sire <- related_ped %>%
+        filter(!is.na(Sire), Sire != "", ID %in% remaining_leaf_ids) %>%
+        group_by(Sire) %>%
+        summarize(children = list(unique(ID)), n = n_distinct(ID), .groups = "drop")
+
+      half_groups_dam <- related_ped %>%
+        filter(!is.na(Dam), Dam != "", ID %in% remaining_leaf_ids) %>%
+        group_by(Dam) %>%
+        summarize(children = list(unique(ID)), n = n_distinct(ID), .groups = "drop")
+
+      half_agg_nodes <- list()
+      half_agg_edges <- list()
+      half_remove_ids <- character(0)
+
+      add_half_group <- function(parent_id, kids, parent_role) {
+        eligible_kids <- setdiff(kids, target_id)
+        if (length(eligible_kids) < half_threshold) return(NULL)
+        agg_id <- paste0("half_", parent_role, "_", digest::digest(as.character(parent_id), algo = "xxhash64"))
+        agg_label <- if (input$show_labels) paste0("Half-sib (n=", length(eligible_kids), ")") else ""
+        agg_title <- paste0(
+          "Half-sib group\n",
+          if (parent_role == "sire") "Sire: " else "Dam: ", as.character(parent_id), "\n",
+          "Count: ", length(eligible_kids)
+        )
+        agg_value <- pmax(input$node_size, input$node_size * (1 + log1p(length(eligible_kids)) / 2))
+
+        half_agg_nodes[[length(half_agg_nodes) + 1]] <<- tibble(
+          id = agg_id,
+          label = agg_label,
+          group = "HalfSib",
+          title = agg_title,
+          value = agg_value,
+          level = "half_sib",
+          color = "#E6C47A",
+          borderWidth = 2,
+          shape = "square"
+        )
+        if (as.character(parent_id) %in% nodes$id) {
+          half_agg_edges[[length(half_agg_edges) + 1]] <<- tibble(from = as.character(parent_id), to = agg_id)
+        }
+        half_remove_ids <<- c(half_remove_ids, eligible_kids)
+      }
+
+      if (nrow(half_groups_sire) > 0) {
+        for (i in seq_len(nrow(half_groups_sire))) {
+          grp <- half_groups_sire[i, ]
+          add_half_group(grp$Sire, unlist(grp$children), "sire")
+        }
+      }
+
+      if (nrow(half_groups_dam) > 0) {
+        for (i in seq_len(nrow(half_groups_dam))) {
+          grp <- half_groups_dam[i, ]
+          add_half_group(grp$Dam, unlist(grp$children), "dam")
+        }
+      }
+
+      if (length(half_remove_ids) > 0) {
+        nodes <- nodes %>% filter(!id %in% half_remove_ids)
+        if (length(half_agg_nodes) > 0) {
+          nodes <- bind_rows(nodes, bind_rows(half_agg_nodes))
+        }
+        edges <- edges %>%
+          filter(!(to %in% half_remove_ids)) %>%
+          filter(from %in% nodes$id & to %in% nodes$id)
+        if (length(half_agg_edges) > 0) {
+          edges <- bind_rows(edges, bind_rows(half_agg_edges)) %>%
+            distinct(from, to, .keep_all = TRUE)
+        }
+      }
+    }
+    
     # Add F values and adjust node size based on inbreeding
     if (!is.null(f_values()) && nrow(f_values()) > 0) {
       nodes <- nodes %>%
@@ -6273,14 +6511,6 @@ output$app_subtitle_ui <- renderUI({
         # Make target individual slightly larger
         value = ifelse(id == target_id, value * 1.2, value)
       )
-    
-    # Build edges
-    edges <- bind_rows(
-      related_ped %>% filter(!is.na(Sire)) %>% transmute(from = as.character(Sire), to = as.character(ID)),
-      related_ped %>% filter(!is.na(Dam)) %>% transmute(from = as.character(Dam), to = as.character(ID))
-    ) %>%
-      # Only keep edges where both nodes exist in the related_ped
-      filter(from %in% related_ped$ID & to %in% related_ped$ID)
     
     
     # Compute layout

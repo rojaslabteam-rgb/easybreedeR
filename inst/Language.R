@@ -234,6 +234,66 @@ TRANSLATIONS <- list(
     zh = "近交程度最高的前10个体：",
     pt = "Top 10 Mais Endogâmicos:"
   ),
+  pediviewer_top_impact_sires = list(
+    en = "Top Impact Sires:",
+    zh = "影响最大的公畜（Top）：",
+    pt = "Principais Reprodutores (Impacto):"
+  ),
+  pediviewer_top_sires_view_label = list(
+    en = "View:",
+    zh = "显示方式：",
+    pt = "Visualização:"
+  ),
+  pediviewer_top_sires_top_n_label = list(
+    en = "Top N to display:",
+    zh = "显示前 N 个：",
+    pt = "Top N a exibir:"
+  ),
+  pediviewer_top_sires_view_table = list(
+    en = "Table",
+    zh = "表格",
+    pt = "Tabela"
+  ),
+  pediviewer_top_sires_view_chart = list(
+    en = "Bar Chart",
+    zh = "柱状图",
+    pt = "Gráfico de Barras"
+  ),
+  pediviewer_download_all_sire_progeny = list(
+    en = "Download All Sire Progeny Counts",
+    zh = "下载全部公畜后代数量",
+    pt = "Baixar Contagem de Descendentes dos Reprodutores"
+  ),
+  pediviewer_no_sire_progeny_data = list(
+    en = "No sire progeny data available",
+    zh = "暂无公畜后代统计数据",
+    pt = "Sem dados de descendência dos reprodutores"
+  ),
+  pediviewer_top_sires_plot_title = list(
+    en = "Top Impact Sires",
+    zh = "影响最大的公畜（Top）",
+    pt = "Principais Reprodutores"
+  ),
+  pediviewer_sire_column = list(
+    en = "Sire",
+    zh = "公畜",
+    pt = "Reprodutor"
+  ),
+  pediviewer_progeny_count_column = list(
+    en = "Progeny Count",
+    zh = "后代数量",
+    pt = "Contagem de Descendentes"
+  ),
+  pediviewer_progeny_percent_column = list(
+    en = "Progeny %",
+    zh = "后代占比",
+    pt = "Percentual de Descendentes"
+  ),
+  pediviewer_sire_progeny_ylabel = list(
+    en = "Number of Progeny",
+    zh = "后代数量",
+    pt = "Número de Descendentes"
+  ),
   pediviewer_download_all_f = list(
     en = "Download All F Values",
     zh = "下载全部 F 值",
