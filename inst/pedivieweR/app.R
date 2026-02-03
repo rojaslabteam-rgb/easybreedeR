@@ -717,11 +717,11 @@ ui <- page_fillable(
         }
       });
       
-      // Handle highlighting descendants
+      // Handle highlighting ancestors
       Shiny.addCustomMessageHandler('highlightDescendants', function(message) {
         var network = $('#pedigree_network').data('visNetwork');
         if (network) {
-          // Get all nodes to highlight (includes selected, parents, and descendants)
+          // Get all nodes to highlight (includes selected and ancestors)
           var allHighlight = message.all_nodes || [];
           
           // Use visNetwork's selectNodes method to highlight all
@@ -3625,20 +3625,16 @@ output$app_subtitle_ui <- renderUI({
     if (!is.null(net) && !is.null(net$nodes) && nrow(net$nodes) > 0) {
       # Count nodes currently visualized
       related_ids <- net$nodes$id
-      # Derive ancestors/descendants sets to present breakdown (computed with same depth)
+      # Derive ancestors set to present breakdown (computed with same depth)
       ancestors <- get_ancestors(ped, target_id, max_depth = depth)
-      descendants <- get_descendants(ped, target_id, max_depth = depth)
       # Intersect with visualized nodes to avoid mismatch
       n_ancestors <- length(intersect(related_ids, ancestors))
-      n_descendants <- length(intersect(related_ids, descendants))
       total_export <- length(unique(related_ids))
     } else {
       # Fallback to recompute when network not yet built
       ancestors <- get_ancestors(ped, target_id, max_depth = depth)
-      descendants <- get_descendants(ped, target_id, max_depth = depth)
-      selected_ids <- unique(c(target_id, ancestors, descendants))
+      selected_ids <- unique(c(target_id, ancestors))
       n_ancestors <- length(ancestors)
-      n_descendants <- length(descendants)
       total_export <- length(selected_ids)
     }
     
@@ -3646,7 +3642,6 @@ output$app_subtitle_ui <- renderUI({
       target_id = target_id,
       depth = depth,
       n_ancestors = n_ancestors,
-      n_descendants = n_descendants,
       total_export = total_export
     ))
   })
@@ -3675,8 +3670,7 @@ output$app_subtitle_ui <- renderUI({
               paste0("📊 Search Depth: ", info$depth, " generation", ifelse(info$depth > 1, "s", ""))),
           div(style = "font-size: 0.95em; color: #666; margin-top: 4px;",
               paste0("📈 Export Summary: ", info$total_export, " individual", ifelse(info$total_export > 1, "s", ""),
-                     " (", info$n_ancestors, " ancestor", ifelse(info$n_ancestors != 1, "s", ""),
-                     " + 1 selected + ", info$n_descendants, " descendant", ifelse(info$n_descendants != 1, "s", ""), ")")))
+                     " (", info$n_ancestors, " ancestor", ifelse(info$n_ancestors != 1, "s", ""), " + 1 selected)")))
     }, error = function(e) {
       # Return a safe fallback UI on error
       return(div(style = "color: #666; font-style: italic; padding: 8px; background: #f8f8f8; border-radius: 4px;",
@@ -3827,8 +3821,7 @@ output$app_subtitle_ui <- renderUI({
 
         # Compute relatives within depth with generation tracking
         ancestors <- get_ancestors(ped, target_id, max_depth = depth)
-        descendants <- get_descendants(ped, target_id, max_depth = depth)
-        selected_ids <- unique(c(target_id, ancestors, descendants))
+        selected_ids <- unique(c(target_id, ancestors))
 
         # Filter pedigree to selection
         export_data <- ped %>%
@@ -3871,34 +3864,6 @@ output$app_subtitle_ui <- renderUI({
               }
             }
             return(-gen)  # Negative for ancestors
-          } else if (id %in% descendants) {
-            # For descendants, calculate downward generations
-            gen <- 0
-            current <- id
-            visited <- character(0)
-            
-            # Trace back to target
-            while (gen < depth && current != target_id && !current %in% visited) {
-              ind <- ped %>% filter(ID == current)
-              if (nrow(ind) == 0) break
-              
-              visited <- c(visited, current)
-              gen <- gen + 1
-              
-              # Check parents
-              if (!is.na(ind$Sire[1]) && ind$Sire[1] == target_id) return(gen)
-              if (!is.na(ind$Dam[1]) && ind$Dam[1] == target_id) return(gen)
-              
-              # Continue with one parent
-              if (!is.na(ind$Sire[1]) && ind$Sire[1] != "") {
-                current <- ind$Sire[1]
-              } else if (!is.na(ind$Dam[1]) && ind$Dam[1] != "") {
-                current <- ind$Dam[1]
-              } else {
-                break
-              }
-            }
-            return(gen)  # Positive for descendants
           }
           return(NA)  # Should not reach here
         }
@@ -3912,9 +3877,6 @@ output$app_subtitle_ui <- renderUI({
               ID %in% ancestors & Generation == -1 ~ "Parent",
               ID %in% ancestors & Generation == -2 ~ "Grandparent",
               ID %in% ancestors & Generation < -2 ~ paste0("Ancestor (G", abs(Generation), ")"),
-              ID %in% descendants & Generation == 1 ~ "Offspring",
-              ID %in% descendants & Generation == 2 ~ "Grandoffspring",
-              ID %in% descendants & Generation > 2 ~ paste0("Descendant (G", Generation, ")"),
               TRUE ~ "Relative"
             )
           )
@@ -3948,7 +3910,7 @@ output$app_subtitle_ui <- renderUI({
     }
   )
   
-  # Handle node highlighting for offspring generations
+  # Handle node highlighting for ancestor generations
   observeEvent(input$selected_node_for_highlight, {
     node_id <- input$selected_node_for_highlight
     if (!is.null(node_id) && node_id != "") {
@@ -3980,27 +3942,13 @@ output$app_subtitle_ui <- renderUI({
       ped <- ped_data()
       if (is.null(ped)) return()
       
-      # Get all relatives (ancestors + descendants) within specified generations
-      # Try different methods in order of preference
-      all_relatives <- tryCatch({
-        # First try igraph method (most comprehensive for network analysis)
-        get_relatives_with_igraph(ped, node_id, max_depth = highlight_gens)
-      }, error = function(e) {
-        # Fallback to pedigreeTools method
-        tryCatch({
-          get_relatives_with_pedigreeTools(ped, node_id, max_depth = highlight_gens)
-        }, error = function(e2) {
-          # Final fallback to custom method
-          get_all_relatives(ped, node_id, max_depth = highlight_gens)
-        })
-      })
-      
-      # Get descendants based on highlight_gens setting (for backward compatibility)
-      descendants <- get_descendants(ped, node_id, max_depth = highlight_gens)
+      # Get ancestors within specified generations
+      ancestors <- get_ancestors(ped, node_id, max_depth = highlight_gens)
+      all_relatives <- unique(c(node_id, ancestors))
       
       # Accumulate highlighted individuals (add to existing highlights)
       current_highlighted <- highlighted_individuals()
-      new_highlighted <- unique(c(node_id, descendants))
+      new_highlighted <- unique(c(node_id, ancestors))
       
       # Combine with existing highlights to avoid duplicates
       all_highlighted <- unique(c(current_highlighted, new_highlighted))
@@ -4016,7 +3964,7 @@ output$app_subtitle_ui <- renderUI({
       
       # Show notification with current total count
       showNotification(paste("Added", length(new_highlighted), "individuals to highlights:", 
-                            node_id, "and", highlight_gens, "generations of offspring. Total:", length(all_highlighted)), 
+                            node_id, "and", highlight_gens, "generations of ancestors. Total:", length(all_highlighted)), 
                       type = "message", duration = 4)
     }
   })
@@ -6004,23 +5952,17 @@ output$app_subtitle_ui <- renderUI({
     })
   }
   
-  # Function to get all relatives (ancestors + descendants) within specified generations
+  # Function to get ancestors within specified generations
   get_all_relatives <- function(ped, individual_id, max_depth = 1) {
     if (is.null(individual_id) || is.na(individual_id)) return(character(0))
     
     # Get ancestors
     ancestors <- get_ancestors(ped, individual_id, max_depth = max_depth)
-    
-    # Get descendants  
-    descendants <- get_descendants(ped, individual_id, max_depth = max_depth)
-    
-    # Combine all relatives (including the individual itself)
-    all_relatives <- unique(c(individual_id, ancestors, descendants))
-    
-    return(all_relatives)
+    # Combine ancestors (including the individual itself)
+    return(unique(c(individual_id, ancestors)))
   }
   
-  # Advanced function using pedigreeTools for comprehensive relative analysis
+  # Advanced function using pedigreeTools for ancestor analysis
   get_relatives_with_pedigreeTools <- function(ped, individual_id, max_depth = 1) {
     if (is.null(individual_id) || is.na(individual_id)) return(character(0))
     
@@ -6046,13 +5988,9 @@ output$app_subtitle_ui <- renderUI({
       
       # Filter by generation depth if needed
       if (max_depth > 0) {
-        # For now, use our custom functions for depth filtering
-        # This could be enhanced with more sophisticated pedigreeTools analysis
         ancestors <- get_ancestors(ped, individual_id, max_depth = max_depth)
-        descendants <- get_descendants(ped, individual_id, max_depth = max_depth)
-        
         # Combine with pedigreeTools results
-        all_relatives <- unique(c(individual_id, ancestors, descendants, related_ids))
+        all_relatives <- unique(c(individual_id, ancestors, related_ids))
       } else {
         all_relatives <- unique(c(individual_id, related_ids))
       }
@@ -6066,7 +6004,7 @@ output$app_subtitle_ui <- renderUI({
     })
   }
   
-  # Function using igraph for network-based relative analysis
+  # Function using igraph for network-based ancestor analysis
   get_relatives_with_igraph <- function(ped, individual_id, max_depth = 1) {
     if (is.null(individual_id) || is.na(individual_id)) return(character(0))
     
@@ -6215,13 +6153,12 @@ output$app_subtitle_ui <- renderUI({
     ped <- ped_data()
     if (is.null(ped) || is.null(target_id)) return(list(nodes = tibble(), edges = tibble()))
     
-    # Get search depth from user input (for both ancestors and descendants)
+    # Get search depth from user input (ancestors only)
     search_depth <- input$search_depth %||% 5
     
-    # Get all related individuals
+    # Get related individuals (ancestors only)
     ancestors <- get_ancestors(ped, target_id, max_depth = search_depth)
-    descendants <- get_descendants(ped, target_id, max_depth = search_depth)
-    related_ids <- unique(c(target_id, ancestors, descendants))
+    related_ids <- unique(c(target_id, ancestors))
     
     # Filter pedigree to related individuals
     related_ped <- ped %>% filter(ID %in% related_ids)
