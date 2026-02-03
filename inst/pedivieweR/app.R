@@ -498,7 +498,15 @@ ui <- page_fillable(
               hr(),
               h5(textOutput("top10_inbred_title"), style = "font-size: 0.95rem; font-weight: 600;"),
               DTOutput("f_table_top"),
-              uiOutput("download_all_f_button")
+              uiOutput("download_all_f_button"),
+              hr(),
+              h5(textOutput("top10_sire_title"), style = "font-size: 0.95rem; font-weight: 600;"),
+              DTOutput("sire_top_table"),
+              downloadButton("download_sire_descendants", "Download All Sires", class = "btn-sm btn-secondary mt-2 w-100"),
+              hr(),
+              h5(textOutput("top10_dam_title"), style = "font-size: 0.95rem; font-weight: 600;"),
+              DTOutput("dam_top_table"),
+              downloadButton("download_dam_descendants", "Download All Dams", class = "btn-sm btn-secondary mt-2 w-100")
           ),
           
           div(class = "panel-section",
@@ -892,6 +900,14 @@ output$app_subtitle_ui <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
     get_label_local("top10_inbred", lang)
   })
+
+output$top10_sire_title <- renderText({
+  "Top 10 Most Influential Sires"
+})
+
+output$top10_dam_title <- renderText({
+  "Top 10 Most Influential Dams"
+})
 
   output$download_all_f_button <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
@@ -5655,6 +5671,109 @@ output$app_subtitle_ui <- renderUI({
       rownames = FALSE
     ) %>% formatRound("F", 4)
   })
+
+  compute_generation_counts <- function(child_map, root_id, max_depth = 50) {
+    visited <- character(0)
+    current <- child_map[[root_id]]
+    if (is.null(current) || length(current) == 0) {
+      return(list(total = 0L, counts = integer(0)))
+    }
+    counts <- integer(0)
+    depth <- 1
+    while (length(current) > 0 && depth <= max_depth) {
+      current <- unique(as.character(current))
+      current <- setdiff(current, visited)
+      if (length(current) == 0) break
+      counts[depth] <- length(current)
+      visited <- c(visited, current)
+      current <- unlist(child_map[current], use.names = FALSE)
+      depth <- depth + 1
+    }
+    list(total = length(visited), counts = counts)
+  }
+
+  build_descendant_summary <- function(parent_col, id_label) {
+    ped <- ped_data()
+    if (is.null(ped) || !"ID" %in% names(ped) || !parent_col %in% names(ped)) {
+      return(data.frame())
+    }
+    parent_vals <- ped[[parent_col]]
+    valid <- !is_missing_parent(parent_vals)
+    if (!any(valid)) return(data.frame())
+    child_map <- split(as.character(ped$ID[valid]), as.character(parent_vals[valid]))
+    parent_ids <- names(child_map)
+    if (length(parent_ids) == 0) return(data.frame())
+
+    summaries <- lapply(parent_ids, function(pid) {
+      res <- compute_generation_counts(child_map, pid)
+      list(id = pid, total = res$total, counts = res$counts)
+    })
+    max_gen <- max(lengths(lapply(summaries, `[[`, "counts")), 0L)
+    rows <- lapply(summaries, function(s) {
+      counts <- s$counts
+      if (length(counts) < max_gen) {
+        counts <- c(counts, rep(0L, max_gen - length(counts)))
+      }
+      data.frame(
+        id = s$id,
+        total = s$total,
+        t(counts),
+        stringsAsFactors = FALSE
+      )
+    })
+    df <- do.call(rbind, rows)
+    if (is.null(df) || nrow(df) == 0) return(data.frame())
+    colnames(df) <- c(id_label, "Total_Descendants", paste0("Gen", seq_len(max_gen)))
+    df[order(-df$Total_Descendants, df[[id_label]]), , drop = FALSE]
+  }
+
+  sire_descendants <- reactive({
+    build_descendant_summary("Sire", "Sire_ID")
+  })
+
+  dam_descendants <- reactive({
+    build_descendant_summary("Dam", "Dam_ID")
+  })
+
+  output$sire_top_table <- renderDT({
+    df <- sire_descendants()
+    if (nrow(df) == 0) {
+      return(datatable(data.frame(Message = "No sire data available"), options = list(dom = "t"), rownames = FALSE))
+    }
+    datatable(head(df, 10), options = list(pageLength = 10, dom = "t"), rownames = FALSE)
+  })
+
+  output$dam_top_table <- renderDT({
+    df <- dam_descendants()
+    if (nrow(df) == 0) {
+      return(datatable(data.frame(Message = "No dam data available"), options = list(dom = "t"), rownames = FALSE))
+    }
+    datatable(head(df, 10), options = list(pageLength = 10, dom = "t"), rownames = FALSE)
+  })
+
+  output$download_sire_descendants <- downloadHandler(
+    filename = function() { paste0("sire_descendants_", Sys.Date(), ".csv") },
+    content = function(file) {
+      df <- sire_descendants()
+      if (nrow(df) == 0) {
+        write.csv(data.frame(Sire_ID = character(), Total_Descendants = integer()), file, row.names = FALSE)
+      } else {
+        write.csv(df, file, row.names = FALSE)
+      }
+    }
+  )
+
+  output$download_dam_descendants <- downloadHandler(
+    filename = function() { paste0("dam_descendants_", Sys.Date(), ".csv") },
+    content = function(file) {
+      df <- dam_descendants()
+      if (nrow(df) == 0) {
+        write.csv(data.frame(Dam_ID = character(), Total_Descendants = integer()), file, row.names = FALSE)
+      } else {
+        write.csv(df, file, row.names = FALSE)
+      }
+    }
+  )
   
   # Download F
   output$download_f <- downloadHandler(
