@@ -990,3 +990,92 @@ NumericVector fast_lap_distribution(CharacterVector ids,
   
   return result;
 }
+
+// Fast LAP depth for each individual
+// [[Rcpp::export]]
+IntegerVector fast_lap_depths(CharacterVector ids,
+                              CharacterVector sires,
+                              CharacterVector dams) {
+  int n = ids.size();
+  
+  std::unordered_set<std::string> id_set;
+  std::unordered_map<std::string, std::pair<std::string, std::string>> parent_map;
+  
+  // Build ID set and parent map
+  for (int i = 0; i < n; i++) {
+    std::string id = Rcpp::as<std::string>(ids[i]);
+    std::string sire = Rcpp::as<std::string>(sires[i]);
+    std::string dam = Rcpp::as<std::string>(dams[i]);
+    
+    id_set.insert(id);
+    
+    bool has_sire = (sire != "NA" && sire != "0" && sire != "");
+    bool has_dam = (dam != "NA" && dam != "0" && dam != "");
+    
+    parent_map[id] = std::make_pair(
+      has_sire ? sire : "",
+      has_dam ? dam : ""
+    );
+  }
+  
+  // Memoization: cache depth for each ID
+  std::unordered_map<std::string, int> depth_cache;
+  
+  // Recursive function to calculate depth with cycle detection
+  std::function<int(const std::string&, std::unordered_set<std::string>&)> calc_depth;
+  calc_depth = [&](const std::string& id, std::unordered_set<std::string>& visited) -> int {
+    if (depth_cache.find(id) != depth_cache.end()) {
+      return depth_cache[id];
+    }
+    
+    if (id_set.find(id) == id_set.end()) {
+      return 0;
+    }
+    
+    if (visited.find(id) != visited.end()) {
+      return 0;
+    }
+    
+    auto it = parent_map.find(id);
+    if (it == parent_map.end()) {
+      depth_cache[id] = 0;
+      return 0;
+    }
+    
+    auto parents = it->second;
+    bool has_sire = !parents.first.empty();
+    bool has_dam = !parents.second.empty();
+    
+    if (!has_sire && !has_dam) {
+      depth_cache[id] = 0;
+      return 0;
+    }
+    
+    visited.insert(id);
+    
+    int max_parent_depth = 0;
+    if (has_sire) {
+      int sire_depth = calc_depth(parents.first, visited);
+      max_parent_depth = std::max(max_parent_depth, sire_depth);
+    }
+    if (has_dam) {
+      int dam_depth = calc_depth(parents.second, visited);
+      max_parent_depth = std::max(max_parent_depth, dam_depth);
+    }
+    
+    visited.erase(id);
+    
+    int depth = max_parent_depth + 1;
+    depth_cache[id] = depth;
+    return depth;
+  };
+  
+  IntegerVector depths(n);
+  for (int i = 0; i < n; i++) {
+    std::string id = Rcpp::as<std::string>(ids[i]);
+    std::unordered_set<std::string> visited;
+    depths[i] = calc_depth(id, visited);
+  }
+  
+  return depths;
+}

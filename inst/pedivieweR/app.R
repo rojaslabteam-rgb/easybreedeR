@@ -62,6 +62,9 @@ tryCatch({
     if (!exists("fast_lap_distribution")) {
       cat("Note: fast_lap_distribution not found, will use R version\n")
     }
+    if (!exists("fast_lap_depths")) {
+      cat("Note: fast_lap_depths not found, will use R version\n")
+    }
   }
 }, error = function(e) {
   cat("Note: Rcpp not available, using optimized R functions\n")
@@ -2199,28 +2202,18 @@ output$top10_dam_title <- renderText({
     }
   })
   
-  # Conditionally show/hide "Inbreeding Trend" tab:
-  # Only show when the user mapped a birthdate column in column mapping.
+  # Conditionally show/hide "Inbreeding Trend" tab
   observe({
-    has_birthdate_mapping <- !is.null(input$birthdate_col) && nzchar(input$birthdate_col)
+    has_data <- !is.null(raw_data())
     
-    if (isTRUE(has_birthdate_mapping) && !isTRUE(inb_trend_tab_inserted())) {
+    if (isTRUE(has_data) && !isTRUE(inb_trend_tab_inserted())) {
       insertTab(
         inputId = "mainTabs",
         tab = nav_panel(
           "Inbreeding Trend",
           value = "inb_trend",
           div(style = "margin-top: 10px;",
-              div(style = "display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;",
-                  tags$strong("Granularity:"),
-                  selectInput(
-                    "inb_trend_granularity",
-                    label = NULL,
-                    choices = c("Week" = "week", "Month" = "month", "Year" = "year"),
-                    selected = "month",
-                    width = "220px"
-                  )
-              ),
+              uiOutput("inb_trend_controls"),
               uiOutput("inb_trend_hint_ui"),
              plotlyOutput("inb_trend_plot", height = "832px")
           )
@@ -2231,7 +2224,7 @@ output$top10_dam_title <- renderText({
       inb_trend_tab_inserted(TRUE)
     }
     
-    if (!isTRUE(has_birthdate_mapping) && isTRUE(inb_trend_tab_inserted())) {
+    if (!isTRUE(has_data) && isTRUE(inb_trend_tab_inserted())) {
       removeTab(inputId = "mainTabs", target = "inb_trend")
       inb_trend_tab_inserted(FALSE)
     }
@@ -5467,20 +5460,88 @@ output$top10_dam_title <- renderText({
     
     NULL
   })
+
+  output$inb_trend_controls <- renderUI({
+    has_birthdate_mapping <- !is.null(input$birthdate_col) && nzchar(input$birthdate_col)
+    if (isTRUE(has_birthdate_mapping)) {
+      div(style = "display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;",
+          tags$strong("Granularity:"),
+          selectInput(
+            "inb_trend_granularity",
+            label = NULL,
+            choices = c("Week" = "week", "Month" = "month", "Year" = "year", "Generation" = "generation"),
+            selected = "month",
+            width = "220px"
+          )
+      )
+    } else {
+      div(style = "display:flex; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;",
+          tags$strong("Granularity:"),
+          span("Generation (LAP)")
+      )
+    }
+  })
+
+  generation_depths <- reactive({
+    req(ped_data())
+    ped <- ped_data()
+    ids <- as.character(ped$ID)
+    depths <- NULL
+    if (exists("use_rcpp") && use_rcpp && exists("fast_lap_depths", mode = "function")) {
+      ids_char <- as.character(ped$ID)
+      sires_char <- as.character(ifelse(is.na(ped$Sire), "NA", ped$Sire))
+      dams_char <- as.character(ifelse(is.na(ped$Dam), "NA", ped$Dam))
+      depths <- tryCatch({
+        as.integer(fast_lap_depths(ids_char, sires_char, dams_char))
+      }, error = function(e) {
+        NULL
+      })
+    }
+    if (is.null(depths) || length(depths) != length(ids)) {
+      depths <- sapply(ids, function(id) get_ancestor_depth(ped, id))
+    }
+    tibble(ID = ids, Generation = as.integer(depths))
+  })
   
   inb_trend_data <- reactive({
     req(ped_data())
-    req(!is.null(input$birthdate_col) && nzchar(input$birthdate_col))
     
     ped <- ped_data()
     if (is.null(ped) || nrow(ped) == 0) return(NULL)
     
-    # Need Birthdate in processed data (ped_data standardizes to "Birthdate")
-    if (!"Birthdate" %in% names(ped)) return(NULL)
-    
     # Need F values (from cache or calculation)
     f_tbl <- f_values_cache()
     if (is.null(f_tbl) || nrow(f_tbl) == 0) return(NULL)
+    
+    has_birthdate_mapping <- !is.null(input$birthdate_col) && nzchar(input$birthdate_col)
+    gran <- input$inb_trend_granularity %||% "generation"
+    if (!isTRUE(has_birthdate_mapping)) {
+      gran <- "generation"
+    }
+    
+    if (identical(gran, "generation")) {
+      gen_tbl <- generation_depths()
+      df <- gen_tbl %>%
+        left_join(f_tbl %>% mutate(ID = as.character(ID)), by = "ID") %>%
+        filter(!is.na(F))
+      if (nrow(df) == 0) return(NULL)
+      
+      out <- df %>%
+        group_by(Generation) %>%
+        summarise(
+          mean_F = mean(F, na.rm = TRUE),
+          sd_F = sd(F, na.rm = TRUE),
+          n_animals = dplyr::n(),
+          .groups = "drop"
+        ) %>%
+        arrange(Generation) %>%
+        mutate(x = Generation)
+      attr(out, "x_label") <- "Generation (LAP)"
+      return(out)
+    }
+    
+    # Need Birthdate in processed data (ped_data standardizes to "Birthdate")
+    if (!"Birthdate" %in% names(ped)) return(NULL)
     
     # Parse Birthdate robustly (allow Date, POSIXct, character; ignore 0/NA)
     bd_raw <- ped$Birthdate
@@ -5506,8 +5567,6 @@ output$top10_dam_title <- renderText({
     
     if (nrow(df) == 0) return(NULL)
     
-    gran <- input$inb_trend_granularity %||% "month"
-    
     period_start <- switch(
       gran,
       week = as.Date(cut(df$Birthdate, breaks = "week", start.on.monday = TRUE)),
@@ -5516,7 +5575,7 @@ output$top10_dam_title <- renderText({
       as.Date(paste0(format(df$Birthdate, "%Y-%m"), "-01"))
     )
     
-    df %>%
+    out <- df %>%
       mutate(period = period_start) %>%
       group_by(period) %>%
       summarise(
@@ -5525,7 +5584,10 @@ output$top10_dam_title <- renderText({
         n_animals = dplyr::n(),
         .groups = "drop"
       ) %>%
-      arrange(period)
+      arrange(period) %>%
+      mutate(x = period)
+    attr(out, "x_label") <- "Birthdate"
+    out
   })
   
   output$inb_trend_plot <- renderPlotly({
@@ -5543,14 +5605,16 @@ output$top10_dam_title <- renderText({
     y0 <- dat$mean_F - sd_val
     y1 <- dat$mean_F + sd_val
     
+    x_label <- attr(dat, "x_label") %||% "X"
+    x_display <- if (inherits(dat$x, "Date")) format(dat$x) else dat$x
     hover_txt <- paste0(
-      "<b>", format(dat$period), "</b>",
+      "<b>", x_display, "</b>",
       "<br>Animals: ", dat$n_animals,
       "<br>Mean inbreeding (F): ", signif(dat$mean_F, 5),
       "<br>SD: ", signif(sd_val, 5)
     )
     
-    plotly::plot_ly(dat, x = ~period) %>%
+    plotly::plot_ly(dat, x = ~x) %>%
       plotly::add_ribbons(
         ymin = ~y0, ymax = ~y1,
         line = list(color = "rgba(0,0,0,0)"),
@@ -5569,10 +5633,10 @@ output$top10_dam_title <- renderText({
         marker = list(color = gold, size = 7),
         text = hover_txt,
         hoverinfo = "text",
-        name = "Period"
+        name = "Mean F"
       ) %>%
       plotly::layout(
-        xaxis = list(title = "Time"),
+        xaxis = list(title = x_label),
         yaxis = list(title = "Inbreeding (F)"),
         hovermode = "closest",
         legend = list(orientation = "h", x = 0, y = -0.15)
