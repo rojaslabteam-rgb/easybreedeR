@@ -66,7 +66,8 @@ tryCatch({
   app_dir <- get_pediviewer_dir()
   cpp_path <- file.path(app_dir, "pedigree_qc.cpp")
   if (file.exists(cpp_path)) {
-    sourceCpp(cpp_path, env = environment())
+    src_env <- environment()
+    sourceCpp(cpp_path, env = src_env)
     use_rcpp <- TRUE
     cat("✓ Rcpp QC functions loaded successfully\n")
     # Check if Rcpp functions are available
@@ -79,11 +80,22 @@ tryCatch({
     if (!exists("fast_lap_depths")) {
       cat("Note: fast_lap_depths not found, will use R version\n")
     }
-    if (!exists("fast_inbreeding_cpp", mode = "function") &&
+    has_fast_inbreeding <- exists(
+      "fast_inbreeding_cpp",
+      mode = "function",
+      envir = src_env,
+      inherits = FALSE
+    )
+    if (!has_fast_inbreeding &&
         exists("fast_inbreeding_cpp", mode = "function", envir = .GlobalEnv)) {
-      fast_inbreeding_cpp <- get("fast_inbreeding_cpp", envir = .GlobalEnv)
+      assign(
+        "fast_inbreeding_cpp",
+        get("fast_inbreeding_cpp", envir = .GlobalEnv),
+        envir = src_env
+      )
+      has_fast_inbreeding <- TRUE
     }
-    if (exists("fast_inbreeding_cpp", mode = "function")) {
+    if (has_fast_inbreeding) {
       use_fast_inbreeding_cpp <- TRUE
       cat("✓ fast inbreeding C++ available - will use Rcpp method\n")
     } else {
