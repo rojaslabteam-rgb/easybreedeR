@@ -433,6 +433,11 @@ TRANSLATIONS <- list(
     zh = "盒线图",
     pt = "Gráfico de Caixa"
   ),
+  dataviewer_qqplot = list(
+    en = "Q-Q Plot",
+    zh = "Q-Q 图",
+    pt = "Gráfico Q-Q"
+  ),
   dataviewer_hist_bin = list(
     en = "Histogram Bin Size",
     zh = "直方图 Bin 大小",
@@ -604,6 +609,46 @@ TRANSLATIONS <- list(
     en = "QC Results",
     zh = "质控结果",
     pt = "Resultados de QC"
+  ),
+  dataviewer_normality_test_title = list(
+    en = "Normality Test (Pre/Post QC)",
+    zh = "正态性检验（质控前/后）",
+    pt = "Teste de Normalidade (Pré/Pós QC)"
+  ),
+  dataviewer_normality_col_column = list(
+    en = "Column",
+    zh = "列",
+    pt = "Coluna"
+  ),
+  dataviewer_normality_col_sample = list(
+    en = "Sample",
+    zh = "样本",
+    pt = "Amostra"
+  ),
+  dataviewer_normality_col_n = list(
+    en = "N",
+    zh = "样本量",
+    pt = "N"
+  ),
+  dataviewer_normality_col_method = list(
+    en = "Method",
+    zh = "方法",
+    pt = "Método"
+  ),
+  dataviewer_normality_col_statistic = list(
+    en = "Statistic",
+    zh = "统计量",
+    pt = "Estatística"
+  ),
+  dataviewer_normality_col_p_value = list(
+    en = "P-value",
+    zh = "P值",
+    pt = "Valor-p"
+  ),
+  dataviewer_normality_col_normal = list(
+    en = "Normal",
+    zh = "正态",
+    pt = "Normal"
   ),
   
   # === easyblup ===
@@ -970,6 +1015,7 @@ TRANSLATIONS$plot_type <- TRANSLATIONS$dataviewer_plot_type
 TRANSLATIONS$plot_type_title <- TRANSLATIONS$dataviewer_plot_type_title
 TRANSLATIONS$histogram <- TRANSLATIONS$dataviewer_histogram
 TRANSLATIONS$boxplot <- TRANSLATIONS$dataviewer_boxplot
+TRANSLATIONS$qqplot <- TRANSLATIONS$dataviewer_qqplot
 TRANSLATIONS$hist_bin <- TRANSLATIONS$dataviewer_hist_bin
 TRANSLATIONS$color_customization <- TRANSLATIONS$dataviewer_color_customization
 TRANSLATIONS$show_color_options <- TRANSLATIONS$dataviewer_show_color_options
