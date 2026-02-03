@@ -1605,10 +1605,10 @@ server <- function(input, output, session) {
                         relatedness_df$Z0 >= 0 & relatedness_df$Z0 <= 1 &
                         relatedness_df$Z1 >= 0 & relatedness_df$Z1 <= 1
             
-            # Filter by PI_HAT > 0.1 if PI_HAT column exists
+            # Filter by PI_HAT > 8 if PI_HAT column exists
             if ("PI_HAT" %in% names(relatedness_df)) {
               valid_idx <- valid_idx & !is.na(relatedness_df$PI_HAT) & 
-                          is.finite(relatedness_df$PI_HAT) & relatedness_df$PI_HAT > 0.1
+                          is.finite(relatedness_df$PI_HAT) & relatedness_df$PI_HAT > 0.8
             }
             
             if (sum(valid_idx) > 0) {

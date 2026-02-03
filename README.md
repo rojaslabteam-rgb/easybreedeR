@@ -8,7 +8,7 @@
 
 easybreedeR combines multiple Shiny applications into a unified suite, offering:
 
-- **dataprevieweR** A dedicated tool for phenotype visualization and basic phenotype quality control.
+- **datavieweR** A dedicated tool for phenotype visualization and basic phenotype quality control.
 - **pediviweR** An interactive pedigree viewer supporting visualization, validation, and essential pedigree QC procedures.
 - **genovieweR** A comprehensive genotype viewer and quality control tool for genotype data visualization, analysis, and format conversion.
 - **easyblup** A streamlined generator for blupf90 parameter cards, designed to work seamlessly with cleaned data produced by the previous tools or by user-provided datasets.
@@ -69,7 +69,7 @@ run_easybreedeR()  # Opens Studio with access to all applications
 You can also launch specific applications directly:
 
 ```r
-run_dataprevieweR()  # Phenotype preview and exploration
+run_datavieweR()  # Phenotype preview and exploration
 run_pedivieweR()     # Pedigree viewer and pedigree quality control
 run_genovieweR()     # Genotype viewer and quality control
 run_easyblup()       # blupf90 parameter cards generator
@@ -81,7 +81,7 @@ run_rcw()            # Visual pipeline builder (R Canvas Workflow)
 ### 🎯 easybreedeR Studio
 The main launcher providing unified access to all applications in the suite.
 
-### 🔍 dataprevieweR
+### 🔍 datavieweR
 **Data Preview and Exploration**
 
 - Quick data preview and summary statistics
@@ -135,7 +135,7 @@ inst/
 ├── easyblup/              # BLUP/REML parameter generator with AI assistant
 ├── pedivieweR/            # Pedigree viewer and quality control
 ├── genovieweR/            # Genotype viewer and quality control
-├── dataprevieweR/         # Data preview and exploration
+├── datavieweR/         # Data preview and exploration
 ├── RCW/                   # R Canvas Workflow (visual pipeline builder)
 └── Language.R             # Shared multilingual translation framework
 R/

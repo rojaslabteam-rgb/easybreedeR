@@ -46,7 +46,7 @@ map_suite_lang_for_app <- function(lang_code, app) {
     if (code %in% c("en", "zh", "pt")) return(code)
     return("en")
   }
-  if (identical(app, "datapreviewer")) {
+  if (identical(app, "dataviewer")) {
     if (code %in% c("en", "zh", "pt")) return(code)
     return("en")
   }
@@ -78,16 +78,16 @@ TRANSLATIONS <- list(
     pt = "Inicie uma ferramenta para explorar dados, verificar pedigrees, executar BLUP/REML ou abrir notebooks."
   ),
   
-  # === dataprevieweR ===
-  datapreviewer_app_title = list(
-    en = "datapreviewR: A data review and QC tool",
+  # === datavieweR ===
+  dataviewer_app_title = list(
+    en = "dataviewR: A data review and QC tool",
     zh = "数据预览R：数据审查与质控工具",
-    pt = "datapreviewR: Uma ferramenta de revisão e controle de qualidade de dados"
+    pt = "dataviewR: Uma ferramenta de revisão e controle de qualidade de dados"
   ),
-  datapreviewer_app_name = list(
-    en = "dataprevieweR",
-    zh = "dataprevieweR",
-    pt = "dataprevieweR"
+  dataviewer_app_name = list(
+    en = "datavieweR",
+    zh = "datavieweR",
+    pt = "datavieweR"
   ),
   pediviewer_app_name = list(
     en = "pedivieweR",
@@ -388,219 +388,219 @@ TRANSLATIONS <- list(
   ),
   
   # NOTE: RCW alias keys are defined after TRANSLATIONS is fully created below.
-  datapreviewer_app_subtitle = list(
+  dataviewer_app_subtitle = list(
     en = "Data review and QC tool",
     zh = "数据审查与质控工具",
     pt = "Revisão e controle de qualidade de dados"
   ),
-  datapreviewer_file_upload = list(
+  dataviewer_file_upload = list(
     en = "Phenotype File",
     zh = "选择表型文件",
     pt = "Escolher Arquivo de Fenótipo"
   ),
-  datapreviewer_supported_types = list(
+  dataviewer_supported_types = list(
     en = " Supported file types: <strong>.csv</strong>, <strong>.tsv</strong>, <strong>.txt</strong>, <strong>.xlsx</strong>, <strong>.xls</strong>, <strong>.rds</strong><br> <em>Note: First row must contain column headers.</em>",
     zh = " 支持的文件类型：<strong>.csv</strong>、<strong>.tsv</strong>、<strong>.txt</strong>、<strong>.xlsx</strong>、<strong>.xls</strong>、<strong>.rds</strong><br> <em>注意：第一行必须包含列名（header）。</em>",
     pt = " Tipos de arquivo suportados: <strong>.csv</strong>, <strong>.tsv</strong>, <strong>.txt</strong>, <strong>.xlsx</strong>, <strong>.xls</strong>, <strong>.rds</strong><br> <em>Nota: A primeira linha deve conter cabeçalhos de coluna.</em>"
   ),
-  datapreviewer_select_columns = list(
+  dataviewer_select_columns = list(
     en = "Select Column Names for Visualization (Multi-select supported)",
     zh = "选择用于可视化的列名（支持多选）",
     pt = "Selecionar Nomes de Colunas para Visualização (Seleção múltipla suportada)"
   ),
-  datapreviewer_categorical_vars = list(
+  dataviewer_categorical_vars = list(
     en = "Select Categorical Variables (e.g., Variety, Farm, etc.)",
     zh = "选择分类变量（如品种、场等）",
     pt = "Selecionar Variáveis Categóricas (ex: Variedade, Fazenda, etc.)"
   ),
-  datapreviewer_plot_type = list(
+  dataviewer_plot_type = list(
     en = "Plot Type",
     zh = "图表类型",
     pt = "Tipo de Gráfico"
   ),
-  datapreviewer_plot_type_title = list(
+  dataviewer_plot_type_title = list(
     en = "Chart Type & Settings",
     zh = "图表类型与设置",
     pt = "Tipo de Gráfico e Configurações"
   ),
-  datapreviewer_histogram = list(
+  dataviewer_histogram = list(
     en = "Histogram",
     zh = "直方图",
     pt = "Histograma"
   ),
-  datapreviewer_boxplot = list(
+  dataviewer_boxplot = list(
     en = "Boxplot",
     zh = "盒线图",
     pt = "Gráfico de Caixa"
   ),
-  datapreviewer_hist_bin = list(
+  dataviewer_hist_bin = list(
     en = "Histogram Bin Size",
     zh = "直方图 Bin 大小",
     pt = "Tamanho do Bin do Histograma"
   ),
-  datapreviewer_color_customization = list(
+  dataviewer_color_customization = list(
     en = "Color Customization",
     zh = "颜色自定义",
     pt = "Personalização de Cores"
   ),
-  datapreviewer_show_color_options = list(
+  dataviewer_show_color_options = list(
     en = "Show Color Options",
     zh = "显示颜色选项",
     pt = "Mostrar Opções de Cor"
   ),
-  datapreviewer_hide_color_options = list(
+  dataviewer_hide_color_options = list(
     en = "Hide Color Options",
     zh = "隐藏颜色选项",
     pt = "Ocultar Opções de Cor"
   ),
-  datapreviewer_pre_filter_color = list(
+  dataviewer_pre_filter_color = list(
     en = "Pre-Filter Color",
     zh = "质控前颜色",
     pt = "Cor Pré-Filtro"
   ),
-  datapreviewer_post_filter_color = list(
+  dataviewer_post_filter_color = list(
     en = "Post-Filter Color",
     zh = "质控后颜色",
     pt = "Cor Pós-Filtro"
   ),
-  datapreviewer_color_input_label = list(
+  dataviewer_color_input_label = list(
     en = "Color (RGB hex, e.g., #FF0000):",
     zh = "颜色（RGB十六进制，如 #FF0000）：",
     pt = "Cor (hexadecimal RGB, ex: #FF0000):"
   ),
-  datapreviewer_color_palette_label = list(
+  dataviewer_color_palette_label = list(
     en = "Choose from color palette:",
     zh = "从颜色调色板选择：",
     pt = "Escolher da paleta de cores:"
   ),
-  datapreviewer_reset_colors = list(
+  dataviewer_reset_colors = list(
     en = "Reset to Default Colors",
     zh = "重置为默认颜色",
     pt = "Restaurar Cores Padrão"
   ),
-  datapreviewer_data_upload = list(
+  dataviewer_data_upload = list(
     en = "Data Upload",
     zh = "数据上传",
     pt = "Upload de Dados"
   ),
-  datapreviewer_column_selection = list(
+  dataviewer_column_selection = list(
     en = "Column Selection",
     zh = "列选择",
     pt = "Seleção de Colunas"
   ),
-  datapreviewer_apply_download = list(
+  dataviewer_apply_download = list(
     en = "Apply & Download",
     zh = "应用与下载",
     pt = "Aplicar & Baixar"
   ),
-  datapreviewer_select_columns_first = list(
+  dataviewer_select_columns_first = list(
     en = "Please select columns first.",
     zh = "请先选择列。",
     pt = "Por favor, selecione as colunas primeiro."
   ),
-  datapreviewer_qc_filter_options = list(
+  dataviewer_qc_filter_options = list(
     en = "QC Filter Options",
     zh = "质控过滤选项",
     pt = "Opções de Filtro de Controle de Qualidade"
   ),
-  datapreviewer_qc_mode = list(
+  dataviewer_qc_mode = list(
     en = "QC Mode",
     zh = "质控模式",
     pt = "Modo de Controle de Qualidade"
   ),
-  datapreviewer_uniform_qc = list(
+  dataviewer_uniform_qc = list(
     en = "Same Method for All Traits",
     zh = "所有性状使用相同方法",
     pt = "Mesmo Método para Todas as Características"
   ),
-  datapreviewer_individual_qc = list(
+  dataviewer_individual_qc = list(
     en = "Different Methods per Trait",
     zh = "每个性状使用不同方法",
     pt = "Métodos Diferentes por Característica"
   ),
-  datapreviewer_filter_type = list(
+  dataviewer_filter_type = list(
     en = "Filter Type",
     zh = "过滤类型",
     pt = "Tipo de Filtro"
   ),
-  datapreviewer_individual_qc_title = list(
+  dataviewer_individual_qc_title = list(
     en = "Per-Trait QC Settings",
     zh = "按性状的质控设置",
     pt = "Configurações de QC por Característica"
   ),
-  datapreviewer_threshold_range = list(
+  dataviewer_threshold_range = list(
     en = "Threshold Range",
     zh = "阈值范围",
     pt = "Intervalo de Limite"
   ),
-  datapreviewer_sd_multiplier = list(
+  dataviewer_sd_multiplier = list(
     en = "SD Multiplier",
     zh = "标准差倍数",
     pt = "Multiplicador de DP"
   ),
-  datapreviewer_iqr_multiplier = list(
+  dataviewer_iqr_multiplier = list(
     en = "IQR Multiplier",
     zh = "IQR 倍数",
     pt = "Multiplicador de IQR"
   ),
-  datapreviewer_min_threshold = list(
+  dataviewer_min_threshold = list(
     en = "Min Threshold",
     zh = "最小阈值",
     pt = "Limite Mínimo"
   ),
-  datapreviewer_max_threshold = list(
+  dataviewer_max_threshold = list(
     en = "Max Threshold",
     zh = "最大阈值",
     pt = "Limite Máximo"
   ),
-  datapreviewer_trait_label = list(
+  dataviewer_trait_label = list(
     en = "Trait",
     zh = "性状",
     pt = "Característica"
   ),
-  datapreviewer_apply_filter = list(
+  dataviewer_apply_filter = list(
     en = "Apply QC Filter",
     zh = "应用质控过滤",
     pt = "Aplicar Filtro de Controle de Qualidade"
   ),
-  datapreviewer_download_filtered = list(
+  dataviewer_download_filtered = list(
     en = "Download Filtered Data",
     zh = "下载过滤后数据",
     pt = "Baixar Dados Filtrados"
   ),
-  datapreviewer_download_plot = list(
+  dataviewer_download_plot = list(
     en = "Download Plot (PNG)",
     zh = "下载图表 (PNG)",
     pt = "Baixar Gráfico (PNG)"
   ),
-  datapreviewer_unsupported_file = list(
+  dataviewer_unsupported_file = list(
     en = "Unsupported file type:",
     zh = "不支持的文件类型：",
     pt = "Tipo de arquivo não suportado:"
   ),
-  datapreviewer_file_error = list(
+  dataviewer_file_error = list(
     en = "Error reading file. Please check the file format.",
     zh = "读取文件错误。请检查文件格式。",
     pt = "Erro ao ler arquivo. Por favor, verifique o formato do arquivo."
   ),
-  datapreviewer_missing_value_format_label = list(
+  dataviewer_missing_value_format_label = list(
     en = "Define Missing Values:",
     zh = "定义缺失值：",
     pt = "Definir Valores Ausentes:"
   ),
-  datapreviewer_missing_value_format_help = list(
+  dataviewer_missing_value_format_help = list(
     en = "Select which values should be treated as missing values when reading the data (multiple selection supported)",
     zh = "选择在读取数据时应该被当作缺失值处理的值（支持多选）",
     pt = "Selecione quais valores devem ser tratados como ausentes ao ler os dados (seleção múltipla suportada)"
   ),
   
-  # dataprevieweR: tab titles
-  datapreviewer_data_preview = list(
+  # datavieweR: tab titles
+  dataviewer_data_preview = list(
     en = "Data Preview",
     zh = "数据预览",
     pt = "Visualização de Dados"
   ),
-  datapreviewer_qc_results = list(
+  dataviewer_qc_results = list(
     en = "QC Results",
     zh = "质控结果",
     pt = "Resultados de QC"
@@ -960,56 +960,56 @@ TRANSLATIONS$rcw_svg_export_generating <- TRANSLATIONS$rcw_svg_export_generating
 TRANSLATIONS$rcw_svg_export_success <- TRANSLATIONS$rcw_svg_export_success
 TRANSLATIONS$rcw_svg_export_error_msg <- TRANSLATIONS$rcw_svg_export_error_msg
 
-# === dataprevieweR alias keys used by app ===
-# Map generic keys used in inst/dataprevieweR/app.R to the centralized datapreviewer_* entries
-TRANSLATIONS$file_upload <- TRANSLATIONS$datapreviewer_file_upload
-TRANSLATIONS$supported_types <- TRANSLATIONS$datapreviewer_supported_types
-TRANSLATIONS$select_columns <- TRANSLATIONS$datapreviewer_select_columns
-TRANSLATIONS$categorical_vars <- TRANSLATIONS$datapreviewer_categorical_vars
-TRANSLATIONS$plot_type <- TRANSLATIONS$datapreviewer_plot_type
-TRANSLATIONS$plot_type_title <- TRANSLATIONS$datapreviewer_plot_type_title
-TRANSLATIONS$histogram <- TRANSLATIONS$datapreviewer_histogram
-TRANSLATIONS$boxplot <- TRANSLATIONS$datapreviewer_boxplot
-TRANSLATIONS$hist_bin <- TRANSLATIONS$datapreviewer_hist_bin
-TRANSLATIONS$color_customization <- TRANSLATIONS$datapreviewer_color_customization
-TRANSLATIONS$show_color_options <- TRANSLATIONS$datapreviewer_show_color_options
-TRANSLATIONS$hide_color_options <- TRANSLATIONS$datapreviewer_hide_color_options
-TRANSLATIONS$pre_filter_color <- TRANSLATIONS$datapreviewer_pre_filter_color
-TRANSLATIONS$post_filter_color <- TRANSLATIONS$datapreviewer_post_filter_color
-TRANSLATIONS$color_input_label <- TRANSLATIONS$datapreviewer_color_input_label
-TRANSLATIONS$color_palette_label <- TRANSLATIONS$datapreviewer_color_palette_label
-TRANSLATIONS$reset_colors <- TRANSLATIONS$datapreviewer_reset_colors
-TRANSLATIONS$data_upload <- TRANSLATIONS$datapreviewer_data_upload
-TRANSLATIONS$column_selection <- TRANSLATIONS$datapreviewer_column_selection
-TRANSLATIONS$apply_download <- TRANSLATIONS$datapreviewer_apply_download
-TRANSLATIONS$select_columns_first <- TRANSLATIONS$datapreviewer_select_columns_first
-TRANSLATIONS$qc_filter_options <- TRANSLATIONS$datapreviewer_qc_filter_options
-TRANSLATIONS$qc_mode <- TRANSLATIONS$datapreviewer_qc_mode
-TRANSLATIONS$uniform_qc <- TRANSLATIONS$datapreviewer_uniform_qc
-TRANSLATIONS$individual_qc <- TRANSLATIONS$datapreviewer_individual_qc
-TRANSLATIONS$filter_type <- TRANSLATIONS$datapreviewer_filter_type
-TRANSLATIONS$individual_qc_title <- TRANSLATIONS$datapreviewer_individual_qc_title
-TRANSLATIONS$threshold_range <- TRANSLATIONS$datapreviewer_threshold_range
-TRANSLATIONS$sd_multiplier <- TRANSLATIONS$datapreviewer_sd_multiplier
-TRANSLATIONS$iqr_multiplier <- TRANSLATIONS$datapreviewer_iqr_multiplier
-TRANSLATIONS$min_threshold <- TRANSLATIONS$datapreviewer_min_threshold
-TRANSLATIONS$max_threshold <- TRANSLATIONS$datapreviewer_max_threshold
-TRANSLATIONS$trait_label <- TRANSLATIONS$datapreviewer_trait_label
-TRANSLATIONS$apply_filter <- TRANSLATIONS$datapreviewer_apply_filter
-TRANSLATIONS$download_filtered <- TRANSLATIONS$datapreviewer_download_filtered
-TRANSLATIONS$download_plot <- TRANSLATIONS$datapreviewer_download_plot
-TRANSLATIONS$unsupported_file <- TRANSLATIONS$datapreviewer_unsupported_file
-TRANSLATIONS$file_error <- TRANSLATIONS$datapreviewer_file_error
-TRANSLATIONS$missing_value_format_label <- TRANSLATIONS$datapreviewer_missing_value_format_label
-TRANSLATIONS$missing_value_format_help <- TRANSLATIONS$datapreviewer_missing_value_format_help
-TRANSLATIONS$data_preview <- TRANSLATIONS$datapreviewer_data_preview
-TRANSLATIONS$qc_results <- TRANSLATIONS$datapreviewer_qc_results
-TRANSLATIONS$missing_value_modal_title <- TRANSLATIONS$datapreviewer_missing_value_modal_title
-TRANSLATIONS$missing_value_modal_text <- TRANSLATIONS$datapreviewer_missing_value_modal_text
-TRANSLATIONS$confirm_download_text <- TRANSLATIONS$datapreviewer_confirm_download_text
-TRANSLATIONS$cancel_download_text <- TRANSLATIONS$datapreviewer_cancel_download_text
+# === datavieweR alias keys used by app ===
+# Map generic keys used in inst/datavieweR/app.R to the centralized dataviewer_* entries
+TRANSLATIONS$file_upload <- TRANSLATIONS$dataviewer_file_upload
+TRANSLATIONS$supported_types <- TRANSLATIONS$dataviewer_supported_types
+TRANSLATIONS$select_columns <- TRANSLATIONS$dataviewer_select_columns
+TRANSLATIONS$categorical_vars <- TRANSLATIONS$dataviewer_categorical_vars
+TRANSLATIONS$plot_type <- TRANSLATIONS$dataviewer_plot_type
+TRANSLATIONS$plot_type_title <- TRANSLATIONS$dataviewer_plot_type_title
+TRANSLATIONS$histogram <- TRANSLATIONS$dataviewer_histogram
+TRANSLATIONS$boxplot <- TRANSLATIONS$dataviewer_boxplot
+TRANSLATIONS$hist_bin <- TRANSLATIONS$dataviewer_hist_bin
+TRANSLATIONS$color_customization <- TRANSLATIONS$dataviewer_color_customization
+TRANSLATIONS$show_color_options <- TRANSLATIONS$dataviewer_show_color_options
+TRANSLATIONS$hide_color_options <- TRANSLATIONS$dataviewer_hide_color_options
+TRANSLATIONS$pre_filter_color <- TRANSLATIONS$dataviewer_pre_filter_color
+TRANSLATIONS$post_filter_color <- TRANSLATIONS$dataviewer_post_filter_color
+TRANSLATIONS$color_input_label <- TRANSLATIONS$dataviewer_color_input_label
+TRANSLATIONS$color_palette_label <- TRANSLATIONS$dataviewer_color_palette_label
+TRANSLATIONS$reset_colors <- TRANSLATIONS$dataviewer_reset_colors
+TRANSLATIONS$data_upload <- TRANSLATIONS$dataviewer_data_upload
+TRANSLATIONS$column_selection <- TRANSLATIONS$dataviewer_column_selection
+TRANSLATIONS$apply_download <- TRANSLATIONS$dataviewer_apply_download
+TRANSLATIONS$select_columns_first <- TRANSLATIONS$dataviewer_select_columns_first
+TRANSLATIONS$qc_filter_options <- TRANSLATIONS$dataviewer_qc_filter_options
+TRANSLATIONS$qc_mode <- TRANSLATIONS$dataviewer_qc_mode
+TRANSLATIONS$uniform_qc <- TRANSLATIONS$dataviewer_uniform_qc
+TRANSLATIONS$individual_qc <- TRANSLATIONS$dataviewer_individual_qc
+TRANSLATIONS$filter_type <- TRANSLATIONS$dataviewer_filter_type
+TRANSLATIONS$individual_qc_title <- TRANSLATIONS$dataviewer_individual_qc_title
+TRANSLATIONS$threshold_range <- TRANSLATIONS$dataviewer_threshold_range
+TRANSLATIONS$sd_multiplier <- TRANSLATIONS$dataviewer_sd_multiplier
+TRANSLATIONS$iqr_multiplier <- TRANSLATIONS$dataviewer_iqr_multiplier
+TRANSLATIONS$min_threshold <- TRANSLATIONS$dataviewer_min_threshold
+TRANSLATIONS$max_threshold <- TRANSLATIONS$dataviewer_max_threshold
+TRANSLATIONS$trait_label <- TRANSLATIONS$dataviewer_trait_label
+TRANSLATIONS$apply_filter <- TRANSLATIONS$dataviewer_apply_filter
+TRANSLATIONS$download_filtered <- TRANSLATIONS$dataviewer_download_filtered
+TRANSLATIONS$download_plot <- TRANSLATIONS$dataviewer_download_plot
+TRANSLATIONS$unsupported_file <- TRANSLATIONS$dataviewer_unsupported_file
+TRANSLATIONS$file_error <- TRANSLATIONS$dataviewer_file_error
+TRANSLATIONS$missing_value_format_label <- TRANSLATIONS$dataviewer_missing_value_format_label
+TRANSLATIONS$missing_value_format_help <- TRANSLATIONS$dataviewer_missing_value_format_help
+TRANSLATIONS$data_preview <- TRANSLATIONS$dataviewer_data_preview
+TRANSLATIONS$qc_results <- TRANSLATIONS$dataviewer_qc_results
+TRANSLATIONS$missing_value_modal_title <- TRANSLATIONS$dataviewer_missing_value_modal_title
+TRANSLATIONS$missing_value_modal_text <- TRANSLATIONS$dataviewer_missing_value_modal_text
+TRANSLATIONS$confirm_download_text <- TRANSLATIONS$dataviewer_confirm_download_text
+TRANSLATIONS$cancel_download_text <- TRANSLATIONS$dataviewer_cancel_download_text
 
-# Additional labels used in dataprevieweR UI not previously defined
+# Additional labels used in datavieweR UI not previously defined
 TRANSLATIONS$data_summary <- list(
   en = "Data Summary",
   zh = "数据摘要",
@@ -1041,23 +1041,23 @@ TRANSLATIONS$no_data_plot <- list(
   pt = "Não há dados numéricos disponíveis para plotagem"
 )
 
-# Modal dialog labels for download workflow (with datapreviewer_ prefix)
-TRANSLATIONS$datapreviewer_missing_value_modal_title <- list(
+# Modal dialog labels for download workflow (with dataviewer_ prefix)
+TRANSLATIONS$dataviewer_missing_value_modal_title <- list(
   en = "Download Filtered Data",
   zh = "下载过滤后的数据",
   pt = "Baixar Dados Filtrados"
 )
-TRANSLATIONS$datapreviewer_missing_value_modal_text <- list(
+TRANSLATIONS$dataviewer_missing_value_modal_text <- list(
   en = "Define Missing Values:",
   zh = "定义缺失值：",
   pt = "Definir Valores Ausentes:"
 )
-TRANSLATIONS$datapreviewer_confirm_download_text <- list(
+TRANSLATIONS$dataviewer_confirm_download_text <- list(
   en = "Confirm Download",
   zh = "确认下载",
   pt = "Confirmar Download"
 )
-TRANSLATIONS$datapreviewer_cancel_download_text <- list(
+TRANSLATIONS$dataviewer_cancel_download_text <- list(
   en = "Cancel",
   zh = "取消",
   pt = "Cancelar"

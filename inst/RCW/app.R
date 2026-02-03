@@ -15,10 +15,17 @@ suppressPackageStartupMessages({
   HAS_SHINYFILES <- requireNamespace("shinyFiles", quietly = TRUE)
   HAS_FS <- requireNamespace("fs", quietly = TRUE)
   HAS_BASE64ENC <- requireNamespace("base64enc", quietly = TRUE)
+  HAS_YAML <- requireNamespace("yaml", quietly = TRUE)
   if (HAS_SHINYFILES) library(shinyFiles)
   if (HAS_FS) library(fs)
   if (HAS_BASE64ENC) library(base64enc)
+  if (HAS_YAML) library(yaml)
 })
+
+# Silence lintr global variable warnings for optional deps
+if (exists("globalVariables", where = asNamespace("utils"), mode = "function")) {
+  utils::globalVariables(c("HAS_YAML", "HAS_BASE64ENC", "HAS_SHINYFILES"))
+}
 
 # Source shared language helpers
 try(source(normalizePath(file.path("..", "Language.R"), winslash = "/", mustWork = FALSE), local = TRUE), silent = TRUE)
@@ -118,8 +125,8 @@ scan_workspace <- function(workspace_paths = c(.rcw_workspace, .rcw_external_fol
       next
     }
     
-    # Get all R files recursively (both .R and .r)
-    all_files <- list.files(workspace_path, pattern = "\\.(R|r)$", 
+    # Get all R and Rmd files recursively
+    all_files <- list.files(workspace_path, pattern = "\\.(R|r|Rmd|rmd)$", 
                             recursive = TRUE, full.names = TRUE, ignore.case = TRUE)
     
     for (file_path in all_files) {
@@ -187,6 +194,144 @@ write_r_file <- function(file_path, content) {
   dir.create(dirname(file_path), recursive = TRUE, showWarnings = FALSE)
   writeLines(content, file_path)
 }
+
+# Read YAML front matter from an Rmd file
+read_rmd_front_matter <- function(file_path) {
+  if (!file.exists(file_path)) return(NULL)
+  lines <- readLines(file_path, warn = FALSE)
+  if (length(lines) < 2 || trimws(lines[1]) != "---") return(NULL)
+  end_idx <- which(trimws(lines[-1]) %in% c("---", "..."))
+  if (length(end_idx) == 0) return(NULL)
+  end_idx <- end_idx[1] + 1
+  yaml_text <- paste(lines[2:(end_idx - 1)], collapse = "\n")
+  if (!exists("HAS_YAML") || !HAS_YAML) { # nolint
+    return(list(raw = yaml_text, parsed = NULL, error = "yaml package not available"))
+  }
+  parsed <- tryCatch({
+    yaml::yaml.load(yaml_text)
+  }, error = function(e) {
+    list(.error = e$message)
+  })
+  list(raw = yaml_text, parsed = parsed)
+}
+
+# Normalize port specification into a consistent list
+normalize_ports <- function(ports_raw) {
+  if (is.null(ports_raw)) return(list())
+  if (is.list(ports_raw) && !is.data.frame(ports_raw)) {
+    # Named list (name -> spec) or list of specs
+    if (!is.null(names(ports_raw)) && any(nzchar(names(ports_raw)))) {
+      ports <- lapply(names(ports_raw), function(nm) {
+        spec <- ports_raw[[nm]]
+        if (!is.list(spec)) spec <- list()
+        spec$name <- spec$name %||% nm
+        spec
+      })
+      return(ports)
+    }
+    return(ports_raw)
+  }
+  list()
+}
+
+# Build a ModuleSpec from Rmd YAML front matter
+parse_rmd_interface <- function(file_path) {
+  fm <- read_rmd_front_matter(file_path)
+  if (is.null(fm) || is.null(fm$parsed) || is.list(fm$parsed) && !is.null(fm$parsed$.error)) {
+    return(NULL)
+  }
+  y <- fm$parsed
+  module <- y$module %||% list()
+  module_name <- module$name %||% y$title %||% tools::file_path_sans_ext(basename(file_path))
+  module_desc <- module$description %||% y$description %||% ""
+  module_version <- module$version %||% y$version %||% ""
+
+  inputs <- normalize_ports(y$inputs)
+  outputs <- normalize_ports(y$outputs)
+
+  normalize_port <- function(p) {
+    p <- p %||% list()
+    list(
+      name = p$name %||% "",
+      base_type = p$base_type %||% p$type %||% "any",
+      semantic_type = p$semantic_type %||% p$semantic %||% "",
+      required = if (is.null(p$required)) TRUE else isTRUE(p$required),
+      default = p$default %||% NULL,
+      description = p$description %||% "",
+      cardinality = p$cardinality %||% "single",
+      file_extensions = p$file_extensions %||% p$extensions %||% NULL,
+      tags = p$tags %||% NULL
+    )
+  }
+
+  inputs_norm <- lapply(inputs, normalize_port)
+  outputs_norm <- lapply(outputs, normalize_port)
+
+  list(
+    id = paste0("module_", gsub("[^a-zA-Z0-9]+", "_", tools::file_path_sans_ext(basename(file_path)))),
+    name = module_name,
+    description = module_desc,
+    version = module_version,
+    inputs = inputs_norm,
+    outputs = outputs_norm
+  )
+}
+
+# Example Rmd interface specifications (YAML front matter only)
+rmd_interface_examples <- paste(
+  "---",
+  "module:",
+  "  name: \"Inbreeding Summary\"",
+  "  description: \"Compute summary statistics from pedigree.\"",
+  "inputs:",
+  "  - name: pedigree",
+  "    type: dataframe",
+  "    semantic_type: pedigree_table",
+  "    required: true",
+  "outputs:",
+  "  - name: summary_table",
+  "    type: dataframe",
+  "    semantic_type: qc_report",
+  "---",
+  "",
+  "---",
+  "module:",
+  "  name: \"GWAS Runner\"",
+  "  description: \"Run GWAS on genotype/phenotype inputs.\"",
+  "inputs:",
+  "  - name: geno",
+  "    type: file",
+  "    semantic_type: genotype_plink",
+  "    file_extensions: [\".bed\", \".bim\", \".fam\"]",
+  "  - name: pheno",
+  "    type: dataframe",
+  "    semantic_type: phenotype_dataframe",
+  "outputs:",
+  "  - name: summary",
+  "    type: dataframe",
+  "    semantic_type: gwas_summary",
+  "  - name: manhattan",
+  "    type: plot",
+  "    semantic_type: manhattan_plot",
+  "---",
+  "",
+  "---",
+  "module:",
+  "  name: \"Relationship Matrix\"",
+  "inputs:",
+  "  - name: pedigree",
+  "    type: dataframe",
+  "    semantic_type: pedigree_table",
+  "  - name: method",
+  "    type: string",
+  "    default: \"A\"",
+  "outputs:",
+  "  - name: K",
+  "    type: dataframe",
+  "    semantic_type: relationship_matrix",
+  "---",
+  sep = "\n"
+)
 
 # Execute R code and capture output (with echo support like RStudio console)
 execute_r_code <- function(code, env = parent.frame(), echo = TRUE) {
@@ -390,8 +535,45 @@ build_node_hierarchy <- function(nodes, edges) {
   return(sorted_nodes)
 }
 
+# Build a lightweight interface manifest from canvas nodes and edges
+build_interface_manifest <- function(nodes, edges) {
+  if (length(nodes) == 0) return(list(nodes = list(), edges = list()))
+  node_list <- lapply(names(nodes), function(id) {
+    n <- nodes[[id]]
+    spec <- n$moduleSpec %||% list()
+    list(
+      id = id,
+      fileName = n$fileName %||% "",
+      filePath = n$filePath %||% "",
+      module = list(
+        name = spec$name %||% n$fileName %||% id,
+        description = spec$description %||% "",
+        version = spec$version %||% ""
+      ),
+      inputs = spec$inputs %||% list(),
+      outputs = spec$outputs %||% list()
+    )
+  })
+  edge_list <- list()
+  if (!is.null(edges) && length(edges) > 0) {
+    for (edge in edges) {
+      if (is.list(edge)) {
+        edge_list[[length(edge_list) + 1]] <- list(
+          source = edge$source %||% "",
+          target = edge$target %||% "",
+          sourcePort = edge$sourcePort %||% "",
+          targetPort = edge$targetPort %||% "",
+          sourceType = edge$sourceType %||% "",
+          targetType = edge$targetType %||% ""
+        )
+      }
+    }
+  }
+  list(nodes = node_list, edges = edge_list)
+}
+
 # Generate R Markdown from sorted hierarchy with connection order markers
-generate_rmd_from_hierarchy <- function(sorted_nodes, workspace_files, edges = NULL, include_metadata = TRUE) {
+generate_rmd_from_hierarchy <- function(sorted_nodes, workspace_files, edges = NULL, include_metadata = TRUE, node_specs = list()) {
   rmd_lines <- c()
   
   if (include_metadata) {
@@ -430,13 +612,21 @@ generate_rmd_from_hierarchy <- function(sorted_nodes, workspace_files, edges = N
     )
   }
   
-  # Add RCW metadata comment at the beginning (after YAML if included)
+    # Add RCW metadata comment at the beginning (after YAML if included)
   if (include_metadata) {
+    manifest <- build_interface_manifest(node_specs, edges)
+    manifest_json <- tryCatch({
+      jsonlite::toJSON(manifest, auto_unbox = TRUE, pretty = TRUE)
+    }, error = function(e) {
+      "{}"
+    })
     rmd_lines <- c(rmd_lines, 
       "",
       "<!-- RCW_METADATA_START",
       paste0("RCW_VERSION: 1.0"),
       paste0("NODE_COUNT: ", length(sorted_nodes)),
+      "INTERFACE_MANIFEST_JSON:",
+      manifest_json,
       "NODES:",
       sep = "\n"
     )
@@ -1159,6 +1349,53 @@ ui <- page_fillable(
       margin-top: 8px; max-width: 100%;
       border: 1px solid #ddd; border-radius: 4px;
     }
+    .node-ports {
+      margin-top: 8px;
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 6px;
+      font-size: 11px;
+    }
+    .node-ports-section {
+      background: #1e1e1e;
+      border: 1px solid #3e3e42;
+      border-radius: 4px;
+      padding: 6px;
+    }
+    .node-ports-title {
+      font-size: 10px;
+      color: #999;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+    .node-port {
+      display: flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 0;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    .node-port .port-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      background: #CEB888;
+    }
+    .node-port .port-label {
+      flex: 1;
+      color: #d4d4d4;
+    }
+    .node-port .port-type {
+      color: #89d185;
+      font-size: 10px;
+    }
+    .node-port .port-semantic {
+      color: #569cd6;
+      font-size: 10px;
+    }
   ")),
       # Additional node-shape styles
       tags$style(HTML("\
@@ -1229,6 +1466,103 @@ ui <- page_fillable(
     // Minimal client-side canvas settings (per-node appearance is handled per-node)
     var canvasSettings = { allow_vertical: true };
 
+    function sanitizePortId(portName) {
+      return String(portName || '').replace(/[^a-zA-Z0-9_-]/g, '_');
+    }
+
+    function isTypeCompatible(sourceType, targetType) {
+      if (!sourceType || !targetType) return false;
+      if (sourceType === 'any' || targetType === 'any') return true;
+      return sourceType === targetType;
+    }
+
+    function renderPorts(nodeId, moduleSpec) {
+      var nodeEl = $('#' + nodeId);
+      if (!nodeEl.length) return;
+      var ports = moduleSpec || { inputs: [], outputs: [] };
+      var inputs = ports.inputs || [];
+      var outputs = ports.outputs || [];
+
+      nodeEl.find('.node-ports').remove();
+      var portsHtml = $('<div class=\"node-ports\"></div>');
+      var inSection = $('<div class=\"node-ports-section\"></div>');
+      var outSection = $('<div class=\"node-ports-section\"></div>');
+      inSection.append('<div class=\"node-ports-title\">Inputs</div>');
+      outSection.append('<div class=\"node-ports-title\">Outputs</div>');
+
+      inputs.forEach(function(p) {
+        var baseType = (p.base_type || p.type || 'any').toLowerCase();
+        var semanticType = p.semantic_type || '';
+        var portId = nodeId + '__in__' + sanitizePortId(p.name || 'input');
+        var label = p.name || 'input';
+        var row = $('<div class=\"node-port input\"></div>')
+          .attr('id', portId)
+          .attr('data-port-name', label)
+          .attr('data-base-type', baseType)
+          .attr('data-semantic-type', semanticType)
+          .append('<span class=\"port-dot\"></span>')
+          .append('<span class=\"port-label\">' + label + '</span>')
+          .append('<span class=\"port-type\">' + baseType + '</span>');
+        if (semanticType) {
+          row.append('<span class=\"port-semantic\">' + semanticType + '</span>');
+        }
+        inSection.append(row);
+      });
+
+      outputs.forEach(function(p) {
+        var baseType = (p.base_type || p.type || 'any').toLowerCase();
+        var semanticType = p.semantic_type || '';
+        var portId = nodeId + '__out__' + sanitizePortId(p.name || 'output');
+        var label = p.name || 'output';
+        var row = $('<div class=\"node-port output\"></div>')
+          .attr('id', portId)
+          .attr('data-port-name', label)
+          .attr('data-base-type', baseType)
+          .attr('data-semantic-type', semanticType)
+          .append('<span class=\"port-dot\"></span>')
+          .append('<span class=\"port-label\">' + label + '</span>')
+          .append('<span class=\"port-type\">' + baseType + '</span>');
+        if (semanticType) {
+          row.append('<span class=\"port-semantic\">' + semanticType + '</span>');
+        }
+        outSection.append(row);
+      });
+
+      portsHtml.append(inSection).append(outSection);
+      nodeEl.append(portsHtml);
+    }
+
+    function setPortEndpoints(nodeId) {
+      var nodeEl = $('#' + nodeId);
+      if (!nodeEl.length) return;
+      var inPorts = nodeEl.find('.node-port.input');
+      var outPorts = nodeEl.find('.node-port.output');
+      inPorts.each(function() {
+        var portId = $(this).attr('id');
+        var baseType = $(this).data('base-type');
+        var portName = $(this).data('port-name');
+        try { jsPlumbInstance.removeAllEndpoints(portId); } catch(e) {}
+        jsPlumbInstance.addEndpoint(portId, Object.assign({
+          anchor: 'Left',
+          isSource: false,
+          isTarget: true,
+          parameters: { baseType: baseType, portName: portName, direction: 'in', nodeId: nodeId }
+        }, { endpoint: ['Dot', { radius: 5 }], paintStyle: { fill: '#CEB888', stroke: '#B89D5D', strokeWidth: 1 } }));
+      });
+      outPorts.each(function() {
+        var portId = $(this).attr('id');
+        var baseType = $(this).data('base-type');
+        var portName = $(this).data('port-name');
+        try { jsPlumbInstance.removeAllEndpoints(portId); } catch(e) {}
+        jsPlumbInstance.addEndpoint(portId, Object.assign({
+          anchor: 'Right',
+          isSource: true,
+          isTarget: false,
+          parameters: { baseType: baseType, portName: portName, direction: 'out', nodeId: nodeId }
+        }, { endpoint: ['Dot', { radius: 5 }], paintStyle: { fill: '#CEB888', stroke: '#B89D5D', strokeWidth: 1 } }));
+      });
+    }
+
     // Receive limited messages from server
     if (typeof Shiny !== 'undefined' && Shiny.addCustomMessageHandler) {
       // Allow server to request an immediate sync of connections
@@ -1238,6 +1572,21 @@ ui <- page_fillable(
       // Server can instruct client to apply appearance to a specific node
       Shiny.addCustomMessageHandler('apply_node_appearance', function(msg) {
         try { applyNodeAppearance(msg.id, msg.appearance); } catch (e) { console.warn('apply appearance failed', e); }
+      });
+      // Server can instruct client to apply ports to a specific node
+      Shiny.addCustomMessageHandler('apply_node_ports', function(msg) {
+        try {
+          try { jsPlumbInstance.removeAllEndpoints(msg.id); } catch (e) {}
+          renderPorts(msg.id, msg.moduleSpec || {});
+          if (msg.moduleSpec && msg.moduleSpec.name) {
+            $('#' + msg.id + ' .node-title').text(msg.moduleSpec.name);
+          }
+          if (canvasNodes[msg.id]) {
+            canvasNodes[msg.id].ports = msg.moduleSpec || {};
+            canvasNodes[msg.id].hasPorts = true;
+          }
+          setTimeout(function(){ try { setPortEndpoints(msg.id); } catch (e) {} }, 50);
+        } catch (e) { console.warn('apply ports failed', e); }
       });
       // Toggle panel visibility
       Shiny.addCustomMessageHandler('toggle_panel', function(msg) {
@@ -1277,8 +1626,11 @@ ui <- page_fillable(
 
           // If endpoints are present, ensure source endpoint is a source and target endpoint is a target
           if (sEP && tEP) {
-            if (sEP.isSource === true && tEP.isTarget === true) return true;
-            return false;
+            if (!(sEP.isSource === true && tEP.isTarget === true)) return false;
+            var sType = sEP.getParameter('baseType');
+            var tType = tEP.getParameter('baseType');
+            if (!isTypeCompatible(sType, tType)) return false;
+            return true;
           }
 
           // Fallback: allow only if sourceId != targetId
@@ -1435,9 +1787,21 @@ ui <- page_fillable(
         var connections = jsPlumbInstance.getConnections();
         var edges = [];
         connections.forEach(function(conn) {
+          var sEP = conn.endpoints && conn.endpoints[0];
+          var tEP = conn.endpoints && conn.endpoints[1];
+          var sourcePort = sEP && sEP.getParameter ? sEP.getParameter('portName') : null;
+          var targetPort = tEP && tEP.getParameter ? tEP.getParameter('portName') : null;
+          var sourceType = sEP && sEP.getParameter ? sEP.getParameter('baseType') : null;
+          var targetType = tEP && tEP.getParameter ? tEP.getParameter('baseType') : null;
+          var sourceNode = sEP && sEP.getParameter ? sEP.getParameter('nodeId') : conn.sourceId;
+          var targetNode = tEP && tEP.getParameter ? tEP.getParameter('nodeId') : conn.targetId;
           edges.push({
-            source: conn.sourceId,
-            target: conn.targetId
+            source: sourceNode,
+            target: targetNode,
+            sourcePort: sourcePort,
+            targetPort: targetPort,
+            sourceType: sourceType,
+            targetType: targetType
           });
         });
         Shiny.setInputValue('canvas_connections', edges, {priority: 'event'});
@@ -1705,7 +2069,13 @@ ui <- page_fillable(
       }
 
       // Rebuild endpoints to match the new shape
-      try { setNodeEndpoints(nodeId, shape); } catch (e) { console.warn('set endpoints failed', e); }
+      try {
+        if (canvasNodes[nodeId] && canvasNodes[nodeId].hasPorts) {
+          setPortEndpoints(nodeId);
+        } else {
+          setNodeEndpoints(nodeId, shape);
+        }
+      } catch (e) { console.warn('set endpoints failed', e); }
 
       if (canvasNodes[nodeId]) {
         canvasNodes[nodeId].appearance = appearance;
@@ -3068,6 +3438,10 @@ ui <- page_fillable(
           # RMD Preview Tab
           tags$div(id = "rmdTab", class = "tab-pane",
             tags$div(style = "padding: 10px;",
+              tags$details(
+                tags$summary("Rmd Interface Spec (YAML)"),
+                tags$pre(rmd_interface_examples, style = "margin-top: 8px; white-space: pre;")
+              ),
               tags$div(style = "margin-bottom: 10px; display: flex; gap: 8px;",
                 tags$button(class = "btn btn-primary btn-sm", id = "refreshRmdPreviewBtn",
                   style = "background: #CEB888; border: none; color: #000; padding: 6px 12px; font-weight: 600; cursor: pointer;",
@@ -3127,6 +3501,7 @@ server <- function(input, output, session) {
     nodes = list(),
     edges = list()
   )
+  validation_cache <- reactiveVal(list())
   
   # Shared R environment for all nodes
   shared_env <- new.env()
@@ -3138,6 +3513,40 @@ server <- function(input, output, session) {
       library(ggplot2)
     }
   }, error = function(e) {})
+
+  validate_required_inputs <- function(nodes, edges) {
+    if (length(nodes) == 0) return(list())
+    missing_by_node <- list()
+    for (node_id in names(nodes)) {
+      node <- nodes[[node_id]]
+      spec <- node$moduleSpec %||% NULL
+      if (is.null(spec) || is.null(spec$inputs)) next
+      req_inputs <- Filter(function(p) isTRUE(p$required), spec$inputs)
+      if (length(req_inputs) == 0) next
+      missing <- character(0)
+      for (p in req_inputs) {
+        pname <- p$name %||% ""
+        if (!nzchar(pname)) next
+        has_edge <- FALSE
+        if (!is.null(edges) && length(edges) > 0) {
+          for (edge in edges) {
+            if (is.list(edge) &&
+                identical(edge$target, node_id) &&
+                !is.null(edge$targetPort) &&
+                identical(edge$targetPort, pname)) {
+              has_edge <- TRUE
+              break
+            }
+          }
+        }
+        if (!has_edge) missing <- c(missing, pname)
+      }
+      if (length(missing) > 0) {
+        missing_by_node[[node_id]] <- missing
+      }
+    }
+    missing_by_node
+  }
   
   # Render file tree
   output$file_tree_ui <- renderUI({
@@ -3367,6 +3776,18 @@ server <- function(input, output, session) {
       }
       
       canvas_state$nodes[[node_id]] <- node_data
+      
+      # If Rmd, parse interface and attach ports
+      if (!is.null(node_data$filePath) && grepl("\\.Rmd$", node_data$filePath, ignore.case = TRUE)) {
+        module_spec <- parse_rmd_interface(node_data$filePath)
+        if (!is.null(module_spec)) {
+          canvas_state$nodes[[node_id]]$moduleSpec <- module_spec
+          session$sendCustomMessage("apply_node_ports", list(
+            id = node_id,
+            moduleSpec = module_spec
+          ))
+        }
+      }
       session$sendCustomMessage("appendToLog", list(
         message = paste0("Node created: ", node_data$fileName), 
         type = "success"
@@ -3413,6 +3834,22 @@ server <- function(input, output, session) {
       }
     } else {
       canvas_state$edges <- list()
+    }
+
+    # Validate required inputs whenever connections change
+    missing <- validate_required_inputs(canvas_state$nodes, canvas_state$edges)
+    last_missing <- validation_cache()
+    if (!identical(missing, last_missing)) {
+      validation_cache(missing)
+      if (length(missing) > 0) {
+        for (node_id in names(missing)) {
+          node_name <- canvas_state$nodes[[node_id]]$fileName %||% node_id
+          session$sendCustomMessage("appendToLog", list(
+            message = paste0("⚠ Missing required inputs for ", node_name, ": ", paste(missing[[node_id]], collapse = ", ")),
+            type = "warning"
+          ))
+        }
+      }
     }
   })
   
@@ -3849,7 +4286,7 @@ server <- function(input, output, session) {
             }
             
             # Handle plots
-            if (!is.null(result$plots) && length(result$plots) > 0 && exists("HAS_BASE64ENC") && HAS_BASE64ENC) {
+            if (!is.null(result$plots) && length(result$plots) > 0 && exists("HAS_BASE64ENC") && HAS_BASE64ENC) { # nolint
               for (i in seq_along(result$plots)) {
                 plot_file <- result$plots[[i]]
                 if (!is.null(plot_file) && file.exists(plot_file)) {
@@ -4149,7 +4586,7 @@ server <- function(input, output, session) {
       
       # Generate RMD content
       rmd_content <- tryCatch({
-        generate_rmd_from_hierarchy(sorted_nodes, structure$files, canvas_state$edges, include_metadata = TRUE)
+        generate_rmd_from_hierarchy(sorted_nodes, structure$files, canvas_state$edges, include_metadata = TRUE, node_specs = canvas_state$nodes)
       }, error = function(e) {
         session$sendCustomMessage("appendToLog", list(
           message = paste0("✗ Error generating RMD: ", e$message), 
@@ -4192,7 +4629,7 @@ server <- function(input, output, session) {
     
     sorted_nodes <- build_node_hierarchy(canvas_state$nodes, canvas_state$edges)
     structure <- scan_workspace()
-    rmd_content <- generate_rmd_from_hierarchy(sorted_nodes, structure$files, canvas_state$edges, include_metadata = TRUE)
+    rmd_content <- generate_rmd_from_hierarchy(sorted_nodes, structure$files, canvas_state$edges, include_metadata = TRUE, node_specs = canvas_state$nodes)
     
     # Create download
     session$sendCustomMessage("downloadFile", list(
@@ -4239,6 +4676,7 @@ server <- function(input, output, session) {
     node_lines <- strsplit(metadata_text, "\n")[[1]]
     current_node <- NULL
     parsing_connections <- FALSE
+    parsing_manifest <- FALSE
     current_connection <- NULL
     
     for (line in node_lines) {
@@ -4252,6 +4690,20 @@ server <- function(input, output, session) {
         next
       }
       
+      # Skip interface manifest JSON block
+      if (grepl("^INTERFACE_MANIFEST_JSON:", line)) {
+        parsing_manifest <- TRUE
+        next
+      }
+      if (parsing_manifest) {
+        # Stop skipping when we hit NODES:
+        if (grepl("^NODES:", line)) {
+          parsing_manifest <- FALSE
+        } else {
+          next
+        }
+      }
+
       # Check if we're starting to parse connections
       if (grepl("^CONNECTIONS:", line)) {
         parsing_connections <- TRUE
@@ -4522,6 +4974,23 @@ server <- function(input, output, session) {
               fileName = final_file_name,
               level = node_info$level %||% 1
             )
+
+            # Update server-side canvas state
+            canvas_state$nodes[[node_id]] <- list(
+              id = node_id,
+              filePath = if (is.null(final_file_path)) "" else final_file_path,
+              fileName = final_file_name
+            )
+            if (!is.null(final_file_path) && grepl("\\.Rmd$", final_file_path, ignore.case = TRUE)) {
+              module_spec <- parse_rmd_interface(final_file_path)
+              if (!is.null(module_spec)) {
+                canvas_state$nodes[[node_id]]$moduleSpec <- module_spec
+                session$sendCustomMessage("apply_node_ports", list(
+                  id = node_id,
+                  moduleSpec = module_spec
+                ))
+              }
+            }
             
             # Log whether file exists or not (informational only)
             file_exists_msg <- ""
@@ -4627,7 +5096,7 @@ server <- function(input, output, session) {
   })
   
   # File import (if shinyFiles is available)
-  if (exists("HAS_SHINYFILES") && HAS_SHINYFILES) {
+            if (exists("HAS_SHINYFILES") && HAS_SHINYFILES) { # nolint
     volumes <- c(Home = path.expand("~"), getVolumes()())
     
     # Use shinyDirChoose for folder selection (not shinyFileChoose)

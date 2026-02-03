@@ -170,7 +170,7 @@ language_code <- function(name) {
 
 # Child endpoints and paths (use detected IP for LAN access)
 child_apps <- list(
-  datapreviewer = paste0("http://", .local_ip, ":8001"),
+  dataviewer = paste0("http://", .local_ip, ":8001"),
   pediviewer   = paste0("http://", .local_ip, ":8002"),
   genoviewer   = paste0("http://", .local_ip, ":8005"),
   easyblupf90  = paste0("http://", .local_ip, ":8003"),
@@ -192,7 +192,7 @@ apps_base_dir <- normalizePath(file.path(suite_dir, ".."), winslash = "/", mustW
 suite_log_path <- normalizePath(file.path(suite_dir, "suite_diagnostics.log"), winslash = "/", mustWork = FALSE)
 
 child_paths <- list(
-  datapreviewer = normalizePath(file.path(apps_base_dir, "dataprevieweR"), winslash = "/", mustWork = FALSE),
+  dataviewer = normalizePath(file.path(apps_base_dir, "datavieweR"), winslash = "/", mustWork = FALSE),
   pediviewer   = normalizePath(file.path(apps_base_dir, "pedivieweR"), winslash = "/", mustWork = FALSE),
   genoviewer   = normalizePath(file.path(apps_base_dir, "genovieweR"), winslash = "/", mustWork = FALSE),
   easyblupf90  = normalizePath(file.path(apps_base_dir, "easyblup"), winslash = "/", mustWork = FALSE),

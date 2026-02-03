@@ -28,11 +28,11 @@ easybreedeR directly addresses this challenge by providing a unified, user-frien
 
 # Key Functions
 easybreederR is composed of four main modules, each addressing a critical step in the breeding data analysis workflow.
-## Phenotype Preview and Quality Control (`dataprevieweR`)
+## Phenotype Preview and Quality Control (`datavieweR`)
 
-As shown in Figure 1, the dataprevieweR interface provides interactive phenotype quality control (QC), allowing interactive data exploration and statistical filtering methods.
+As shown in Figure 1, the datavieweR interface provides interactive phenotype quality control (QC), allowing interactive data exploration and statistical filtering methods.
 
-![Overview of the dataprevieweR interface.](Figures/Figure1.png)
+![Overview of the datavieweR interface.](Figures/Figure1.png)
 
 Data visualization is implemented using the `ggplot2` package [@Wickham2016], offering customizable histograms for distribution analysis and boxplots for outlier detection. Quality control filtering employs three statistical methods:
 

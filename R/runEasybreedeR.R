@@ -1,7 +1,7 @@
 #' Launch the easybreedeR Studio (suite launcher)
 #'
 #' Main entry point for the easybreedeR Shiny application suite. Provides
-#' access to all sub-applications (easyblup, pedivieweR, dataprevieweR, RCW).
+#' access to all sub-applications (easyblup, pedivieweR, datavieweR, RCW).
 #'
 #' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
 #' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
@@ -169,26 +169,26 @@ run_genovieweR <- function(host = "0.0.0.0", port = NULL) {
   shiny::runApp(app_dir, host = host, port = port, launch.browser = TRUE)
 }
 
-#' Launch dataprevieweR application
+#' Launch datavieweR application
 #'
 #' @description
-#' Launches the dataprevieweR application for data preview and exploration.
+#' Launches the datavieweR application for data preview and exploration.
 #'
 #' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
 #' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
 #' @export
 #' @examples
 #' \dontrun{
-#'   run_dataprevieweR()
+#'   run_datavieweR()
 #' }
-run_dataprevieweR <- function(host = "0.0.0.0", port = NULL) {
-  app_dir <- system.file("dataprevieweR", package = "easybreedeR")
+run_datavieweR <- function(host = "0.0.0.0", port = NULL) {
+  app_dir <- system.file("datavieweR", package = "easybreedeR")
   if (app_dir == "") {
-    dev_dir <- file.path(getwd(), "inst", "dataprevieweR")
+    dev_dir <- file.path(getwd(), "inst", "datavieweR")
     if (dir.exists(dev_dir)) {
       app_dir <- dev_dir
     } else {
-      stop("dataprevieweR application not found. Please reinstall the package or run from package root.")
+      stop("datavieweR application not found. Please reinstall the package or run from package root.")
     }
   }
   shiny::runApp(app_dir, host = host, port = port, launch.browser = TRUE)

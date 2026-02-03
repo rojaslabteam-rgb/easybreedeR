@@ -20,11 +20,11 @@ Home_UI <- function() {
                       tags$span(class = "material-symbols-outlined blue", "bar_chart")
                     ),
                     div(class = "app-card-title-wrapper",
-                      h3("dataprevieweR"),
+                      h3("datavieweR"),
                       p("Interactive data exploration and visualization")
                     )
                   ),
-                  actionButton("open_datapreviewR", "Launch", class = "btn-primary")
+                  actionButton("open_dataviewR", "Launch", class = "btn-primary")
                 )
               ),
               column(3,
@@ -1039,7 +1039,7 @@ suite_ui <- function() {
     # Use stable 'value' for each tab so programmatic navigation doesn't depend on
     # the translated title string. Titles are rendered via uiOutput so they
     # react to language changes while the tab 'value' stays constant.
-    tabPanel(uiOutput("tab_datapreviewer"), uiOutput("frame_datapreviewer"), value = "datapreviewR"),
+    tabPanel(uiOutput("tab_dataviewer"), uiOutput("frame_dataviewer"), value = "dataviewR"),
     tabPanel(uiOutput("tab_pediviewer"), uiOutput("frame_pediviewer"), value = "pediviewer"),
     tabPanel(uiOutput("tab_genoviewer"), uiOutput("frame_genoviewer"), value = "genoviewer"),
     tabPanel(uiOutput("tab_easyblup"), uiOutput("frame_easyblup"), value = "easyblup"),
