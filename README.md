@@ -1,12 +1,26 @@
-# easybreedeR  [![R-CMD-check](https://github.com/rojaslabteam-rgb/easybreedeR/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/rojaslabteam-rgb/easybreedeR/actions/workflows/R-CMD-check.yaml) <img src="inst/www/easybreedeR.svg" alt="easybreedeR logo" height="140" align="right" />
-## An Integrated R Shiny Application for Breeding Data Analysis
+<h1>
+  easybreedeR:
+  <img src="inst/www/easybreedeR.svg" alt="easybreedeR logo" align="right" 
+       alt="easybreedeR logo"
+       height="255"
+       align="right" />
 
-------------------------------------------------------------------------
+
+**An Integrated R Shiny Application for Breeding Data Analysis**
+</h1>
 
 
-**easybreedeR** is a comprehensive R/Shiny application suite designed for breeding data quick checking, visualization, quality control and preparation. It provides an integrated platform with multiple specialized modules for phenotypic data checking, pedigree data checking, genotype data checking and blupf90 parameter files preparation.
+# Contents
+
+- [Overview](#overview)
+- [Installation](#installation)
+- [Quick start](#quick-start)
+
+
+
 
 ## Overview
+**easybreedeR** is a comprehensive R/Shiny application designed for breeding data quick checking, visualization, quality control and preparation. It provides an integrated platform with multiple specialized modules for phenotypic data checking, pedigree data checking, genotype data checking and blupf90 parameter files preparation.
 
 easybreedeR combines multiple Shiny applications into a unified suite, offering:
 
