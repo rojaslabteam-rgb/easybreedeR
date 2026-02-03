@@ -14,12 +14,12 @@ Depends:
     R (>= 4.1.0),
 Imports:
     shiny (>= 1.7.0),
-    Rcpp,
     httpuv
 Suggests:
     bslib (>= 0.4.0),
     DT (>= 0.20),
     jsonlite (>= 1.8.0),
+    Rcpp,
     plotly,
     shinyFiles,
     fs,
