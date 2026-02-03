@@ -1,17 +1,3 @@
-#' Launch the easybreedeR Studio (suite launcher)
-#'
-#' Main entry point for the easybreedeR Shiny application suite. Provides
-#' access to all sub-applications (easyblup, pedivieweR, datavieweR, RCW).
-#'
-#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
-#' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
-#' @name run_easybreedeR
-#' @export
-#' @return A Shiny app object (invisibly returned by `shiny::runApp`).
-#' @examples
-#' \dontrun{
-#'   run_easybreedeR()            # launch suite
-#' }
 .resolve_port <- function(port) {
   if (!is.null(port)) {
     return(as.integer(port))
@@ -103,6 +89,19 @@
   }
 }
 
+#' Launch the easybreedeR Studio (suite launcher)
+#'
+#' Main entry point for the easybreedeR Shiny application suite. Provides
+#' access to all sub-applications (easyblup, pedivieweR, datavieweR, RCW).
+#'
+#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
+#' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
+#' @export
+#' @return A Shiny app object (invisibly returned by `shiny::runApp`).
+#' @examples
+#' \dontrun{
+#'   run_easybreedeR()            # launch suite
+#' }
 run_easybreedeR <- function(host = "0.0.0.0", port = NULL) {
   # Try to find app in installed package first
   app_dir <- system.file("easybreedeR_Studio", package = "easybreedeR")

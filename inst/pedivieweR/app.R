@@ -2372,6 +2372,10 @@ output$top10_dam_title <- renderText({
     f_values_cache(NULL)  # Clear inbreeding cache when new file uploaded
     f_values_cache_hash(NULL)
     analysis_started(FALSE)  # Reset analysis started flag
+    qc_issues(NULL)
+    pending_data(NULL)
+    qc_fix_summary(NULL)
+    last_fix_summary(NULL)
   })
   
   # Handle Start Analysis button click
