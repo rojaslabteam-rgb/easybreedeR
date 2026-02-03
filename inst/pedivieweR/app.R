@@ -50,10 +50,23 @@ tryCatch({
 # Try to load Rcpp QC function
 use_rcpp <- FALSE
 use_fast_inbreeding_cpp <- FALSE
+get_pediviewer_dir <- function() {
+  app_dir <- system.file("pedivieweR", package = "easybreedeR")
+  if (nzchar(app_dir) && dir.exists(app_dir)) {
+    return(app_dir)
+  }
+  dev_dir <- file.path(getwd(), "inst", "pedivieweR")
+  if (dir.exists(dev_dir)) {
+    return(dev_dir)
+  }
+  return(getwd())
+}
 tryCatch({
   library(Rcpp)
-  if (file.exists("pedigree_qc.cpp")) {
-    sourceCpp("pedigree_qc.cpp")
+  app_dir <- get_pediviewer_dir()
+  cpp_path <- file.path(app_dir, "pedigree_qc.cpp")
+  if (file.exists(cpp_path)) {
+    sourceCpp(cpp_path)
     use_rcpp <- TRUE
     cat("✓ Rcpp QC functions loaded successfully\n")
     # Check if Rcpp functions are available
@@ -72,9 +85,11 @@ tryCatch({
     } else {
       cat("Note: fast_inbreeding_cpp not found, will use inbupgf90/pedigreeTools\n")
     }
+  } else {
+    cat("Note: pedigree_qc.cpp not found at:", cpp_path, "\n")
   }
 }, error = function(e) {
-  cat("Note: Rcpp not available, using optimized R functions\n")
+  cat("Note: Rcpp not available or compilation failed:", e$message, "\n")
   use_rcpp <- FALSE
   use_fast_inbreeding_cpp <- FALSE
 })
