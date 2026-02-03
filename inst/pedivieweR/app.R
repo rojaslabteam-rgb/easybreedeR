@@ -49,6 +49,7 @@ tryCatch({
 
 # Try to load Rcpp QC function
 use_rcpp <- FALSE
+use_fast_inbreeding_cpp <- FALSE
 tryCatch({
   library(Rcpp)
   if (file.exists("pedigree_qc.cpp")) {
@@ -65,10 +66,17 @@ tryCatch({
     if (!exists("fast_lap_depths")) {
       cat("Note: fast_lap_depths not found, will use R version\n")
     }
+    if (exists("fast_inbreeding_cpp", mode = "function")) {
+      use_fast_inbreeding_cpp <- TRUE
+      cat("✓ fast inbreeding C++ available - will use Rcpp method\n")
+    } else {
+      cat("Note: fast_inbreeding_cpp not found, will use inbupgf90/pedigreeTools\n")
+    }
   }
 }, error = function(e) {
   cat("Note: Rcpp not available, using optimized R functions\n")
   use_rcpp <- FALSE
+  use_fast_inbreeding_cpp <- FALSE
 })
 
 # Suppress SASS color contrast warnings from bslib
@@ -3576,20 +3584,32 @@ output$top10_dam_title <- renderText({
       
       n_rows <- nrow(ped_data())
       
-      # Auto-select individual with deepest ancestors
-      deepest_info <- find_deepest_ancestor_individual(ped_data())
-      
-      if (!is.null(deepest_info)) {
-        # Set the individual with deepest ancestors as selected
-        selected_individual(deepest_info$id)
+      # Auto-select individual with highest inbreeding coefficient (if available)
+      f_vals_auto <- f_values_cache()
+      if (!is.null(f_vals_auto) && nrow(f_vals_auto) > 0 && "ID" %in% names(f_vals_auto) && "F" %in% names(f_vals_auto)) {
+        highest_f <- f_vals_auto %>% arrange(desc(F)) %>% slice(1)
+        if (nrow(highest_f) > 0) {
+          selected_individual(highest_f$ID)
+          showNotification(
+            paste0("🎯 Auto-selected highest inbreeding individual: ", highest_f$ID,
+                   " (F = ", round(highest_f$F, 4), ")"),
+            type = "message",
+            duration = 8
+          )
+        }
+      } else {
+        # F values not available yet; keep previous behavior as fallback
+        deepest_info <- find_deepest_ancestor_individual(ped_data())
         
-        # Show notification
-        showNotification(
-          paste0("🎯 Auto-selected individual with deepest pedigree: ", 
-                 deepest_info$id, " (", deepest_info$depth, " generations)"),
-          type = "message",
-          duration = 8
-        )
+        if (!is.null(deepest_info)) {
+          selected_individual(deepest_info$id)
+          showNotification(
+            paste0("🎯 Auto-selected individual with deepest pedigree: ", 
+                   deepest_info$id, " (", deepest_info$depth, " generations)"),
+            type = "message",
+            duration = 8
+          )
+        }
       }
       
       # For large datasets, stay on data tab to avoid rendering freeze
@@ -3605,7 +3625,7 @@ output$top10_dam_title <- renderText({
       }
     }
   })
-  
+
   # Reactive value to store current drill-down state
   current_family <- reactiveVal(NULL)
   
@@ -4905,6 +4925,50 @@ output$top10_dam_title <- renderText({
     }
   )
   
+  # Helper function to calculate inbreeding using fast C++ method (Rcpp)
+  calculate_inbreeding_cpp <- function(ped_clean, progress_callback = NULL, status_callback = NULL) {
+    tryCatch({
+      if (!is.null(progress_callback)) progress_callback(0.1, "Preparing pedigree data for C++ inbreeding...")
+      if (!is.null(status_callback)) {
+        status_callback(list(
+          calculating = TRUE,
+          progress = 0.1,
+          message = "Preparing pedigree data for C++ inbreeding...",
+          n_individuals = nrow(ped_clean)
+        ))
+      }
+
+      ids <- as.character(ped_clean$ID)
+      sires <- ifelse(is.na(ped_clean$Sire) | ped_clean$Sire == "" | ped_clean$Sire == "0", "0", as.character(ped_clean$Sire))
+      dams <- ifelse(is.na(ped_clean$Dam) | ped_clean$Dam == "" | ped_clean$Dam == "0", "0", as.character(ped_clean$Dam))
+
+      if (!is.null(progress_callback)) progress_callback(0.5, "Computing inbreeding coefficients (C++ method)...")
+      if (!is.null(status_callback)) {
+        status_callback(list(
+          calculating = TRUE,
+          progress = 0.5,
+          message = "Computing inbreeding coefficients (C++ method)...",
+          n_individuals = nrow(ped_clean)
+        ))
+      }
+
+      f_vec <- fast_inbreeding_cpp(ids, sires, dams)
+      if (is.null(f_vec) || length(f_vec) == 0) {
+        stop("C++ inbreeding calculation returned empty results.")
+      }
+      if (length(f_vec) != nrow(ped_clean)) {
+        stop("C++ inbreeding result length mismatch.")
+      }
+
+      result <- tibble(ID = as.character(ped_clean$ID), F = as.numeric(f_vec))
+      return(result)
+    }, error = function(e) {
+      error_msg <- paste("Error in C++ inbreeding calculation:", e$message)
+      cat(error_msg, "\n")
+      return(NULL)
+    })
+  }
+
   # Helper function to calculate inbreeding using inbupgf90 (faster method)
   calculate_inbreeding_inbupgf90 <- function(ped_clean, progress_callback = NULL, status_callback = NULL) {
     # Create temporary directory in app directory
@@ -5196,8 +5260,126 @@ output$top10_dam_title <- renderText({
         missing_sires <- setdiff(valid_sires, all_ids)
         missing_dams <- setdiff(valid_dams, all_ids)
         
-        # Try to use inbupgf90 if linkbreedeR is available (skip editPed for inbupgf90)
-        if (use_linkbreedeR) {
+        # Try to use fast C++ method if available (skip editPed for C++ method)
+        if (use_fast_inbreeding_cpp) {
+          # C++ method treats missing parents as founders
+          if (length(missing_sires) > 0 || length(missing_dams) > 0) {
+            cat("Note: Some parent references not found in ID column. C++ method will treat them as founders.\n")
+          }
+          incProgress(0.4, detail = "Computing inbreeding coefficients (using fast C++ method)...")
+          
+          # Update progress status
+          f_calculation_status(list(
+            calculating = TRUE,
+            progress = 0.4,
+            message = "Computing inbreeding coefficients (using fast C++ method)...",
+            n_individuals = n_individuals
+          ))
+          
+          # Try fast C++ method first
+          result_fast <- calculate_inbreeding_cpp(
+            ped_clean,
+            progress_callback = function(progress, detail) {
+              incProgress(progress - 0.4, detail = detail)
+            },
+            status_callback = function(status) {
+              f_calculation_status(status)
+            }
+          )
+          
+          # If fast method succeeded, use it; otherwise fall back to pedigreeTools
+          if (!is.null(result_fast) && nrow(result_fast) > 0) {
+            incProgress(0.8, detail = "Finalizing results...")
+            
+            # Update progress status
+            f_calculation_status(list(
+              calculating = TRUE,
+              progress = 0.8,
+              message = "Finalizing results...",
+              n_individuals = n_individuals
+            ))
+            
+            result <- result_fast
+          } else {
+            # Fall back to pedigreeTools - need to do editPed and create ped_obj
+            cat("Falling back to pedigreeTools method...\n")
+            
+            # Use editPed() to complete and sort pedigree (ensures ancestors precede progeny)
+            incProgress(0.25, detail = "Completing and sorting pedigree...")
+            
+            # Update progress status
+            f_calculation_status(list(
+              calculating = TRUE,
+              progress = 0.25,
+              message = "Completing and sorting pedigree...",
+              n_individuals = n_individuals
+            ))
+            
+            # Check for missing parent references (pedigreeTools requires them)
+            if (length(missing_sires) > 0 || length(missing_dams) > 0) {
+              error_msg <- paste0("Invalid parent references found. ",
+                                 if(length(missing_sires) > 0) paste0(length(missing_sires), " missing Sire(s)") else "",
+                                 if(length(missing_sires) > 0 && length(missing_dams) > 0) ", " else "",
+                                 if(length(missing_dams) > 0) paste0(length(missing_dams), " missing Dam(s)") else "",
+                                 ". Please use 'Fix Pedigree' button to correct.")
+              stop(error_msg)
+            }
+            
+            # Use editPed() to complete missing ancestors and sort (ancestors before progeny)
+            ped_edited <- pedigreeTools::editPed(
+              sire = ped_clean$Sire,
+              dam = ped_clean$Dam,
+              label = ped_clean$ID
+            )
+            
+            incProgress(0.3, detail = "Building pedigree object...")
+            
+            # Update progress status
+            f_calculation_status(list(
+              calculating = TRUE,
+              progress = 0.3,
+              message = "Building pedigree object...",
+              n_individuals = n_individuals
+            ))
+            
+            # Convert edited pedigree to pedigree object
+            ped_obj <- with(ped_edited, pedigreeTools::pedigree(
+              label = label,
+              sire = sire,
+              dam = dam
+            ))
+            
+            incProgress(0.4, detail = "Computing inbreeding coefficients (using pedigreeTools method)...")
+            
+            # Update progress status
+            f_calculation_status(list(
+              calculating = TRUE,
+              progress = 0.4,
+              message = "Computing inbreeding coefficients (using pedigreeTools method)...",
+              n_individuals = n_individuals
+            ))
+            
+            # Use inbreeding() function instead of getF()
+            f_vec <- pedigreeTools::inbreeding(ped_obj)
+            
+            # Check if result is valid
+            if (is.null(f_vec) || length(f_vec) == 0 || all(is.na(f_vec))) {
+              stop("Inbreeding calculation returned empty or all-NA results. Please check pedigree structure.")
+            }
+            
+            incProgress(0.8, detail = "Finalizing results...")
+            
+            # Update progress status
+            f_calculation_status(list(
+              calculating = TRUE,
+              progress = 0.8,
+              message = "Finalizing results...",
+              n_individuals = n_individuals
+            ))
+            
+            result <- tibble(ID = as.character(ped_clean$ID), F = f_vec)
+          }
+        } else if (use_linkbreedeR) {
           # inbupgf90 doesn't need editPed, so we can use ped_clean directly
           # But we still need to check for missing parent references for validation
           if (length(missing_sires) > 0 || length(missing_dams) > 0) {
@@ -5768,6 +5950,26 @@ output$top10_dam_title <- renderText({
     parent_vals <- ped[[parent_col]]
     valid <- !is_missing_parent(parent_vals)
     if (!any(valid)) return(data.frame())
+
+    if (exists("use_rcpp") && use_rcpp && exists("fast_descendant_summary", mode = "function")) {
+      res <- fast_descendant_summary(
+        ids = as.character(ped$ID),
+        parent_vals = as.character(parent_vals),
+        max_depth = 50
+      )
+      if (is.null(res) || length(res$parents) == 0) return(data.frame())
+      counts <- res$counts
+      max_gen <- ncol(counts)
+      df <- data.frame(
+        id = as.character(res$parents),
+        total = as.integer(res$totals),
+        counts,
+        stringsAsFactors = FALSE
+      )
+      colnames(df) <- c(id_label, "Total_Descendants", paste0("Gen", seq_len(max_gen)))
+      return(df[order(-df$Total_Descendants, df[[id_label]]), , drop = FALSE])
+    }
+
     child_map <- split(as.character(ped$ID[valid]), as.character(parent_vals[valid]))
     parent_ids <- names(child_map)
     if (length(parent_ids) == 0) return(data.frame())

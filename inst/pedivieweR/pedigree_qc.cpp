@@ -5,6 +5,8 @@
 #include <algorithm>
 #include <random>
 #include <functional>
+#include <queue>
+#include <cctype>
 using namespace Rcpp;
 
 // [[Rcpp::export]]
@@ -1078,4 +1080,342 @@ IntegerVector fast_lap_depths(CharacterVector ids,
   }
   
   return depths;
+}
+
+// Fast descendant summary for parent role (Sire/Dam)
+// [[Rcpp::export]]
+List fast_descendant_summary(CharacterVector ids,
+                             CharacterVector parent_vals,
+                             int max_depth = 50) {
+  int n = ids.size();
+  if (parent_vals.size() != n) {
+    Rcpp::stop("Length mismatch: ids and parent_vals must have same length.");
+  }
+  if (n == 0) {
+    return List::create(
+      Named("parents") = CharacterVector(),
+      Named("totals") = IntegerVector(),
+      Named("counts") = IntegerMatrix(0, 0)
+    );
+  }
+
+  std::unordered_map<std::string, std::vector<int>> parent_children;
+  parent_children.reserve(n * 2);
+  std::unordered_map<std::string, int> parent_index;
+  parent_index.reserve(n);
+  std::vector<std::string> parent_ids;
+  parent_ids.reserve(n / 2);
+
+  auto is_missing_parent_str = [](const Rcpp::String& s) -> bool {
+    if (s == NA_STRING) return true;
+    std::string x = std::string(s.get_cstring());
+    if (x.empty()) return true;
+    if (x == "0") return true;
+    if (x == "NA") return true;
+    return false;
+  };
+
+  for (int i = 0; i < n; ++i) {
+    Rcpp::String p = parent_vals[i];
+    if (is_missing_parent_str(p)) continue;
+    std::string parent_id = std::string(p.get_cstring());
+    auto it = parent_index.find(parent_id);
+    if (it == parent_index.end()) {
+      parent_index[parent_id] = static_cast<int>(parent_ids.size());
+      parent_ids.push_back(parent_id);
+    }
+    parent_children[parent_id].push_back(i);
+  }
+
+  int pcount = static_cast<int>(parent_ids.size());
+  if (pcount == 0) {
+    return List::create(
+      Named("parents") = CharacterVector(),
+      Named("totals") = IntegerVector(),
+      Named("counts") = IntegerMatrix(0, 0)
+    );
+  }
+
+  IntegerVector totals(pcount);
+  IntegerMatrix counts(pcount, max_depth);
+
+  std::vector<int> visit_tag(n, 0);
+  int stamp = 1;
+
+  for (int pi = 0; pi < pcount; ++pi) {
+    const std::string& root = parent_ids[pi];
+    auto it_root = parent_children.find(root);
+    if (it_root == parent_children.end() || it_root->second.empty()) {
+      totals[pi] = 0;
+      continue;
+    }
+
+    std::vector<int> current = it_root->second;
+    int depth = 1;
+    int total = 0;
+
+    while (!current.empty() && depth <= max_depth) {
+      std::vector<int> next;
+      next.reserve(current.size());
+      for (int idx : current) {
+        if (visit_tag[idx] == stamp) continue;
+        visit_tag[idx] = stamp;
+        counts(pi, depth - 1) += 1;
+        total += 1;
+
+        const std::string& child_id = Rcpp::as<std::string>(ids[idx]);
+        auto it_child = parent_children.find(child_id);
+        if (it_child != parent_children.end()) {
+          const std::vector<int>& kids = it_child->second;
+          next.insert(next.end(), kids.begin(), kids.end());
+        }
+      }
+      current.swap(next);
+      depth += 1;
+    }
+
+    totals[pi] = total;
+    stamp += 1;
+    if (stamp == INT_MAX) {
+      std::fill(visit_tag.begin(), visit_tag.end(), 0);
+      stamp = 1;
+    }
+  }
+
+  CharacterVector parents(pcount);
+  for (int i = 0; i < pcount; ++i) {
+    parents[i] = parent_ids[i];
+  }
+
+  return List::create(
+    Named("parents") = parents,
+    Named("totals") = totals,
+    Named("counts") = counts
+  );
+}
+
+static inline std::string trim_copy(const std::string& s) {
+  size_t start = 0;
+  while (start < s.size() && std::isspace(static_cast<unsigned char>(s[start]))) {
+    ++start;
+  }
+  if (start == s.size()) return "";
+  size_t end = s.size() - 1;
+  while (end > start && std::isspace(static_cast<unsigned char>(s[end]))) {
+    --end;
+  }
+  return s.substr(start, end - start + 1);
+}
+
+static inline bool is_missing_parent(const Rcpp::String& s) {
+  if (s == NA_STRING) return true;
+  std::string x = trim_copy(std::string(s.get_cstring()));
+  if (x.empty()) return true;
+  if (x == "0") return true;
+  if (x == "NA") return true;
+  return false;
+}
+
+// Fast inbreeding coefficients using modified algorithm (C++ implementation)
+// [[Rcpp::export]]
+NumericVector fast_inbreeding_cpp(CharacterVector ids,
+                                  CharacterVector sires,
+                                  CharacterVector dams) {
+  int n = ids.size();
+  if (sires.size() != n || dams.size() != n) {
+    Rcpp::stop("Length mismatch: ids, sires, and dams must have same length.");
+  }
+  if (n == 0) {
+    return NumericVector();
+  }
+
+  std::unordered_map<std::string, int> id_to_index;
+  id_to_index.reserve(n * 2);
+  std::vector<std::string> id_vec(n);
+
+  for (int i = 0; i < n; ++i) {
+    if (ids[i] == NA_STRING) {
+      Rcpp::stop("IDs cannot contain NA values.");
+    }
+    std::string id = Rcpp::as<std::string>(ids[i]);
+    if (id_to_index.find(id) != id_to_index.end()) {
+      Rcpp::stop("Duplicate ID found in pedigree: " + id);
+    }
+    id_to_index[id] = i;
+    id_vec[i] = id;
+  }
+
+  std::vector<int> sire_idx(n, -1);
+  std::vector<int> dam_idx(n, -1);
+  std::vector<std::vector<int>> children(n);
+  std::vector<int> indegree(n, 0);
+
+  for (int i = 0; i < n; ++i) {
+    Rcpp::String s = sires[i];
+    Rcpp::String d = dams[i];
+    if (!is_missing_parent(s)) {
+      std::string sire_id = trim_copy(std::string(s.get_cstring()));
+      auto it = id_to_index.find(sire_id);
+      if (it != id_to_index.end()) {
+        sire_idx[i] = it->second;
+        children[it->second].push_back(i);
+        indegree[i] += 1;
+      }
+    }
+    if (!is_missing_parent(d)) {
+      std::string dam_id = trim_copy(std::string(d.get_cstring()));
+      auto it = id_to_index.find(dam_id);
+      if (it != id_to_index.end()) {
+        dam_idx[i] = it->second;
+        children[it->second].push_back(i);
+        indegree[i] += 1;
+      }
+    }
+  }
+
+  std::priority_queue<int, std::vector<int>, std::greater<int>> ready;
+  for (int i = 0; i < n; ++i) {
+    if (indegree[i] == 0) {
+      ready.push(i);
+    }
+  }
+
+  std::vector<int> order;
+  order.reserve(n);
+  while (!ready.empty()) {
+    int node = ready.top();
+    ready.pop();
+    order.push_back(node);
+    for (int child : children[node]) {
+      indegree[child] -= 1;
+      if (indegree[child] == 0) {
+        ready.push(child);
+      }
+    }
+  }
+
+  if ((int)order.size() != n) {
+    Rcpp::stop("Cycle detected in pedigree; cannot compute inbreeding coefficients.");
+  }
+
+  std::vector<int> new_index(n, 0);
+  for (int pos = 0; pos < n; ++pos) {
+    new_index[order[pos]] = pos + 1;
+  }
+
+  std::vector<int> ped_sire(n + 1, 0);
+  std::vector<int> ped_dam(n + 1, 0);
+  for (int pos = 1; pos <= n; ++pos) {
+    int node = order[pos - 1];
+    ped_sire[pos] = (sire_idx[node] >= 0) ? new_index[sire_idx[node]] : 0;
+    ped_dam[pos] = (dam_idx[node] >= 0) ? new_index[dam_idx[node]] : 0;
+  }
+
+  int m = n;
+  std::vector<int> SId(n + 1, 0);
+  std::vector<int> Link(n + 1, 0);
+  std::vector<int> MaxIdP(n + 1, 0);
+  std::vector<double> F(n + 1, 0.0);
+  std::vector<double> B(n + 1, 0.0);
+  std::vector<double> x(n + 1, 0.0);
+  std::vector<int> rPedS(n + 1, 0);
+  std::vector<int> rPedD(n + 1, 0);
+
+  F[0] = -1.0;
+  x[0] = 0.0;
+  Link[0] = 0;
+  MaxIdP[0] = 0;
+
+  int rN = 1;
+  for (int i = 1; i <= n; ++i) {
+    SId[i] = i;
+    Link[i] = 0;
+    if (i <= m) {
+      x[i] = 0.0;
+    }
+    int S = ped_sire[i];
+    int D = ped_dam[i];
+    if (S != 0 && Link[S] == 0) {
+      MaxIdP[rN] = Link[S] = rN;
+      rPedS[rN] = Link[ped_sire[S]];
+      rPedD[rN] = Link[ped_dam[S]];
+      rN++;
+    }
+    if (D != 0 && Link[D] == 0) {
+      Link[D] = rN;
+      rPedS[rN] = Link[ped_sire[D]];
+      rPedD[rN] = Link[ped_dam[D]];
+      rN++;
+    }
+    if (MaxIdP[Link[S]] < Link[D]) {
+      MaxIdP[Link[S]] = Link[D];
+    }
+  }
+
+  std::vector<int> sidx;
+  sidx.reserve(n);
+  for (int i = 1; i <= n; ++i) {
+    sidx.push_back(i);
+  }
+  std::sort(sidx.begin(), sidx.end(), [&](int a, int b) {
+    return ped_sire[a] < ped_sire[b];
+  });
+  for (int i = 1; i <= n; ++i) {
+    SId[i] = sidx[i - 1];
+  }
+
+  int k = 1;
+  int i = 1;
+  while (i <= n) {
+    if (ped_sire[SId[i]] == 0) {
+      F[SId[i]] = 0.0;
+      i++;
+      continue;
+    }
+
+    int S = ped_sire[SId[i]];
+    int rS = Link[S];
+    if (rS == 0) {
+      F[SId[i]] = 0.0;
+      i++;
+      continue;
+    }
+    int MIP = MaxIdP[rS];
+    x[rS] = 1.0;
+
+    for (; k <= S; ++k) {
+      if (Link[k]) {
+        B[Link[k]] = 0.5 - 0.25 * (F[ped_sire[k]] + F[ped_dam[k]]);
+      }
+    }
+
+    for (int j = rS; j >= 1; --j) {
+      if (x[j] != 0.0) {
+        if (rPedS[j]) x[rPedS[j]] += x[j] * 0.5;
+        if (rPedD[j]) x[rPedD[j]] += x[j] * 0.5;
+        x[j] *= B[j];
+      }
+    }
+
+    for (int j = 1; j <= MIP; ++j) {
+      x[j] += (x[rPedS[j]] + x[rPedD[j]]) * 0.5;
+    }
+
+    for (; i <= n; ++i) {
+      if (S != ped_sire[SId[i]]) break;
+      int dam_id = ped_dam[SId[i]];
+      F[SId[i]] = x[Link[dam_id]] * 0.5;
+    }
+
+    for (int j = 1; j <= MIP; ++j) {
+      x[j] = 0.0;
+    }
+  }
+
+  NumericVector result(n);
+  for (int idx = 0; idx < n; ++idx) {
+    result[idx] = F[new_index[idx]];
+  }
+  result.attr("names") = ids;
+  return result;
 }
