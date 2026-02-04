@@ -6046,7 +6046,8 @@ output$top10_dam_title <- renderText({
     if (nrow(df) == 0) {
       return(datatable(data.frame(Message = "No sire data available"), options = list(dom = "t"), rownames = FALSE))
     }
-    datatable(head(df, 10), options = list(pageLength = 10, dom = "t"), rownames = FALSE)
+    df_display <- df[, 1:2, drop = FALSE]
+    datatable(head(df_display, 10), options = list(pageLength = 10, dom = "t"), rownames = FALSE)
   })
 
   output$dam_top_table <- renderDT({
@@ -6054,7 +6055,8 @@ output$top10_dam_title <- renderText({
     if (nrow(df) == 0) {
       return(datatable(data.frame(Message = "No dam data available"), options = list(dom = "t"), rownames = FALSE))
     }
-    datatable(head(df, 10), options = list(pageLength = 10, dom = "t"), rownames = FALSE)
+    df_display <- df[, 1:2, drop = FALSE]
+    datatable(head(df_display, 10), options = list(pageLength = 10, dom = "t"), rownames = FALSE)
   })
 
   output$download_sire_descendants <- downloadHandler(
