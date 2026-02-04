@@ -36,18 +36,6 @@ get_label_local <- function(key, lang = NULL) {
   }
 }
 
-# Check if plinkR is available for genotype format conversion
-use_plinkR <- FALSE
-tryCatch({
-  if (requireNamespace("plinkR", quietly = TRUE)) {
-    use_plinkR <- TRUE
-    cat("✓ plinkR available - will use for genotype format conversion\n")
-  }
-}, error = function(e) {
-  cat("Note: plinkR not available, format conversion features will be limited\n")
-  use_plinkR <- FALSE
-})
-
 # Check if linkbreedeR is available for extended analysis
 use_linkbreedeR <- FALSE
 tryCatch({
@@ -58,6 +46,18 @@ tryCatch({
 }, error = function(e) {
   cat("Note: linkbreedeR not available, extended analysis features will be limited\n")
   use_linkbreedeR <- FALSE
+})
+
+# Check if plinkR is available (prefer PLINK when installed)
+use_plinkR <- FALSE
+tryCatch({
+  if (requireNamespace("plinkR", quietly = TRUE)) {
+    use_plinkR <- TRUE
+    cat("✓ plinkR available - will prefer PLINK for statistics/QC\n")
+  }
+}, error = function(e) {
+  cat("Note: plinkR not available, using pure R calculations\n")
+  use_plinkR <- FALSE
 })
 
 # Check if data.table is available for faster file reading
@@ -305,7 +305,12 @@ ui <- page_fillable(
           div(class = "panel-section",
               h4("Data Upload", class = "section-title"),
               selectInput("geno_format", "Genotype Format",
-                         choices = list("PLINK" = "plink", "BLUPF90" = "blupf90"),
+                         choices = list(
+                           "PLINK (.ped/.map)" = "plink_ped",
+                           "PLINK (.bed/.bim/.fam)" = "plink_bed",
+                           "VCF (.vcf/.vcf.gz)" = "vcf",
+                           "BLUPF90 (.txt + .map)" = "blupf90_txt"
+                         ),
                          selected = "plink"),
               numericInput("max_chromosome", "Chromosome", value = 18, min = 1, max = 100, step = 1),
               p(style = "font-size: 0.8rem; color: #888; margin-top: -10px; margin-bottom: 10px;",
@@ -314,7 +319,7 @@ ui <- page_fillable(
               
               # PLINK Format File Uploads (2 files)
               conditionalPanel(
-                condition = "input.geno_format == 'plink'",
+                condition = "input.geno_format == 'plink_ped'",
                 div(
                   div(style = "margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; border-left: 3px solid #CEB888;",
                       tags$strong("📋 PLINK Format: Upload 2 files"),
@@ -340,22 +345,67 @@ ui <- page_fillable(
                 )
               ),
               
-              # BLUPF90 Format File Uploads (3 files)
+              # PLINK BED Format File Uploads (3 files)
               conditionalPanel(
-                condition = "input.geno_format == 'blupf90'",
+                condition = "input.geno_format == 'plink_bed'",
                 div(
                   div(style = "margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; border-left: 3px solid #CEB888;",
-                      tags$strong("📋 BLUPF90 Format: Upload 3 files"),
+                      tags$strong("📋 PLINK BED Format: Upload 3 files"),
+                      tags$ul(style = "margin: 8px 0 0 0; padding-left: 20px; font-size: 0.9rem;",
+                              tags$li(tags$code(".bed"), " file - binary genotype data"),
+                              tags$li(tags$code(".bim"), " file - marker information"),
+                              tags$li(tags$code(".fam"), " file - sample information")
+                      )
+                  ),
+                  fileInput("plink_bed_file", 
+                           label = tags$span("📄 Upload .bed File", 
+                                            style = "font-weight: 600;"),
+                           accept = c(".bed"),
+                           buttonLabel = "Browse...",
+                           placeholder = "No .bed file selected"),
+                  fileInput("plink_bim_file", 
+                           label = tags$span("📄 Upload .bim File", 
+                                            style = "font-weight: 600;"),
+                           accept = c(".bim"),
+                           buttonLabel = "Browse...",
+                           placeholder = "No .bim file selected"),
+                  fileInput("plink_fam_file", 
+                           label = tags$span("📄 Upload .fam File", 
+                                            style = "font-weight: 600;"),
+                           accept = c(".fam"),
+                           buttonLabel = "Browse...",
+                           placeholder = "No .fam file selected")
+                )
+              ),
+              
+              # VCF Format File Uploads (1 file)
+              conditionalPanel(
+                condition = "input.geno_format == 'vcf'",
+                div(
+                  div(style = "margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; border-left: 3px solid #CEB888;",
+                      tags$strong("📋 VCF Format: Upload 1 file"),
+                      tags$ul(style = "margin: 8px 0 0 0; padding-left: 20px; font-size: 0.9rem;",
+                              tags$li(tags$code(".vcf"), " or ", tags$code(".vcf.gz"), " file")
+                      )
+                  ),
+                  fileInput("vcf_file", 
+                           label = tags$span("📄 Upload .vcf File", 
+                                            style = "font-weight: 600;"),
+                           accept = c(".vcf", ".vcf.gz"),
+                           buttonLabel = "Browse...",
+                           placeholder = "No .vcf file selected")
+                )
+              ),
+              
+              # BLUPF90 TXT Format File Uploads (2 files)
+              conditionalPanel(
+                condition = "input.geno_format == 'blupf90_txt'",
+                div(
+                  div(style = "margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; border-left: 3px solid #CEB888;",
+                      tags$strong("📋 BLUPF90 TXT Format: Upload 2 files"),
                       tags$ul(style = "margin: 8px 0 0 0; padding-left: 20px; font-size: 0.9rem;",
                               tags$li(tags$code(".txt"), " file - genotype data"),
-                              tags$li(tags$code(".map"), " file - marker map information"),
-                              tags$li(tags$code(".bim"), " file - marker information")
-                      ),
-                      div(style = "margin-top: 10px; padding: 8px; background-color: #e7f3ff; border-radius: 4px; border-left: 3px solid #2196F3;",
-                          tags$strong("🔄 Auto-Conversion:"), 
-                          " BLUPF90 files will be automatically converted to PLINK format for analysis.",
-                          br(),
-                          tags$em("Note: Requires plinkR package to be installed.")
+                              tags$li(tags$code(".map"), " file - marker map information")
                       )
                   ),
                   fileInput("blupf90_txt_file", 
@@ -369,13 +419,7 @@ ui <- page_fillable(
                                             style = "font-weight: 600;"),
                            accept = c(".map"),
                            buttonLabel = "Browse...",
-                           placeholder = "No .map file selected"),
-                  fileInput("blupf90_bim_file", 
-                           label = tags$span("📄 Upload .bim File", 
-                                            style = "font-weight: 600;"),
-                           accept = c(".bim"),
-                           buttonLabel = "Browse...",
-                           placeholder = "No .bim file selected")
+                           placeholder = "No .map file selected")
                 )
               ),
               
@@ -387,21 +431,14 @@ ui <- page_fillable(
                   helpText(style = "margin-top: 8px; font-size: 0.85rem; color: #666; text-align: center;",
                           "Generate basic visualizations from loaded data")
               ),
-              br(),
-              conditionalPanel(
-                condition = if (use_plinkR) "true" else "false",
-                div(style = "margin-top: 10px;",
-                    actionLink("format_convert_help", "🔄 Format Conversion Help ?",
-                             style = "font-size: 0.9rem; color: #CEB888; text-decoration: none;")
-                )
-              )
+              br()
           ),
           
           # QC Options Section (for quality control only)
           div(class = "panel-section",
               h4("Quality Control", class = "section-title"),
               p(style = "font-size: 0.9rem; color: #666; margin-bottom: 15px;",
-                "Set PLINK quality control thresholds and filter the data."),
+                "Set quality control thresholds and filter the data."),
               numericInput("geno_threshold", "--geno (SNP missing rate)", value = 0.1, min = 0, max = 1, step = 0.01),
               p(style = "font-size: 0.8rem; color: #888; margin-top: -10px; margin-bottom: 10px;",
                 "Exclude SNPs with missing rate > threshold"),
@@ -620,17 +657,15 @@ server <- function(input, output, session) {
     geno_data(NULL)
     qc_results(NULL)
     
-    # Reset file inputs
-    if (input$geno_format == "plink") {
-      # Clear BLUPF90 inputs
-      shinyjs::reset("blupf90_txt_file")
-      shinyjs::reset("blupf90_map_file")
-      shinyjs::reset("blupf90_bim_file")
-    } else if (input$geno_format == "blupf90") {
-      # Clear PLINK inputs
-      shinyjs::reset("plink_ped_file")
-      shinyjs::reset("plink_map_file")
-    }
+    # Reset all file inputs
+    shinyjs::reset("plink_ped_file")
+    shinyjs::reset("plink_map_file")
+    shinyjs::reset("plink_bed_file")
+    shinyjs::reset("plink_bim_file")
+    shinyjs::reset("plink_fam_file")
+    shinyjs::reset("vcf_file")
+    shinyjs::reset("blupf90_txt_file")
+    shinyjs::reset("blupf90_map_file")
   })
   
   # Data loading is now done in show_summary event, not automatically on file upload
@@ -650,8 +685,21 @@ server <- function(input, output, session) {
       sample_ids <- ped_data[, 1:2]
       colnames(sample_ids) <- c("Family_ID", "Sample_ID")
       
-      # Extract genotype data (columns 7 onwards)
-      geno_matrix <- as.matrix(ped_data[, 7:ncol(ped_data)])
+      # Extract genotype data (columns 7 onwards) and combine allele pairs
+      allele_matrix <- as.matrix(ped_data[, 7:ncol(ped_data)])
+      if (ncol(allele_matrix) %% 2 != 0) {
+        stop("Invalid PED format: genotype columns must be in allele pairs.")
+      }
+      snp_count <- ncol(allele_matrix) / 2
+      geno_matrix <- matrix(NA_character_, nrow = nrow(allele_matrix), ncol = snp_count)
+      for (i in seq_len(snp_count)) {
+        a1 <- allele_matrix[, (i - 1) * 2 + 1]
+        a2 <- allele_matrix[, (i - 1) * 2 + 2]
+        geno_matrix[, i] <- paste(a1, a2)
+      }
+      if (!is.null(map_data) && nrow(map_data) == ncol(geno_matrix)) {
+        colnames(geno_matrix) <- map_data$SNP_ID
+      }
     } else {
       # Fallback to base R
       map_data <- read.table(map_path, header = FALSE, stringsAsFactors = FALSE)
@@ -660,7 +708,20 @@ server <- function(input, output, session) {
       ped_data <- read.table(ped_path, header = FALSE, stringsAsFactors = FALSE)
       sample_ids <- ped_data[, 1:2]
       colnames(sample_ids) <- c("Family_ID", "Sample_ID")
-      geno_matrix <- as.matrix(ped_data[, 7:ncol(ped_data)])
+      allele_matrix <- as.matrix(ped_data[, 7:ncol(ped_data)])
+      if (ncol(allele_matrix) %% 2 != 0) {
+        stop("Invalid PED format: genotype columns must be in allele pairs.")
+      }
+      snp_count <- ncol(allele_matrix) / 2
+      geno_matrix <- matrix(NA_character_, nrow = nrow(allele_matrix), ncol = snp_count)
+      for (i in seq_len(snp_count)) {
+        a1 <- allele_matrix[, (i - 1) * 2 + 1]
+        a2 <- allele_matrix[, (i - 1) * 2 + 2]
+        geno_matrix[, i] <- paste(a1, a2)
+      }
+      if (!is.null(map_data) && nrow(map_data) == ncol(geno_matrix)) {
+        colnames(geno_matrix) <- map_data$SNP_ID
+      }
     }
     
     list(
@@ -675,13 +736,18 @@ server <- function(input, output, session) {
     req(geno_data())
     data <- geno_data()
     
-    # All data is now in PLINK format (BLUPF90 is converted)
+    # All data is now in a unified format
     if (is.list(data) && "samples" %in% names(data) && "map" %in% names(data)) {
-      original_format <- if (input$geno_format == "blupf90") "BLUPF90 (converted to PLINK)" else "PLINK"
+      format_label <- switch(input$geno_format,
+                             "plink_ped" = "PLINK (.ped/.map)",
+                             "plink_bed" = "PLINK (.bed/.bim/.fam)",
+                             "vcf" = "VCF",
+                             "blupf90_txt" = "BLUPF90 (.txt/.map)",
+                             "PLINK")
       paste0("Samples: ", nrow(data$samples), "\n",
              "SNPs: ", nrow(data$map), "\n",
-             "Format: ", original_format, "\n",
-             "Analysis Format: PLINK")
+             "Format: ", format_label, "\n",
+             "Analysis Format: ", format_label)
     } else if (is.data.frame(data)) {
       paste0("Rows: ", nrow(data), "\n",
              "Columns: ", ncol(data), "\n",
@@ -696,185 +762,55 @@ server <- function(input, output, session) {
   
   # Generate summary and basic plots when Show Summary button is clicked
   observeEvent(input$show_summary, {
-    if (!use_plinkR || !requireNamespace("plinkR", quietly = TRUE)) {
-      showNotification(
-        HTML(paste0(
-          "<strong>❌ PLINK Not Available</strong><br>",
-          "plinkR package is required for data loading and analysis.<br>",
-          "Please install plinkR: install.packages('plinkR')"
-        )),
-        type = "error",
-        duration = 10
-      )
-      return(NULL)
-    }
-    
     withProgress(message = "Loading and processing data...", value = 0, {
       tryCatch({
         # Step 1: Load data based on format
         setProgress(value = 0.1, message = "Loading data files...")
         
-        if (input$geno_format == "plink") {
-          # Check if files are uploaded
-          if (is.null(input$plink_ped_file) || is.null(input$plink_map_file)) {
-            showNotification("Please upload both .ped and .map files", type = "error")
-            return(NULL)
-          }
-          
-          ped_file <- input$plink_ped_file
-          map_file <- input$plink_map_file
-          
-          # Validate file extensions
-          ped_valid <- grepl("\\.ped$", ped_file$name, ignore.case = TRUE)
-          map_valid <- grepl("\\.map$", map_file$name, ignore.case = TRUE)
-          if (length(ped_valid) == 0 || length(map_valid) == 0 || !isTRUE(ped_valid) || !isTRUE(map_valid)) {
-            showNotification("Please upload valid .ped and .map files", type = "error")
-            return(NULL)
-          }
-          
-          # Create temporary directory for initial PLINK files
-          tmp_dir <- tempfile(pattern = "genovieweR_load_")
-          dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
-          initial_prefix <- file.path(tmp_dir, "initial_data")
-          
-          file.copy(ped_file$datapath, paste0(initial_prefix, ".ped"), overwrite = TRUE)
-          file.copy(map_file$datapath, paste0(initial_prefix, ".map"), overwrite = TRUE)
-          
-        } else if (input$geno_format == "blupf90") {
-          # Check if files are uploaded
-          if (is.null(input$blupf90_txt_file) || 
-              is.null(input$blupf90_map_file) || 
-              is.null(input$blupf90_bim_file)) {
-            showNotification("Please upload all BLUPF90 files (.txt, .map, .bim)", type = "error")
-            return(NULL)
-          }
-          
-          setProgress(value = 0.2, message = "Converting BLUPF90 to PLINK...")
-          
-          txt_file <- input$blupf90_txt_file
-          map_file <- input$blupf90_map_file
-          bim_file <- input$blupf90_bim_file
-          
-          # Create temporary directory for BLUPF90 files
-          tmp_dir <- tempfile(pattern = "genovieweR_blupf90_")
-          dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
-          
-          base_prefix <- tools::file_path_sans_ext(basename(txt_file$name))
-          blupf90_prefix <- file.path(tmp_dir, base_prefix)
-          
-          file.copy(txt_file$datapath, paste0(blupf90_prefix, ".txt"), overwrite = TRUE)
-          file.copy(map_file$datapath, paste0(blupf90_prefix, ".map"), overwrite = TRUE)
-          file.copy(bim_file$datapath, paste0(blupf90_prefix, ".bim"), overwrite = TRUE)
-          
-          # Convert BLUPF90 to PLINK
-          plink_output_dir <- tempfile(pattern = "genovieweR_plink_converted_")
-          dir.create(plink_output_dir, recursive = TRUE, showWarnings = FALSE)
-          initial_prefix <- file.path(plink_output_dir, base_prefix)
-          
-          conversion_result <- tryCatch({
-            plinkR::blupf90_to_plink(
-              blupf90_prefix = blupf90_prefix,
-              geno_file = paste0(blupf90_prefix, ".txt"),
-              map_file = paste0(blupf90_prefix, ".map"),
-              bim_file = paste0(blupf90_prefix, ".bim"),
-              out_prefix = initial_prefix,
-              verbose = TRUE
-            )
-          }, error = function(e) {
-            showNotification(paste("BLUPF90 conversion failed:", e$message), type = "error")
-            return(NULL)
-          })
-          
-          if (is.null(conversion_result) || 
-              !file.exists(paste0(initial_prefix, ".ped")) ||
-              !file.exists(paste0(initial_prefix, ".map"))) {
-            showNotification("BLUPF90 conversion failed", type = "error")
-            return(NULL)
-          }
-        } else {
-          showNotification("Unknown genotype format", type = "error")
-          return(NULL)
-        }
-        
-        # Step 2: Filter by chromosome using PLINK --chr
-        setProgress(value = 0.4, message = "Filtering chromosomes...")
-        
-        # Get max chromosome number
-        max_chr <- if (!is.null(input$max_chromosome) && length(input$max_chromosome) == 1 && input$max_chromosome >= 1) {
-          as.integer(input$max_chromosome[1])
-        } else {
-          18  # Default
-        }
-        
-        # Find plink executable
-        plink_path <- tryCatch({
-          if (exists("find_plink", where = "package:plinkR", mode = "function")) {
-            plinkR::find_plink()
-          } else {
-            Sys.which("plink")
-          }
-        }, error = function(e) {
-          Sys.which("plink")
-        })
-        
-        if (is.null(plink_path) || length(plink_path) == 0 || plink_path == "" || length(plink_path) > 1 || !file.exists(plink_path)) {
-          showNotification("PLINK executable not found", type = "error")
-          return(NULL)
-        }
-        
-        # Create chromosome-filtered output
-        chr_filtered_prefix <- file.path(tmp_dir, "chr_filtered")
-        
-        # Run PLINK to filter chromosomes: --chr 1-max_chr with --allow-extra-chr
-        chr_result <- system2(
-          plink_path,
-          args = c(
-            "--file", initial_prefix,
-            "--allow-extra-chr",
-            "--chr", paste0("1-", max_chr),
-            "--make-bed",
-            "--out", chr_filtered_prefix
-          ),
-          stdout = FALSE,
-          stderr = FALSE
-        )
-        
-        if (chr_result != 0 || !file.exists(paste0(chr_filtered_prefix, ".bed"))) {
-          showNotification("Chromosome filtering failed", type = "error")
-          return(NULL)
-        }
-        
-        # Convert .bed back to .ped for reading
-        setProgress(value = 0.6, message = "Converting to PED format...")
-        
-        ped_output <- paste0(chr_filtered_prefix, "_ped")
-        convert_result <- system2(
-          plink_path,
-          args = c(
-            "--bfile", chr_filtered_prefix,
-            "--allow-extra-chr",
-            "--recode",
-            "--out", ped_output
-          ),
-          stdout = FALSE,
-          stderr = FALSE
-        )
-        
-        if (convert_result != 0 || !file.exists(paste0(ped_output, ".ped"))) {
-          showNotification("Failed to convert filtered data to PED format", type = "error")
-          return(NULL)
-        }
-        
-        # Step 3: Read filtered data
-        setProgress(value = 0.7, message = "Reading filtered data...")
+        # Step 2: Read data by format
+        setProgress(value = 0.4, message = "Reading data...")
         
         data <- tryCatch({
-          read_plink_manual(
-            paste0(ped_output, ".ped"),
-            paste0(ped_output, ".map")
-          )
+          if (input$geno_format == "plink_ped") {
+            if (is.null(input$plink_ped_file) || is.null(input$plink_map_file)) {
+              showNotification("Please upload both .ped and .map files", type = "error")
+              return(NULL)
+            }
+            
+            ped_file <- input$plink_ped_file
+            map_file <- input$plink_map_file
+            ped_valid <- grepl("\\.ped$", ped_file$name, ignore.case = TRUE)
+            map_valid <- grepl("\\.map$", map_file$name, ignore.case = TRUE)
+            if (length(ped_valid) == 0 || length(map_valid) == 0 || !isTRUE(ped_valid) || !isTRUE(map_valid)) {
+              showNotification("Please upload valid .ped and .map files", type = "error")
+              return(NULL)
+            }
+            
+            read_plink_manual(ped_file$datapath, map_file$datapath)
+          } else if (input$geno_format == "plink_bed") {
+            if (is.null(input$plink_bed_file) || is.null(input$plink_bim_file) || is.null(input$plink_fam_file)) {
+              showNotification("Please upload .bed, .bim, and .fam files", type = "error")
+              return(NULL)
+            }
+            read_plink_bed(input$plink_bed_file$datapath, input$plink_bim_file$datapath, input$plink_fam_file$datapath)
+          } else if (input$geno_format == "vcf") {
+            if (is.null(input$vcf_file)) {
+              showNotification("Please upload a .vcf file", type = "error")
+              return(NULL)
+            }
+            read_vcf_file(input$vcf_file$datapath)
+          } else if (input$geno_format == "blupf90_txt") {
+            if (is.null(input$blupf90_txt_file) || is.null(input$blupf90_map_file)) {
+              showNotification("Please upload BLUPF90 .txt and .map files", type = "error")
+              return(NULL)
+            }
+            read_blupf90_txt(input$blupf90_txt_file$datapath, input$blupf90_map_file$datapath)
+          } else {
+            showNotification("Unknown genotype format", type = "error")
+            return(NULL)
+          }
         }, error = function(e) {
-          showNotification(paste("Error reading filtered data:", e$message), type = "error")
+          showNotification(paste("Error reading data:", e$message), type = "error")
           NULL
         })
         
@@ -882,15 +818,39 @@ server <- function(input, output, session) {
           return(NULL)
         }
         
+        # Step 3: Filter by chromosome using map (R-based)
+        setProgress(value = 0.6, message = "Filtering chromosomes...")
+        max_chr <- if (!is.null(input$max_chromosome) && length(input$max_chromosome) == 1 && input$max_chromosome >= 1) {
+          as.integer(input$max_chromosome[1])
+        } else {
+          18
+        }
+        
+        if (is.list(data) && !is.null(data$map) && nrow(data$map) > 0) {
+          chr_numeric <- suppressWarnings(as.integer(data$map$Chromosome))
+          keep_idx <- !is.na(chr_numeric) & chr_numeric >= 1 & chr_numeric <= max_chr
+          if (sum(keep_idx) == 0) {
+            showNotification("No markers remain after chromosome filtering.", type = "error")
+            return(NULL)
+          }
+          data$map <- data$map[keep_idx, , drop = FALSE]
+          if (is.matrix(data$genotypes) && ncol(data$genotypes) == length(keep_idx)) {
+            data$genotypes <- data$genotypes[, keep_idx, drop = FALSE]
+          }
+        }
+        
+        # Store input format for downstream decisions
+        data$input_format <- input$geno_format
+        
         # Store the loaded data
         geno_data(data)
         
         # Verify data is in PLINK format
-        if (!is.list(data) || length(data) == 0 || !isTRUE(all(c("samples", "genotypes", "map") %in% names(data)))) {
+    if (!is.list(data) || length(data) == 0 || !isTRUE(all(c("samples", "genotypes", "map") %in% names(data)))) {
           showNotification(
             HTML(paste0(
               "<strong>❌ Data Format Error</strong><br>",
-              "Data must be in PLINK format for visualization."
+              "Data must include samples, genotypes, and map."
             )),
             type = "error",
             duration = 10
@@ -901,49 +861,17 @@ server <- function(input, output, session) {
         setProgress(value = 0.8, message = "Calculating basic statistics...")
         
         # Calculate basic statistics for visualization (without QC thresholds)
-        basic_stats <- list()
-        
-        # Calculate all statistics using plink (if plinkR is available)
-        if (use_plinkR && requireNamespace("plinkR", quietly = TRUE)) {
-          # Use plink for all calculations (include relatedness with timeout)
-          plink_stats <- calculate_all_stats_plink(data, skip_relatedness = FALSE)
-          
-          # Use ONLY plink results - no R fallback to avoid slow calculations
-          if (!is.null(plink_stats)) {
-            basic_stats$individual_call_rate <- plink_stats$individual_call_rate
-            basic_stats$individual_missing_rate <- plink_stats$individual_missing_rate
-            basic_stats$individual_heterozygosity <- plink_stats$individual_heterozygosity
-            basic_stats$individual_relatedness <- plink_stats$individual_relatedness
-            basic_stats$maf <- plink_stats$maf
-            basic_stats$marker_call_rate <- plink_stats$marker_call_rate
-            basic_stats$marker_missing_rate <- plink_stats$marker_missing_rate
-            basic_stats$hwe_pvalues <- plink_stats$hwe_pvalues
-            # Add PCA results if available
-            if (!is.null(plink_stats$pca_scores)) {
-              basic_stats$pca_scores <- plink_stats$pca_scores
-              basic_stats$pca_variance <- plink_stats$pca_variance
-              basic_stats$pca_sample_ids <- plink_stats$pca_sample_ids
-            }
-          } else {
-            # PLINK calculation failed - show error and return
-            showNotification(
-              HTML(paste0(
-                "<strong>❌ PLINK Calculation Failed</strong><br>",
-                "Unable to calculate statistics using PLINK.<br>",
-                "Please check that PLINK is installed and accessible."
-              )),
-              type = "error",
-              duration = 10
-            )
-            return(NULL)
-          }
+        use_plink_for_format <- input$geno_format %in% c("plink_ped", "plink_bed")
+        if (use_plink_for_format && !is.null(find_plink_path())) {
+          basic_stats <- calculate_all_stats_plink(data, skip_relatedness = FALSE)
         } else {
-          # plinkR not available - show error and return
+          basic_stats <- calculate_all_stats_r(data, skip_relatedness = FALSE)
+        }
+        if (is.null(basic_stats)) {
           showNotification(
             HTML(paste0(
-              "<strong>❌ PLINK Not Available</strong><br>",
-              "plinkR package is required for statistics calculation.<br>",
-              "Please install plinkR: install.packages('plinkR')"
+              "<strong>❌ Statistics Calculation Failed</strong><br>",
+              "Unable to calculate statistics from the uploaded data."
             )),
             type = "error",
             duration = 10
@@ -1002,23 +930,9 @@ server <- function(input, output, session) {
   }, server = FALSE)
   
   # Run QC
-  # Note: All data is now in PLINK format (BLUPF90 is automatically converted)
+  # Note: Data is expected in PLINK format
   observeEvent(input$run_qc, {
     req(geno_data())
-    
-    if (!use_plinkR || !requireNamespace("plinkR", quietly = TRUE)) {
-      showNotification(
-        HTML(paste0(
-          "<strong>❌ PLINK Not Available</strong><br>",
-          "plinkR package is required for quality control filtering.<br>",
-          "Please install plinkR: install.packages('plinkR')"
-        )),
-        type = "error",
-        duration = 10
-      )
-      return(NULL)
-    }
-    
     withProgress(message = "Running quality control filtering...", value = 0, {
       tryCatch({
         data <- geno_data()
@@ -1028,8 +942,7 @@ server <- function(input, output, session) {
           showNotification(
             HTML(paste0(
               "<strong>❌ Data Format Error</strong><br>",
-              "Data must be in PLINK format for analysis.<br>",
-              "If you uploaded BLUPF90 format, please ensure plinkR is installed for conversion."
+              "Data must include samples, genotypes, and map."
             )),
             type = "error",
             duration = 10
@@ -1037,94 +950,235 @@ server <- function(input, output, session) {
           return(NULL)
         }
         
-        setProgress(value = 0.2, message = "Preparing PLINK files...")
+        setProgress(value = 0.2, message = "Preparing data...")
         
-        # Create temporary directory for PLINK files
-        tmp_dir <- tempfile(pattern = "genovieweR_qc_")
-        dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
-        prefix <- file.path(tmp_dir, "temp_data")
-        
-        # Write PLINK files
-        fam_data <- cbind(
-          data$samples$Family_ID,
-          data$samples$Sample_ID,
-          0, 0, 0, -9  # Father, Mother, Sex, Phenotype
-        )
-        write.table(fam_data, paste0(prefix, ".fam"), 
-                    row.names = FALSE, col.names = FALSE, quote = FALSE, sep = " ")
-        
-        if (ncol(data$map) >= 4) {
-          map_data <- cbind(
-            data$map[, 1],  # Chromosome
-            data$map[, 2],  # SNP_ID
-            data$map[, 3],  # Genetic_Distance
-            data$map[, 4]   # Physical_Position
-          )
-          write.table(map_data, paste0(prefix, ".map"), 
-                      row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
+        # Prefer PLINK QC only for PLINK formats
+        plink_path <- if (input$geno_format %in% c("plink_ped", "plink_bed")) {
+          find_plink_path()
+        } else {
+          NULL
         }
-        
-        ped_data <- cbind(
-          data$samples$Family_ID,
-          data$samples$Sample_ID,
-          0, 0, 0, -9,  # Father, Mother, Sex, Phenotype
-          data$genotypes
-        )
-        write.table(ped_data, paste0(prefix, ".ped"), 
-                    row.names = FALSE, col.names = FALSE, quote = FALSE, sep = " ")
-        
-        # Find plink executable
-        plink_path <- tryCatch({
-          if (exists("find_plink", where = "package:plinkR", mode = "function")) {
-            plinkR::find_plink()
-          } else {
-            Sys.which("plink")
+        if (!is.null(plink_path)) {
+          tmp_dir <- tempfile(pattern = "genovieweR_qc_")
+          dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
+          prefix <- file.path(tmp_dir, "temp_data")
+          
+          if (!write_plink_text_files(prefix, data)) {
+            showNotification("Failed to prepare PLINK input files.", type = "error")
+            return(NULL)
           }
-        }, error = function(e) {
-          Sys.which("plink")
-        })
-        
-        if (is.null(plink_path) || length(plink_path) == 0 || plink_path == "" || length(plink_path) > 1 || !file.exists(plink_path)) {
-          unlink(tmp_dir, recursive = TRUE, force = TRUE)
-          showNotification("PLINK executable not found", type = "error")
+          
+          count_plink_items <- function(prefix) {
+            samples <- 0
+            snps <- 0
+            if (file.exists(paste0(prefix, ".ped"))) {
+              samples <- length(readLines(paste0(prefix, ".ped"), warn = FALSE))
+            }
+            if (file.exists(paste0(prefix, ".map"))) {
+              snps <- length(readLines(paste0(prefix, ".map"), warn = FALSE))
+            }
+            list(samples = samples, snps = snps)
+          }
+          
+          initial_counts <- count_plink_items(prefix)
+          
+          filter_stats <- list(
+            geno_removed_snps = 0,
+            mind_removed_samples = 0,
+            maf_removed_snps = 0,
+            hwe_removed_snps = 0
+          )
+          
+          current_prefix <- prefix
+          
+          if (!is.null(input$geno_threshold) && input$geno_threshold < 1) {
+            geno_output <- paste0(prefix, "_geno_step")
+            geno_result <- system2(
+              plink_path,
+              args = c("--file", current_prefix, "--allow-extra-chr", "--geno",
+                      as.character(input$geno_threshold), "--make-bed", "--out", geno_output),
+              stdout = FALSE, stderr = FALSE
+            )
+            if (geno_result == 0 && file.exists(paste0(geno_output, ".bed"))) {
+              geno_counts <- list(
+                samples = length(readLines(paste0(geno_output, ".fam"), warn = FALSE)),
+                snps = length(readLines(paste0(geno_output, ".bim"), warn = FALSE))
+              )
+              filter_stats$geno_removed_snps <- initial_counts$snps - geno_counts$snps
+              current_prefix <- geno_output
+            }
+          }
+          
+          if (!is.null(input$mind_threshold) && input$mind_threshold < 1) {
+            mind_output <- paste0(prefix, "_mind_step")
+            mind_result <- system2(
+              plink_path,
+              args = c("--bfile", current_prefix, "--allow-extra-chr", "--mind",
+                      as.character(input$mind_threshold), "--make-bed", "--out", mind_output),
+              stdout = FALSE, stderr = FALSE
+            )
+            if (mind_result == 0 && file.exists(paste0(mind_output, ".bed"))) {
+              mind_counts <- list(
+                samples = length(readLines(paste0(mind_output, ".fam"), warn = FALSE)),
+                snps = length(readLines(paste0(mind_output, ".bim"), warn = FALSE))
+              )
+              filter_stats$mind_removed_samples <- initial_counts$samples - mind_counts$samples
+              current_prefix <- mind_output
+            }
+          }
+          
+          if (!is.null(input$maf_threshold) && input$maf_threshold > 0) {
+            maf_output <- paste0(prefix, "_maf_step")
+            maf_result <- system2(
+              plink_path,
+              args = c("--bfile", current_prefix, "--allow-extra-chr", "--maf",
+                      as.character(input$maf_threshold), "--make-bed", "--out", maf_output),
+              stdout = FALSE, stderr = FALSE
+            )
+            if (maf_result == 0 && file.exists(paste0(maf_output, ".bed"))) {
+              maf_counts <- list(
+                samples = length(readLines(paste0(maf_output, ".fam"), warn = FALSE)),
+                snps = length(readLines(paste0(maf_output, ".bim"), warn = FALSE))
+              )
+              current_counts <- list(
+                samples = length(readLines(paste0(current_prefix, ".fam"), warn = FALSE)),
+                snps = length(readLines(paste0(current_prefix, ".bim"), warn = FALSE))
+              )
+              filter_stats$maf_removed_snps <- current_counts$snps - maf_counts$snps
+              current_prefix <- maf_output
+            }
+          }
+          
+          if (!is.null(input$hwe_threshold) && input$hwe_threshold > 0) {
+            hwe_output <- paste0(prefix, "_hwe_step")
+            hwe_result <- system2(
+              plink_path,
+              args = c("--bfile", current_prefix, "--allow-extra-chr", "--hwe",
+                      as.character(input$hwe_threshold), "--make-bed", "--out", hwe_output),
+              stdout = FALSE, stderr = FALSE
+            )
+            if (hwe_result == 0 && file.exists(paste0(hwe_output, ".bed"))) {
+              hwe_counts <- list(
+                samples = length(readLines(paste0(hwe_output, ".fam"), warn = FALSE)),
+                snps = length(readLines(paste0(hwe_output, ".bim"), warn = FALSE))
+              )
+              current_counts <- list(
+                samples = length(readLines(paste0(current_prefix, ".fam"), warn = FALSE)),
+                snps = length(readLines(paste0(current_prefix, ".bim"), warn = FALSE))
+              )
+              filter_stats$hwe_removed_snps <- current_counts$snps - hwe_counts$snps
+              current_prefix <- hwe_output
+            }
+          }
+          
+          qc_output <- paste0(prefix, "_qc")
+          plink_args <- c("--file", prefix, "--allow-extra-chr")
+          if (!is.null(input$geno_threshold) && input$geno_threshold < 1) {
+            plink_args <- c(plink_args, "--geno", as.character(input$geno_threshold))
+          }
+          if (!is.null(input$mind_threshold) && input$mind_threshold < 1) {
+            plink_args <- c(plink_args, "--mind", as.character(input$mind_threshold))
+          }
+          if (!is.null(input$maf_threshold) && input$maf_threshold > 0) {
+            plink_args <- c(plink_args, "--maf", as.character(input$maf_threshold))
+          }
+          if (!is.null(input$hwe_threshold) && input$hwe_threshold > 0) {
+            plink_args <- c(plink_args, "--hwe", as.character(input$hwe_threshold))
+          }
+          plink_args <- c(plink_args, "--make-bed", "--out", qc_output)
+          
+          result <- system2(plink_path, args = plink_args, stdout = FALSE, stderr = FALSE)
+          if (result != 0 || !file.exists(paste0(qc_output, ".bed"))) {
+            showNotification("PLINK quality control failed", type = "error")
+            return(NULL)
+          }
+          
+          final_counts <- list(
+            samples = length(readLines(paste0(qc_output, ".fam"), warn = FALSE)),
+            snps = length(readLines(paste0(qc_output, ".bim"), warn = FALSE))
+          )
+          
+          geno_after_snps <- if (file.exists(paste0(prefix, "_geno_step.bed"))) {
+            length(readLines(paste0(prefix, "_geno_step.bim"), warn = FALSE))
+          } else {
+            initial_counts$snps
+          }
+          
+          maf_before_snps <- if (!is.null(input$maf_threshold) && input$maf_threshold > 0) {
+            if (file.exists(paste0(prefix, "_geno_step.bed"))) {
+              length(readLines(paste0(prefix, "_geno_step.bim"), warn = FALSE))
+            } else {
+              initial_counts$snps
+            }
+          } else {
+            initial_counts$snps
+          }
+          
+          maf_after_snps <- if (file.exists(paste0(prefix, "_maf_step.bed"))) {
+            length(readLines(paste0(prefix, "_maf_step.bim"), warn = FALSE))
+          } else {
+            maf_before_snps
+          }
+          
+          hwe_before_snps <- if (!is.null(input$hwe_threshold) && input$hwe_threshold > 0) {
+            maf_after_snps
+          } else {
+            initial_counts$snps
+          }
+          
+          qc_report <- list(
+            filtered = TRUE,
+            message = "Quality control filtering completed",
+            samples_before = initial_counts$samples,
+            samples_after = final_counts$samples,
+            snps_before = initial_counts$snps,
+            snps_after = final_counts$snps,
+            thresholds = list(
+              geno = input$geno_threshold,
+              mind = input$mind_threshold,
+              maf = input$maf_threshold,
+              hwe = input$hwe_threshold
+            ),
+            filter_stats = filter_stats,
+            intermediate_counts = list(
+              geno_after_snps = geno_after_snps,
+              maf_before_snps = maf_before_snps,
+              maf_after_snps = maf_after_snps,
+              hwe_before_snps = hwe_before_snps
+            ),
+            output_files = list(
+              bed = paste0(qc_output, ".bed"),
+              bim = paste0(qc_output, ".bim"),
+              fam = paste0(qc_output, ".fam")
+            ),
+            filtered_data = NULL
+          )
+          
+          qc_results(qc_report)
+          setProgress(value = 1, message = "QC completed!")
+          
+          samples_info <- paste0("Samples: ", qc_report$samples_before, " → ", qc_report$samples_after)
+          snps_info <- paste0("SNPs: ", qc_report$snps_before, " → ", qc_report$snps_after)
+          
+          showNotification(
+            HTML(paste0(
+              "<strong>✓ Quality Control Completed</strong><br>",
+              samples_info, "<br>",
+              snps_info, "<br>",
+              "Filtered data saved. Check QC Results tab for details."
+            )),
+            type = "message",
+            duration = 8
+          )
+          
           return(NULL)
         }
         
-        # Helper function to count SNPs/samples in PLINK files
-        # Supports both text format (.ped/.map) and binary format (.bed/.bim/.fam)
-        count_plink_items <- function(prefix) {
-          samples <- 0
-          snps <- 0
-          
-          # Check for binary format (.fam and .bim)
-          has_fam <- file.exists(paste0(prefix, ".fam"))
-          has_bim <- file.exists(paste0(prefix, ".bim"))
-          
-          if (has_fam) {
-            fam_lines <- readLines(paste0(prefix, ".fam"), warn = FALSE)
-            samples <- length(fam_lines)
-          }
-          if (has_bim) {
-            bim_lines <- readLines(paste0(prefix, ".bim"), warn = FALSE)
-            snps <- length(bim_lines)
-          }
-          
-          # If binary format incomplete or not found, try text format (.ped and .map)
-          # Always check text format if binary format is missing
-          if (!has_fam && file.exists(paste0(prefix, ".ped"))) {
-            ped_lines <- readLines(paste0(prefix, ".ped"), warn = FALSE)
-            samples <- length(ped_lines)
-          }
-          if (!has_bim && file.exists(paste0(prefix, ".map"))) {
-            map_lines <- readLines(paste0(prefix, ".map"), warn = FALSE)
-            snps <- length(map_lines)
-          }
-          
-          list(samples = samples, snps = snps)
-        }
-        
-        # Count initial numbers
-        initial_counts <- count_plink_items(prefix)
+        # Count initial numbers (R fallback)
+        initial_counts <- list(
+          samples = nrow(data$samples),
+          snps = nrow(data$map)
+        )
         
         # Initialize filter statistics
         filter_stats <- list(
@@ -1134,164 +1188,76 @@ server <- function(input, output, session) {
           hwe_removed_snps = 0
         )
         
-        setProgress(value = 0.3, message = "Calculating individual filter statistics...")
+        setProgress(value = 0.3, message = "Applying QC filters...")
         
-        # Run each filter separately to get detailed removal counts
-        # This is done in parallel conceptually, but sequentially for accuracy
-        current_prefix <- prefix
+        current_data <- data
         
         # --geno: exclude SNPs with missing rate > threshold
+        geno_after_snps <- initial_counts$snps
         if (!is.null(input$geno_threshold) && input$geno_threshold < 1) {
-          geno_output <- paste0(prefix, "_geno_step")
-          geno_result <- system2(
-            plink_path,
-            args = c("--file", current_prefix, "--allow-extra-chr", "--geno", as.character(input$geno_threshold),
-                    "--make-bed", "--out", geno_output),
-            stdout = FALSE,
-            stderr = FALSE
-          )
-          if (geno_result == 0 && file.exists(paste0(geno_output, ".bed"))) {
-            geno_counts <- count_plink_items(geno_output)
-            filter_stats$geno_removed_snps <- initial_counts$snps - geno_counts$snps
-            current_prefix <- geno_output  # Use filtered data for next step
-          }
+          marker_call_rate <- calculate_call_rate(current_data)
+          marker_missing_rate <- 1 - marker_call_rate
+          keep_snps <- is.finite(marker_missing_rate) & marker_missing_rate <= input$geno_threshold
+          before <- ncol(current_data$genotypes)
+          current_data$genotypes <- current_data$genotypes[, keep_snps, drop = FALSE]
+          current_data$map <- current_data$map[keep_snps, , drop = FALSE]
+          after <- ncol(current_data$genotypes)
+          filter_stats$geno_removed_snps <- before - after
+          geno_after_snps <- after
         }
         
         # --mind: exclude samples with missing rate > threshold
         if (!is.null(input$mind_threshold) && input$mind_threshold < 1) {
-          mind_output <- paste0(prefix, "_mind_step")
-          mind_result <- system2(
-            plink_path,
-            args = c("--bfile", current_prefix, "--allow-extra-chr", "--mind", as.character(input$mind_threshold),
-                    "--make-bed", "--out", mind_output),
-            stdout = FALSE,
-            stderr = FALSE
-          )
-          if (mind_result == 0 && file.exists(paste0(mind_output, ".bed"))) {
-            mind_counts <- count_plink_items(mind_output)
-            filter_stats$mind_removed_samples <- initial_counts$samples - mind_counts$samples
-            current_prefix <- mind_output  # Use filtered data for next step
-          }
+          individual_call_rate <- calculate_individual_call_rate(current_data)
+          individual_missing_rate <- 1 - individual_call_rate
+          keep_samples <- is.finite(individual_missing_rate) & individual_missing_rate <= input$mind_threshold
+          before <- nrow(current_data$samples)
+          current_data$genotypes <- current_data$genotypes[keep_samples, , drop = FALSE]
+          current_data$samples <- current_data$samples[keep_samples, , drop = FALSE]
+          after <- nrow(current_data$samples)
+          filter_stats$mind_removed_samples <- before - after
         }
         
         # --maf: exclude SNPs with MAF < threshold
+        maf_before_snps <- if (!is.null(input$maf_threshold) && input$maf_threshold > 0) {
+          ncol(current_data$genotypes)
+        } else {
+          geno_after_snps
+        }
+        maf_after_snps <- maf_before_snps
         if (!is.null(input$maf_threshold) && input$maf_threshold > 0) {
-          maf_output <- paste0(prefix, "_maf_step")
-          maf_result <- system2(
-            plink_path,
-            args = c("--bfile", current_prefix, "--allow-extra-chr", "--maf", as.character(input$maf_threshold),
-                    "--make-bed", "--out", maf_output),
-            stdout = FALSE,
-            stderr = FALSE
-          )
-          if (maf_result == 0 && file.exists(paste0(maf_output, ".bed"))) {
-            maf_counts <- count_plink_items(maf_output)
-            # Count SNPs removed by MAF (from current state)
-            current_counts <- count_plink_items(current_prefix)
-            filter_stats$maf_removed_snps <- current_counts$snps - maf_counts$snps
-            current_prefix <- maf_output  # Use filtered data for next step
-          }
+          maf_values <- calculate_maf(current_data)
+          keep_snps <- is.finite(maf_values) & maf_values >= input$maf_threshold
+          before <- ncol(current_data$genotypes)
+          current_data$genotypes <- current_data$genotypes[, keep_snps, drop = FALSE]
+          current_data$map <- current_data$map[keep_snps, , drop = FALSE]
+          after <- ncol(current_data$genotypes)
+          filter_stats$maf_removed_snps <- before - after
+          maf_after_snps <- after
         }
         
         # --hwe: exclude SNPs with HWE p-value < threshold
-        if (!is.null(input$hwe_threshold) && input$hwe_threshold > 0) {
-          hwe_output <- paste0(prefix, "_hwe_step")
-          hwe_result <- system2(
-            plink_path,
-            args = c("--bfile", current_prefix, "--allow-extra-chr", "--hwe", as.character(input$hwe_threshold),
-                    "--make-bed", "--out", hwe_output),
-            stdout = FALSE,
-            stderr = FALSE
-          )
-          if (hwe_result == 0 && file.exists(paste0(hwe_output, ".bed"))) {
-            hwe_counts <- count_plink_items(hwe_output)
-            # Count SNPs removed by HWE (from current state)
-            current_counts <- count_plink_items(current_prefix)
-            filter_stats$hwe_removed_snps <- current_counts$snps - hwe_counts$snps
-            current_prefix <- hwe_output
-          }
-        }
-        
-        setProgress(value = 0.6, message = "Running final combined PLINK quality control...")
-        
-        # Now run all filters together in one command for final output (faster)
-        qc_output <- paste0(prefix, "_qc")
-        plink_args <- c("--file", prefix, "--allow-extra-chr")
-        
-        # Add all filters to single command
-        if (!is.null(input$geno_threshold) && input$geno_threshold < 1) {
-          plink_args <- c(plink_args, "--geno", as.character(input$geno_threshold))
-        }
-        if (!is.null(input$mind_threshold) && input$mind_threshold < 1) {
-          plink_args <- c(plink_args, "--mind", as.character(input$mind_threshold))
-        }
-        if (!is.null(input$maf_threshold) && input$maf_threshold > 0) {
-          plink_args <- c(plink_args, "--maf", as.character(input$maf_threshold))
+        hwe_before_snps <- if (!is.null(input$hwe_threshold) && input$hwe_threshold > 0) {
+          ncol(current_data$genotypes)
+        } else {
+          maf_after_snps
         }
         if (!is.null(input$hwe_threshold) && input$hwe_threshold > 0) {
-          plink_args <- c(plink_args, "--hwe", as.character(input$hwe_threshold))
-        }
-        
-        plink_args <- c(plink_args, "--make-bed", "--out", qc_output)
-        
-        # Run PLINK QC with all filters combined (single command for speed)
-        result <- system2(
-          plink_path,
-          args = plink_args,
-          stdout = FALSE,
-          stderr = FALSE
-        )
-        
-        if (result != 0 || !file.exists(paste0(qc_output, ".bed"))) {
-          # Clean up intermediate files
-          unlink(paste0(prefix, c("_geno_step", "_mind_step", "_maf_step", "_hwe_step")), recursive = TRUE, force = TRUE)
-          unlink(tmp_dir, recursive = TRUE, force = TRUE)
-          showNotification("PLINK quality control failed", type = "error")
-          return(NULL)
+          hwe_values <- calculate_hwe(current_data)
+          keep_snps <- is.finite(hwe_values) & hwe_values >= input$hwe_threshold
+          before <- ncol(current_data$genotypes)
+          current_data$genotypes <- current_data$genotypes[, keep_snps, drop = FALSE]
+          current_data$map <- current_data$map[keep_snps, , drop = FALSE]
+          after <- ncol(current_data$genotypes)
+          filter_stats$hwe_removed_snps <- before - after
         }
         
         setProgress(value = 0.8, message = "Generating QC report...")
         
-        # Get final counts
-        final_counts <- count_plink_items(qc_output)
-        
-        # Calculate intermediate counts for accurate reporting (before cleaning up files)
-        # Get counts after each filter step for proper "Before" values
-        geno_after_snps <- if (!is.null(input$geno_threshold) && input$geno_threshold < 1 && 
-                               file.exists(paste0(prefix, "_geno_step.bed"))) {
-          count_plink_items(paste0(prefix, "_geno_step"))$snps
-        } else {
-          initial_counts$snps
-        }
-        
-        maf_before_snps <- if (!is.null(input$maf_threshold) && input$maf_threshold > 0) {
-          # MAF is applied after geno, so before = after geno (or initial if no geno)
-          if (!is.null(input$geno_threshold) && input$geno_threshold < 1 && 
-              file.exists(paste0(prefix, "_geno_step.bed"))) {
-            count_plink_items(paste0(prefix, "_geno_step"))$snps
-          } else {
-            initial_counts$snps
-          }
-        } else {
-          initial_counts$snps
-        }
-        
-        maf_after_snps <- if (!is.null(input$maf_threshold) && input$maf_threshold > 0 && 
-                              file.exists(paste0(prefix, "_maf_step.bed"))) {
-          count_plink_items(paste0(prefix, "_maf_step"))$snps
-        } else {
-          maf_before_snps
-        }
-        
-        hwe_before_snps <- if (!is.null(input$hwe_threshold) && input$hwe_threshold > 0) {
-          # HWE is applied after maf (and geno), so before = after maf
-          maf_after_snps
-        } else {
-          initial_counts$snps
-        }
-        
-        # Clean up intermediate step files
-        unlink(paste0(prefix, c("_geno_step", "_mind_step", "_maf_step", "_hwe_step")), recursive = TRUE, force = TRUE)
+        final_counts <- list(
+          samples = nrow(current_data$samples),
+          snps = nrow(current_data$map)
+        )
         
         # Build comprehensive QC report
         qc_report <- list(
@@ -1314,18 +1280,12 @@ server <- function(input, output, session) {
             maf_after_snps = maf_after_snps,
             hwe_before_snps = hwe_before_snps
           ),
-          output_files = list(
-            bed = paste0(qc_output, ".bed"),
-            bim = paste0(qc_output, ".bim"),
-            fam = paste0(qc_output, ".fam")
-          )
+          filtered_data = current_data,
+          output_files = NULL
         )
         
         # Set QC results for display
         qc_results(qc_report)
-        
-        # Clean up temporary files (keep output files for user to download if needed)
-        # unlink(tmp_dir, recursive = TRUE, force = TRUE)
         
         setProgress(value = 1, message = "QC completed!")
         
@@ -1589,88 +1549,23 @@ server <- function(input, output, session) {
       if (!is.null(stats$individual_relatedness)) {
         relatedness_df <- stats$individual_relatedness
         
-        # Check for required columns: Z0, Z1, and EXPECTED (or RT for relationship type)
         if (is.data.frame(relatedness_df) && nrow(relatedness_df) > 0) {
-          # PLINK --genome output typically has RT (relationship type) column
-          # Map RT to EXPECTED if needed, or use RT directly
-          if ("RT" %in% names(relatedness_df) && !"EXPECTED" %in% names(relatedness_df)) {
-            relatedness_df$EXPECTED <- as.factor(relatedness_df$RT)
-          }
-          
-          # Ensure Z0 and Z1 columns exist
-          if ("Z0" %in% names(relatedness_df) && "Z1" %in% names(relatedness_df) && "EXPECTED" %in% names(relatedness_df)) {
-            # Filter valid data points
-            valid_idx <- is.finite(relatedness_df$Z0) & is.finite(relatedness_df$Z1) & 
-                        !is.na(relatedness_df$Z0) & !is.na(relatedness_df$Z1) &
-                        relatedness_df$Z0 >= 0 & relatedness_df$Z0 <= 1 &
-                        relatedness_df$Z1 >= 0 & relatedness_df$Z1 <= 1
-            
-            # Filter by PI_HAT > 8 if PI_HAT column exists
-            if ("PI_HAT" %in% names(relatedness_df)) {
-              valid_idx <- valid_idx & !is.na(relatedness_df$PI_HAT) & 
-                          is.finite(relatedness_df$PI_HAT) & relatedness_df$PI_HAT > 0.8
-            }
-            
-            if (sum(valid_idx) > 0) {
-              plot_df <- relatedness_df[valid_idx, ]
-              plot_df$EXPECTED <- as.factor(plot_df$EXPECTED)
-              
-              # Create Z0-Z1 IBD relationship plot with golden color
-              # Build hover text with PI_HAT if available
-              if ("PI_HAT" %in% names(plot_df)) {
-                p_relatedness <- plot_ly(plot_df, x = ~Z0, y = ~Z1, 
-                                        type = "scatter", mode = "markers",
-                                        marker = list(size = 4, opacity = 0.6, color = "#CEB888"),
-                                        text = ~paste("Pair:", if("IID1" %in% names(plot_df)) paste(IID1, IID2, sep="-") else "N/A",
-                                                     "<br>Z0:", round(Z0, 3),
-                                                     "<br>Z1:", round(Z1, 3),
-                                                     "<br>PI_HAT:", round(PI_HAT, 4),
-                                                     "<br>Expected:", EXPECTED),
-                                        hoverinfo = "text")
-              } else {
-                p_relatedness <- plot_ly(plot_df, x = ~Z0, y = ~Z1, 
-                                        type = "scatter", mode = "markers",
-                                        marker = list(size = 4, opacity = 0.6, color = "#CEB888"),
-                                        text = ~paste("Pair:", if("IID1" %in% names(plot_df)) paste(IID1, IID2, sep="-") else "N/A",
-                                                     "<br>Z0:", round(Z0, 3),
-                                                     "<br>Z1:", round(Z1, 3),
-                                                     "<br>Expected:", EXPECTED),
-                                        hoverinfo = "text")
-              }
-              
-              p_relatedness <- p_relatedness %>%
-                layout(title = list(text = "Sample Relatedness Distribution", font = list(size = 16)),
-                      xaxis = list(title = list(text = "Z0", font = list(size = 14)), 
-                                  range = c(0, 1)),
-                      yaxis = list(title = list(text = "Z1", font = list(size = 14)), 
-                                  range = c(0, 1)),
-                      showlegend = FALSE,
-                      margin = list(t = 60, b = 60, l = 80, r = 40))
-              p_relatedness
-            } else {
-              plotly_empty() %>% 
-                add_annotations(text = "No valid Z0/Z1 data points found",
-                              x = 0.5, y = 0.5, showarrow = FALSE)
-            }
+          if ("PI_HAT" %in% names(relatedness_df)) {
+            p_relatedness <- plot_ly() %>%
+              add_histogram(data = relatedness_df, x = ~PI_HAT,
+                           nbinsx = 50,
+                           marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
+                           name = "Relatedness") %>%
+              layout(title = list(text = "Sample Relatedness Distribution", font = list(size = 16)),
+                    xaxis = list(title = list(text = "PI_HAT (Proportion IBD)", font = list(size = 14))),
+                    yaxis = list(title = list(text = "Number of Sample Pairs", font = list(size = 14))),
+                    showlegend = FALSE,
+                    margin = list(t = 60, b = 60, l = 80, r = 40))
+            p_relatedness
           } else {
-            # Fallback to PI_HAT histogram if Z0/Z1 not available
-            if ("PI_HAT" %in% names(relatedness_df)) {
-              p_relatedness <- plot_ly() %>%
-                add_histogram(data = relatedness_df, x = ~PI_HAT,
-                             nbinsx = 50,
-                             marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
-                             name = "Relatedness") %>%
-                layout(title = list(text = "Sample Relatedness Distribution", font = list(size = 16)),
-                      xaxis = list(title = list(text = "PI_HAT (Proportion IBD)", font = list(size = 14))),
-                      yaxis = list(title = list(text = "Number of Sample Pairs", font = list(size = 14))),
-                      showlegend = FALSE,
-                      margin = list(t = 60, b = 60, l = 80, r = 40))
-              p_relatedness
-            } else {
-              plotly_empty() %>% 
-                add_annotations(text = "Relatedness data missing Z0/Z1 or PI_HAT columns",
-                              x = 0.5, y = 0.5, showarrow = FALSE)
-            }
+            plotly_empty() %>% 
+              add_annotations(text = "Relatedness data missing PI_HAT column",
+                            x = 0.5, y = 0.5, showarrow = FALSE)
           }
         } else {
           plotly_empty() %>% 
@@ -1746,64 +1641,20 @@ server <- function(input, output, session) {
       if (!is.null(stats$individual_relatedness)) {
         relatedness_df <- stats$individual_relatedness
         
-        # Check for required columns: Z0, Z1, and EXPECTED (or RT for relationship type)
         if (is.data.frame(relatedness_df) && nrow(relatedness_df) > 0) {
-          # PLINK --genome output typically has RT (relationship type) column
-          # Map RT to EXPECTED if needed, or use RT directly
-          if ("RT" %in% names(relatedness_df) && !"EXPECTED" %in% names(relatedness_df)) {
-            relatedness_df$EXPECTED <- as.factor(relatedness_df$RT)
-          }
-          
-          # Ensure Z0 and Z1 columns exist
-          if ("Z0" %in% names(relatedness_df) && "Z1" %in% names(relatedness_df) && "EXPECTED" %in% names(relatedness_df)) {
-            # Filter valid data points
-            valid_idx <- is.finite(relatedness_df$Z0) & is.finite(relatedness_df$Z1) & 
-                        !is.na(relatedness_df$Z0) & !is.na(relatedness_df$Z1) &
-                        relatedness_df$Z0 >= 0 & relatedness_df$Z0 <= 1 &
-                        relatedness_df$Z1 >= 0 & relatedness_df$Z1 <= 1
-            
-            # Filter by PI_HAT > 0.1 if PI_HAT column exists
-            if ("PI_HAT" %in% names(relatedness_df)) {
-              valid_idx <- valid_idx & !is.na(relatedness_df$PI_HAT) & 
-                          is.finite(relatedness_df$PI_HAT) & relatedness_df$PI_HAT > 0.1
-            }
-            
-            if (sum(valid_idx) > 0) {
-              plot_df <- relatedness_df[valid_idx, ]
-              plot_df$EXPECTED <- as.factor(plot_df$EXPECTED)
-              
-              # Create Z0-Z1 IBD relationship plot using ggplot2 with golden color
-              ggplot(plot_df, aes_string(x = "Z0", y = "Z1")) +
-                geom_point(alpha = 0.6, size = 2, color = "#CEB888") +
-                labs(title = "Sample Relatedness Distribution",
-                     x = "Z0",
-                     y = "Z1") +
-                xlim(0, 1) +
-                ylim(0, 1) +
-                theme_gray() +
-                theme(plot.title = element_text(hjust = 0.5, size = 14))
-            } else {
-              ggplot() + 
-                annotate("text", x = 0.5, y = 0.5, 
-                        label = "No valid Z0/Z1 data points found", size = 4) +
-                theme_void()
-            }
+          if ("PI_HAT" %in% names(relatedness_df)) {
+            ggplot(relatedness_df, aes_string(x = "PI_HAT")) +
+              geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+              labs(title = "Sample Relatedness Distribution",
+                   x = "PI_HAT (Proportion IBD)",
+                   y = "Number of Sample Pairs") +
+              theme_bw() +
+              theme(plot.title = element_text(hjust = 0.5, size = 14))
           } else {
-            # Fallback to PI_HAT histogram if Z0/Z1 not available
-            if ("PI_HAT" %in% names(relatedness_df)) {
-              ggplot(relatedness_df, aes_string(x = "PI_HAT")) +
-                geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
-                labs(title = "Sample Relatedness Distribution",
-                     x = "PI_HAT (Proportion IBD)",
-                     y = "Number of Sample Pairs") +
-                theme_bw() +
-                theme(plot.title = element_text(hjust = 0.5, size = 14))
-            } else {
-              ggplot() + 
-                annotate("text", x = 0.5, y = 0.5, 
-                        label = "Relatedness data missing Z0/Z1 or PI_HAT columns", size = 4) +
-                theme_void()
-            }
+            ggplot() + 
+              annotate("text", x = 0.5, y = 0.5, 
+                      label = "Relatedness data missing PI_HAT column", size = 4) +
+              theme_void()
           }
         } else {
           ggplot() + 
@@ -2004,7 +1855,7 @@ server <- function(input, output, session) {
         }
       } else {
         plotly_empty() %>% 
-          add_annotations(text = "HWE p-values not calculated\nPlease run PLINK statistics first",
+          add_annotations(text = "HWE p-values not calculated\nPlease run Summary or QC first",
                         x = 0.5, y = 0.5, showarrow = FALSE)
       }
     })
@@ -2166,7 +2017,7 @@ server <- function(input, output, session) {
       } else {
         ggplot() + 
           annotate("text", x = 0.5, y = 0.5, 
-                  label = "HWE p-values not calculated\nPlease run PLINK statistics first", size = 4) +
+                  label = "HWE p-values not calculated\nPlease run Summary or QC first", size = 4) +
           theme_void()
       }
     })
@@ -2219,11 +2070,12 @@ server <- function(input, output, session) {
       # Get genotype matrix (samples x markers)
       geno_matrix <- geno_data$genotypes
       
-      # Convert to numeric if needed
+      # Convert genotype strings to numeric minor-allele counts
       if (!is.numeric(geno_matrix)) {
-        geno_matrix <- apply(geno_matrix, 2, function(x) {
-          as.numeric(as.character(x))
-        })
+        geno_matrix <- encode_genotypes_to_numeric(geno_matrix)
+      }
+      if (is.null(geno_matrix)) {
+        return(NULL)
       }
       
       # Remove markers with all missing values
@@ -2347,7 +2199,7 @@ server <- function(input, output, session) {
           pca_result(pca)
         } else {
           return(plotly_empty() %>% 
-                 add_annotations(text = "PCA computation failed. Please check your data and ensure PLINK is available.",
+                add_annotations(text = "PCA computation failed. Please check your data.",
                                x = 0.5, y = 0.5, showarrow = FALSE))
         }
       }
@@ -2775,60 +2627,6 @@ server <- function(input, output, session) {
     }
   )
   
-  # Format conversion help modal (if plinkR is available)
-  observeEvent(input$format_convert_help, {
-    if (!use_plinkR) {
-      showNotification("plinkR is not installed. Please install it for format conversion features.",
-                      type = "warning")
-      return(NULL)
-    }
-    
-    showModal(modalDialog(
-      title = div(style = "font-weight: bold;", "🔄 Genotype Format Conversion Help"),
-      size = "l",
-      easyClose = TRUE,
-      tagList(
-        div(style = "margin-bottom: 20px;",
-            p(style = "font-size: 1.05rem; margin-bottom: 15px;",
-              "Use plinkR to convert between PLINK and BLUPF90 formats.")
-        ),
-        
-        div(style = "background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #CEB888;",
-            h5(style = "font-weight: bold; color: #2c3e50; margin-top: 0;", "📤 PLINK Format"),
-            p(style = "margin-bottom: 10px;", 
-              tags$strong("Required files:"),
-              tags$ul(
-                tags$li(tags$code(".ped"), " file - Contains genotype data (individuals × markers)"),
-                tags$li(tags$code(".map"), " file - Contains marker map information (chromosome, SNP ID, genetic distance, physical position)")
-              )
-            ),
-            p(style = "margin-bottom: 0; color: #666; font-size: 0.95rem;",
-              "💡 Note: Both files must have the same prefix (e.g., ", tags$code("data.ped"), " and ", tags$code("data.map"), ")")
-        ),
-        
-        div(style = "background-color: #f8f9fa; padding: 15px; border-radius: 8px; margin-bottom: 15px; border-left: 4px solid #CEB888;",
-            h5(style = "font-weight: bold; color: #2c3e50; margin-top: 0;", "📥 BLUPF90 Format"),
-            p(style = "margin-bottom: 10px;",
-              tags$strong("Required files:"),
-              tags$ul(
-                tags$li(tags$code(".txt"), " file - Contains genotype data"),
-                tags$li(tags$code(".map"), " file - Contains marker map information"),
-                tags$li(tags$code(".bim"), " file - Contains marker information")
-              )
-            )
-        ),
-        
-        div(style = "margin-top: 20px; padding: 10px; background-color: #fff3cd; border-radius: 5px; border: 1px solid #ffc107;",
-            tags$strong("⚠️ Important:"), 
-            " This feature requires the ", tags$code("plinkR"), " package to be installed.",
-            br(),
-            "Install with: ", tags$code("remotes::install_github('Thymine2001/plinkR')")
-        )
-      ),
-      footer = modalButton("Close")
-    ))
-  })
-  
   # Download handlers
   output$download_qc_report <- downloadHandler(
     filename = function() {
@@ -3033,116 +2831,311 @@ server <- function(input, output, session) {
     filename = function() {
       req(qc_results())
       report <- qc_results()
-      if (!is.null(report) && !is.null(report$output_files) && !is.null(report$output_files$bed)) {
-        # Extract base name from bed file path
-        bed_path <- report$output_files$bed
-        base_name <- basename(sub("\\.bed$", "", bed_path))
-        paste0(base_name, "_filtered_", Sys.Date(), ".zip")
-      } else {
-        paste0("genovieweR_filtered_data_", Sys.Date(), ".zip")
-      }
+      paste0("genovieweR_filtered_data_", Sys.Date(), ".zip")
     },
     content = function(file) {
       req(qc_results())
       report <- qc_results()
       
-      if (is.null(report) || is.null(report$output_files)) {
+      if (is.null(report)) {
         writeLines("No QC results available. Please run QC first.", file)
         return(NULL)
       }
       
-      # Check if PLINK executable is available
-      plink_path <- tryCatch({
-        if (exists("find_plink", where = "package:plinkR", mode = "function")) {
-          plinkR::find_plink()
-        } else {
-          Sys.which("plink")
+      # Prefer PLINK output files if available
+      if (!is.null(report$output_files) && !is.null(report$output_files$bed)) {
+        plink_path <- find_plink_path()
+        if (is.null(plink_path)) {
+          writeLines("PLINK executable not found. Cannot convert filtered data.", file)
+          return(NULL)
         }
-      }, error = function(e) {
-        Sys.which("plink")
-      })
-      
-      if (is.null(plink_path) || length(plink_path) == 0 || plink_path == "" || 
-          length(plink_path) > 1 || !file.exists(plink_path)) {
-        writeLines("PLINK executable not found. Cannot convert filtered data.", file)
-        return(NULL)
-      }
-      
-      # Check if filtered binary files exist
-      bed_file <- report$output_files$bed
-      bim_file <- report$output_files$bim
-      fam_file <- report$output_files$fam
-      
-      if (is.null(bed_file) || !file.exists(bed_file) ||
-          is.null(bim_file) || !file.exists(bim_file) ||
-          is.null(fam_file) || !file.exists(fam_file)) {
-        writeLines("Filtered data files not found. Please run QC again.", file)
-        return(NULL)
-      }
-      
-      # Create temporary directory for conversion
-      temp_dir <- tempfile(pattern = "genovieweR_download_")
-      dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
-      
-      # Extract base name from bed file
-      bed_base <- sub("\\.bed$", "", basename(bed_file))
-      bed_dir <- dirname(bed_file)
-      ped_output <- file.path(temp_dir, paste0(bed_base, "_filtered"))
-      
-      # Convert binary format to text format (.ped/.map) using PLINK
-      convert_result <- system2(
-        plink_path,
-        args = c(
-          "--bfile", file.path(bed_dir, bed_base),
-          "--allow-extra-chr",
-          "--recode",
-          "--out", ped_output
-        ),
-        stdout = FALSE,
-        stderr = FALSE
-      )
-      
-      # Prepare files to zip
-      files_to_zip <- c()
-      
-      # Add binary format files (.bed, .bim, .fam)
-      files_to_zip <- c(files_to_zip, bed_file, bim_file, fam_file)
-      
-      # Add text format files (.ped, .map) if conversion succeeded
-      ped_file <- paste0(ped_output, ".ped")
-      map_file <- paste0(ped_output, ".map")
-      
-      if (convert_result == 0 && file.exists(ped_file) && file.exists(map_file)) {
-        files_to_zip <- c(files_to_zip, ped_file, map_file)
-      }
-      
-      # Create zip file
-      if (length(files_to_zip) > 0) {
+        
+        bed_file <- report$output_files$bed
+        bim_file <- report$output_files$bim
+        fam_file <- report$output_files$fam
+        if (is.null(bed_file) || !file.exists(bed_file) ||
+            is.null(bim_file) || !file.exists(bim_file) ||
+            is.null(fam_file) || !file.exists(fam_file)) {
+          writeLines("Filtered data files not found. Please run QC again.", file)
+          return(NULL)
+        }
+        
+        temp_dir <- tempfile(pattern = "genovieweR_download_")
+        dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
+        
+        bed_base <- sub("\\.bed$", "", basename(bed_file))
+        bed_dir <- dirname(bed_file)
+        ped_output <- file.path(temp_dir, paste0(bed_base, "_filtered"))
+        
+        convert_result <- system2(
+          plink_path,
+          args = c(
+            "--bfile", file.path(bed_dir, bed_base),
+            "--allow-extra-chr",
+            "--recode",
+            "--out", ped_output
+          ),
+          stdout = FALSE,
+          stderr = FALSE
+        )
+        
+        files_to_zip <- c(bed_file, bim_file, fam_file)
+        ped_file <- paste0(ped_output, ".ped")
+        map_file <- paste0(ped_output, ".map")
+        if (convert_result == 0 && file.exists(ped_file) && file.exists(map_file)) {
+          files_to_zip <- c(files_to_zip, ped_file, map_file)
+        }
+        
         temp_zip <- tempfile(fileext = ".zip")
         zip(temp_zip, files_to_zip)
         file.copy(temp_zip, file)
-        
-        # Clean up temporary directory
         unlink(temp_dir, recursive = TRUE, force = TRUE)
-      } else {
-        writeLines("Failed to prepare filtered data files for download.", file)
-        unlink(temp_dir, recursive = TRUE, force = TRUE)
+        return(NULL)
       }
+      
+      # R-based filtered data fallback
+      if (is.null(report$filtered_data)) {
+        writeLines("Filtered data is not available in expected format.", file)
+        return(NULL)
+      }
+      
+      filtered_data <- report$filtered_data
+      if (!is.list(filtered_data) || !all(c("samples", "genotypes", "map") %in% names(filtered_data))) {
+        writeLines("Filtered data is not available in expected format.", file)
+        return(NULL)
+      }
+      
+      temp_dir <- tempfile(pattern = "genovieweR_download_")
+      dir.create(temp_dir, recursive = TRUE, showWarnings = FALSE)
+      
+      ped_file <- file.path(temp_dir, "filtered.ped")
+      map_file <- file.path(temp_dir, "filtered.map")
+      
+      # Write MAP file
+      map_data <- filtered_data$map
+      write.table(map_data, map_file, row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
+      
+      # Write PED file (expand genotype pairs)
+      geno_matrix <- filtered_data$genotypes
+      allele_a <- substr(geno_matrix, 1, 1)
+      allele_b <- substr(geno_matrix, 3, 3)
+      allele_cols <- matrix(NA_character_, nrow = nrow(geno_matrix), ncol = ncol(geno_matrix) * 2)
+      for (i in seq_len(ncol(geno_matrix))) {
+        allele_cols[, (i - 1) * 2 + 1] <- allele_a[, i]
+        allele_cols[, (i - 1) * 2 + 2] <- allele_b[, i]
+      }
+      
+      ped_data <- cbind(
+        filtered_data$samples$Family_ID,
+        filtered_data$samples$Sample_ID,
+        0, 0, 0, -9,
+        allele_cols
+      )
+      write.table(ped_data, ped_file, row.names = FALSE, col.names = FALSE, quote = FALSE, sep = " ")
+      
+      files_to_zip <- c(ped_file, map_file)
+      temp_zip <- tempfile(fileext = ".zip")
+      zip(temp_zip, files_to_zip)
+      file.copy(temp_zip, file)
+      unlink(temp_dir, recursive = TRUE, force = TRUE)
     }
   )
 }
 
+# Read VCF file into internal format
+read_vcf_file <- function(vcf_path) {
+  if (!requireNamespace("vcfR", quietly = TRUE)) {
+    stop("vcfR package is required to read VCF files.")
+  }
+  
+  vcf <- vcfR::read.vcfR(vcf_path, verbose = FALSE)
+  gt <- vcfR::extract.gt(vcf, element = "GT", as.numeric = FALSE)
+  if (is.null(gt) || nrow(gt) == 0) {
+    stop("No genotype data found in VCF.")
+  }
+  
+  # Convert GT to numeric minor allele counts (0/1/2)
+  geno_matrix <- matrix(NA_real_, nrow = nrow(gt), ncol = ncol(gt))
+  for (i in seq_len(nrow(gt))) {
+    for (j in seq_len(ncol(gt))) {
+      g <- gt[i, j]
+      if (is.na(g) || g == "." || g == "./." || g == ".|.") {
+        geno_matrix[i, j] <- NA_real_
+      } else {
+        alleles <- unlist(strsplit(g, "[/|]"))
+        if (length(alleles) == 2 && all(alleles %in% c("0", "1"))) {
+          geno_matrix[i, j] <- as.numeric(alleles[1]) + as.numeric(alleles[2])
+        } else {
+          geno_matrix[i, j] <- NA_real_
+        }
+      }
+    }
+  }
+  
+  geno_matrix <- t(geno_matrix)  # samples x markers
+  colnames(geno_matrix) <- vcf@fix[, "ID"]
+  
+  map <- data.frame(
+    Chromosome = vcf@fix[, "CHROM"],
+    SNP_ID = ifelse(vcf@fix[, "ID"] == ".", paste0(vcf@fix[, "CHROM"], ":", vcf@fix[, "POS"]), vcf@fix[, "ID"]),
+    Genetic_Distance = 0,
+    Physical_Position = as.integer(vcf@fix[, "POS"]),
+    stringsAsFactors = FALSE
+  )
+  
+  samples <- data.frame(
+    Family_ID = colnames(gt),
+    Sample_ID = colnames(gt),
+    stringsAsFactors = FALSE
+  )
+  
+  list(samples = samples, genotypes = geno_matrix, map = map)
+}
+
+# Read PLINK BED/BIM/FAM into internal format
+read_plink_bed <- function(bed_path, bim_path, fam_path) {
+  if (!requireNamespace("SNPRelate", quietly = TRUE)) {
+    stop("SNPRelate package is required to read PLINK .bed files.")
+  }
+  
+  temp_gds <- tempfile(fileext = ".gds")
+  SNPRelate::snpgdsBED2GDS(bed.fn = bed_path, bim.fn = bim_path, fam.fn = fam_path,
+                           out.gdsfn = temp_gds, verbose = FALSE)
+  gds <- SNPRelate::snpgdsOpen(temp_gds, readonly = TRUE)
+  on.exit({
+    SNPRelate::snpgdsClose(gds)
+    unlink(temp_gds)
+  }, add = TRUE)
+  
+  geno <- SNPRelate::snpgdsGetGeno(gds)
+  geno[geno == 3] <- NA  # missing
+  geno_matrix <- t(geno)  # samples x markers
+  
+  snp_id <- SNPRelate::snpgdsGetSNPID(gds)
+  chr <- SNPRelate::snpgdsGetSNPChromosome(gds)
+  pos <- SNPRelate::snpgdsGetSNPPosition(gds)
+  sample_id <- SNPRelate::snpgdsGetSampleID(gds)
+  
+  map <- data.frame(
+    Chromosome = chr,
+    SNP_ID = snp_id,
+    Genetic_Distance = 0,
+    Physical_Position = pos,
+    stringsAsFactors = FALSE
+  )
+  
+  samples <- data.frame(
+    Family_ID = sample_id,
+    Sample_ID = sample_id,
+    stringsAsFactors = FALSE
+  )
+  
+  list(samples = samples, genotypes = geno_matrix, map = map)
+}
+
+# Read BLUPF90 TXT + MAP into internal format (numeric genotypes)
+read_blupf90_txt <- function(txt_path, map_path) {
+  map_data <- if (use_data_table && requireNamespace("data.table", quietly = TRUE)) {
+    data.table::fread(map_path, header = FALSE, data.table = FALSE, showProgress = FALSE)
+  } else {
+    read.table(map_path, header = FALSE, stringsAsFactors = FALSE)
+  }
+  colnames(map_data) <- c("Chromosome", "SNP_ID", "Genetic_Distance", "Physical_Position")
+  
+  geno_data <- if (use_data_table && requireNamespace("data.table", quietly = TRUE)) {
+    data.table::fread(txt_path, header = FALSE, data.table = FALSE, showProgress = FALSE)
+  } else {
+    read.table(txt_path, header = FALSE, stringsAsFactors = FALSE)
+  }
+  
+  sample_ids <- data.frame(
+    Family_ID = geno_data[, 1],
+    Sample_ID = geno_data[, 1],
+    stringsAsFactors = FALSE
+  )
+  
+  geno_matrix <- as.matrix(geno_data[, 2:ncol(geno_data)])
+  mode(geno_matrix) <- "numeric"
+  
+  # Treat common missing codes as NA
+  geno_matrix[geno_matrix %in% c(-9, 9, 5)] <- NA
+  
+  if (ncol(geno_matrix) != nrow(map_data)) {
+    stop("BLUPF90 txt columns do not match map rows.")
+  }
+  
+  list(samples = sample_ids, genotypes = geno_matrix, map = map_data)
+}
+
+# Find PLINK executable if plinkR is available
+find_plink_path <- function() {
+  plink_path <- tryCatch({
+    if (use_plinkR && requireNamespace("plinkR", quietly = TRUE) &&
+        exists("find_plink", where = "package:plinkR", mode = "function")) {
+      plinkR::find_plink()
+    } else {
+      Sys.which("plink")
+    }
+  }, error = function(e) {
+    Sys.which("plink")
+  })
+  
+  if (is.null(plink_path) || length(plink_path) == 0 || plink_path == "" ||
+      length(plink_path) > 1 || !file.exists(plink_path)) {
+    return(NULL)
+  }
+  plink_path
+}
+
+# Write PLINK .ped/.map from in-memory data (genotype strings "A T")
+write_plink_text_files <- function(prefix, data) {
+  if (!is.list(data) || !all(c("samples", "genotypes", "map") %in% names(data))) {
+    return(FALSE)
+  }
+  
+  # Write .map file
+  map_data <- data$map
+  write.table(map_data, paste0(prefix, ".map"),
+              row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
+  
+  # Expand genotypes into allele pairs for .ped
+  geno_matrix <- data$genotypes
+  allele_a <- substr(geno_matrix, 1, 1)
+  allele_b <- substr(geno_matrix, 3, 3)
+  allele_cols <- matrix(NA_character_, nrow = nrow(geno_matrix), ncol = ncol(geno_matrix) * 2)
+  for (i in seq_len(ncol(geno_matrix))) {
+    allele_cols[, (i - 1) * 2 + 1] <- allele_a[, i]
+    allele_cols[, (i - 1) * 2 + 2] <- allele_b[, i]
+  }
+  
+  ped_data <- cbind(
+    data$samples$Family_ID,
+    data$samples$Sample_ID,
+    0, 0, 0, -9,
+    allele_cols
+  )
+  write.table(ped_data, paste0(prefix, ".ped"),
+              row.names = FALSE, col.names = FALSE, quote = FALSE, sep = " ")
+  
+  TRUE
+}
+
 # Helper functions for QC calculations
 calculate_maf <- function(data) {
-  # Placeholder - implement actual MAF calculation
-  # This would depend on the data format
   if (is.list(data) && "genotypes" %in% names(data)) {
-    # Calculate MAF from genotype matrix
     geno_matrix <- data$genotypes
-    # Simplified MAF calculation
     maf_values <- apply(geno_matrix, 2, function(x) {
-      alleles <- unlist(strsplit(as.character(x), ""))
-      if (length(alleles) == 0) return(NA)
+      if (is.numeric(x)) {
+        valid <- !is.na(x)
+        if (sum(valid) == 0) return(NA)
+      p <- mean(x[valid]) / 2
+        return(min(p, 1 - p))
+      }
+      valid <- !is.na(x) & x != "0 0" & x != "N N" & x != ""
+      if (sum(valid) == 0) return(NA)
+      a1 <- substr(as.character(x[valid]), 1, 1)
+      a2 <- substr(as.character(x[valid]), 3, 3)
+      alleles <- c(a1, a2)
       allele_counts <- table(alleles)
       if (length(allele_counts) < 2) return(0)
       min_count <- min(allele_counts)
@@ -3155,11 +3148,14 @@ calculate_maf <- function(data) {
 }
 
 calculate_call_rate <- function(data) {
-  # Placeholder - implement actual call rate calculation
   if (is.list(data) && "genotypes" %in% names(data)) {
     geno_matrix <- data$genotypes
     call_rates <- apply(geno_matrix, 2, function(x) {
-      non_missing <- sum(!is.na(x) & x != "0 0" & x != "N N")
+      if (is.numeric(x)) {
+        non_missing <- sum(!is.na(x))
+      } else {
+        non_missing <- sum(!is.na(x) & x != "0 0" & x != "N N" & x != "")
+      }
       total <- length(x)
       non_missing / total
     })
@@ -3173,6 +3169,11 @@ calculate_heterozygosity <- function(data) {
   if (is.list(data) && "genotypes" %in% names(data)) {
     geno_matrix <- data$genotypes
     het_values <- apply(geno_matrix, 2, function(x) {
+      if (is.numeric(x)) {
+        valid <- !is.na(x)
+        if (sum(valid) == 0) return(NA)
+        return(sum(x[valid] == 1) / sum(valid))
+      }
       het_count <- sum(grepl("^[ATCG] [ATCG]$", x) & 
                       substr(x, 1, 1) != substr(x, 3, 3), na.rm = TRUE)
       total <- sum(!is.na(x) & x != "0 0" & x != "N N" & x != "")
@@ -3184,14 +3185,37 @@ calculate_heterozygosity <- function(data) {
   return(NULL)
 }
 
-# Calculate heterozygosity per individual (row-wise) - using PLINK --het
-# This function should be called after calculate_all_stats_plink which runs --het
-calculate_individual_heterozygosity <- function(data) {
-  # This function is now primarily a fallback
-  # The main calculation is done via PLINK --het in calculate_all_stats_plink
-  # and stored in results$individual_heterozygosity
+# Convert genotype strings ("A T") to numeric minor-allele counts (0/1/2)
+encode_genotypes_to_numeric <- function(geno_matrix) {
+  if (is.null(geno_matrix) || !is.matrix(geno_matrix) || ncol(geno_matrix) == 0) {
+    return(NULL)
+  }
   
-  # If data already has heterozygosity from PLINK, return it
+  num_matrix <- matrix(NA_real_, nrow = nrow(geno_matrix), ncol = ncol(geno_matrix))
+  colnames(num_matrix) <- colnames(geno_matrix)
+  
+  for (i in seq_len(ncol(geno_matrix))) {
+    x <- as.character(geno_matrix[, i])
+    valid <- !is.na(x) & x != "0 0" & x != "N N" & x != ""
+    if (sum(valid) == 0) next
+    
+    a1 <- substr(x[valid], 1, 1)
+    a2 <- substr(x[valid], 3, 3)
+    alleles <- c(a1, a2)
+    allele_counts <- table(alleles)
+    if (length(allele_counts) < 2) next
+    
+    minor_allele <- names(allele_counts)[which.min(allele_counts)]
+    minor_counts <- (a1 == minor_allele) + (a2 == minor_allele)
+    num_matrix[valid, i] <- minor_counts
+  }
+  
+  num_matrix
+}
+
+# Calculate heterozygosity per individual (row-wise)
+calculate_individual_heterozygosity <- function(data) {
+  # If data already has heterozygosity computed, return it
   if (is.list(data) && "individual_heterozygosity" %in% names(data)) {
     return(data$individual_heterozygosity)
   }
@@ -3202,6 +3226,11 @@ calculate_individual_heterozygosity <- function(data) {
     
     # Calculate using base R
     het_values <- apply(geno_matrix, 1, function(x) {
+      if (is.numeric(x)) {
+        valid <- !is.na(x)
+        if (sum(valid) == 0) return(NA)
+        return(sum(x[valid] == 1) / sum(valid))
+      }
       het_count <- sum(grepl("^[ATCG] [ATCG]$", as.character(x)) & 
                       substr(as.character(x), 1, 1) != substr(as.character(x), 3, 3), na.rm = TRUE)
       total <- sum(!is.na(x) & x != "0 0" & x != "N N" & x != "", na.rm = TRUE)
@@ -3213,10 +3242,9 @@ calculate_individual_heterozygosity <- function(data) {
   return(NULL)
 }
 
-# Calculate call rate per individual (row-wise) - using PLINK --missing
-# This function should use results from calculate_all_stats_plink which runs --missing
+# Calculate call rate per individual (row-wise)
 calculate_individual_call_rate <- function(data) {
-  # If data already has call rate from PLINK, return it
+  # If data already has call rate computed, return it
   if (is.list(data) && "individual_call_rate" %in% names(data)) {
     return(data$individual_call_rate)
   }
@@ -3227,7 +3255,11 @@ calculate_individual_call_rate <- function(data) {
     
     # Calculate using base R
     call_rates <- apply(geno_matrix, 1, function(x) {
-      non_missing <- sum(!is.na(x) & x != "0 0" & x != "N N" & x != "", na.rm = TRUE)
+      if (is.numeric(x)) {
+        non_missing <- sum(!is.na(x), na.rm = TRUE)
+      } else {
+        non_missing <- sum(!is.na(x) & x != "0 0" & x != "N N" & x != "", na.rm = TRUE)
+      }
       total <- length(x)
       if (total == 0) return(NA)
       non_missing / total
@@ -3243,9 +3275,13 @@ calculate_all_stats_plink <- function(data, skip_relatedness = FALSE) {
   if (!is.list(data) || !all(c("samples", "genotypes", "map") %in% names(data))) {
     return(NULL)
   }
+  if (!is.null(data$input_format) && !data$input_format %in% c("plink_ped", "plink_bed")) {
+    return(calculate_all_stats_r(data, skip_relatedness = skip_relatedness))
+  }
   
-  if (!requireNamespace("plinkR", quietly = TRUE)) {
-    return(NULL)
+  plink_path <- find_plink_path()
+  if (is.null(plink_path)) {
+    return(calculate_all_stats_r(data, skip_relatedness = skip_relatedness))
   }
   
   tryCatch({
@@ -3254,54 +3290,9 @@ calculate_all_stats_plink <- function(data, skip_relatedness = FALSE) {
     dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
     prefix <- file.path(tmp_dir, "temp_data")
     
-    # Write PLINK files
-    # Write .fam file - optimized batch writing
-    fam_data <- cbind(
-      data$samples$Family_ID,
-      data$samples$Sample_ID,
-      0, 0, 0, -9  # Father, Mother, Sex, Phenotype
-    )
-    write.table(fam_data, paste0(prefix, ".fam"), 
-                row.names = FALSE, col.names = FALSE, quote = FALSE, sep = " ")
-    
-    # Write .map file (from map data) - optimized
-    if (ncol(data$map) >= 4) {
-      map_data <- cbind(
-        data$map[, 1],  # Chromosome
-        data$map[, 2],  # SNP_ID
-        data$map[, 3],  # Genetic_Distance
-        data$map[, 4]   # Physical_Position
-      )
-      write.table(map_data, paste0(prefix, ".map"), 
-                  row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
-    }
-    
-    # Write .ped file (genotypes) - optimized batch writing
-    # Use cbind directly instead of creating data.frame
-    ped_data <- cbind(
-      data$samples$Family_ID,
-      data$samples$Sample_ID,
-      0, 0, 0, -9,  # Father, Mother, Sex, Phenotype
-      data$genotypes
-    )
-    # Use write.table with optimized settings
-    write.table(ped_data, paste0(prefix, ".ped"), 
-                row.names = FALSE, col.names = FALSE, quote = FALSE, sep = " ")
-    
-    # Find plink executable
-    plink_path <- tryCatch({
-      if (exists("find_plink", where = "package:plinkR", mode = "function")) {
-        plinkR::find_plink()
-      } else {
-        Sys.which("plink")
-      }
-    }, error = function(e) {
-      Sys.which("plink")
-    })
-    
-    if (is.null(plink_path) || length(plink_path) == 0 || plink_path == "" || length(plink_path) > 1 || !file.exists(plink_path)) {
+    if (!write_plink_text_files(prefix, data)) {
       unlink(tmp_dir, recursive = TRUE, force = TRUE)
-      return(NULL)
+      return(calculate_all_stats_r(data, skip_relatedness = skip_relatedness))
     }
     
     stats_output <- paste0(prefix, "_stats")
@@ -3697,7 +3688,40 @@ calculate_all_stats_plink <- function(data, skip_relatedness = FALSE) {
   }, error = function(e) {
     # On error, log and return NULL (will trigger error message in UI)
     cat("Error in calculate_all_stats_plink:", e$message, "\n")
+    return(calculate_all_stats_r(data, skip_relatedness = skip_relatedness))
+  })
+}
+
+# Calculate all statistics using base R (no PLINK dependency)
+calculate_all_stats_r <- function(data, skip_relatedness = FALSE) {
+  if (!is.list(data) || !all(c("samples", "genotypes", "map") %in% names(data))) {
     return(NULL)
+  }
+  
+  tryCatch({
+    results <- list()
+    results$individual_call_rate <- calculate_individual_call_rate(data)
+    if (!is.null(results$individual_call_rate)) {
+      results$individual_missing_rate <- 1 - results$individual_call_rate
+    }
+    results$individual_heterozygosity <- calculate_individual_heterozygosity(data)
+    
+    results$marker_call_rate <- calculate_call_rate(data)
+    if (!is.null(results$marker_call_rate)) {
+      results$marker_missing_rate <- 1 - results$marker_call_rate
+    }
+    
+    results$maf <- calculate_maf(data)
+    results$hwe_pvalues <- calculate_hwe(data)
+    
+    if (!skip_relatedness) {
+      results$individual_relatedness <- calculate_sample_relatedness(data)
+    }
+    
+    results
+  }, error = function(e) {
+    cat("Error in calculate_all_stats_r:", e$message, "\n")
+    NULL
   })
 }
 
@@ -3706,9 +3730,13 @@ calculate_hwe_plink <- function(data) {
   if (!is.list(data) || !all(c("samples", "genotypes", "map") %in% names(data))) {
     return(NULL)
   }
+  if (!is.null(data$input_format) && !data$input_format %in% c("plink_ped", "plink_bed")) {
+    return(calculate_hwe(data))
+  }
   
-  if (!requireNamespace("plinkR", quietly = TRUE)) {
-    return(calculate_hwe(data))  # Fallback to R calculation
+  plink_path <- find_plink_path()
+  if (is.null(plink_path)) {
+    return(calculate_hwe(data))
   }
   
   tryCatch({
@@ -3717,60 +3745,7 @@ calculate_hwe_plink <- function(data) {
     dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
     prefix <- file.path(tmp_dir, "temp_data")
     
-    # Write .fam file
-    fam_data <- data.frame(
-      FID = data$samples$Family_ID,
-      IID = data$samples$Sample_ID,
-      Father = 0,
-      Mother = 0,
-      Sex = 0,
-      Phenotype = -9,
-      stringsAsFactors = FALSE
-    )
-    write.table(fam_data, paste0(prefix, ".fam"), 
-                row.names = FALSE, col.names = FALSE, quote = FALSE, sep = " ")
-    
-    # Write .map file (from map data)
-    if (ncol(data$map) >= 4) {
-      map_data <- data.frame(
-        Chromosome = data$map[, 1],
-        SNP_ID = data$map[, 2],
-        Genetic_Distance = data$map[, 3],
-        Physical_Position = data$map[, 4],
-        stringsAsFactors = FALSE
-      )
-      write.table(map_data, paste0(prefix, ".map"), 
-                  row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
-    }
-    
-    # Write .ped file (genotypes)
-    # PLINK .ped format: FID IID Father Mother Sex Phenotype Genotype1 Genotype2 ...
-    ped_data <- cbind(
-      data$samples$Family_ID,
-      data$samples$Sample_ID,
-      0,  # Father
-      0,  # Mother
-      0,  # Sex
-      -9, # Phenotype
-      data$genotypes
-    )
-    write.table(ped_data, paste0(prefix, ".ped"), 
-                row.names = FALSE, col.names = FALSE, quote = FALSE, sep = " ")
-    
-    # Find plink executable
-    plink_path <- tryCatch({
-      # Try plinkR function if available
-      if (exists("find_plink", where = "package:plinkR", mode = "function")) {
-        plinkR::find_plink()
-      } else {
-        Sys.which("plink")
-      }
-    }, error = function(e) {
-      Sys.which("plink")
-    })
-    
-    if (is.null(plink_path) || length(plink_path) == 0 || plink_path == "" || length(plink_path) > 1 || !file.exists(plink_path)) {
-      # Fallback to R calculation
+    if (!write_plink_text_files(prefix, data)) {
       unlink(tmp_dir, recursive = TRUE, force = TRUE)
       return(calculate_hwe(data))
     }
@@ -3846,6 +3821,26 @@ calculate_hwe <- function(data) {
     
     # Calculate HWE p-value for each marker (column)
     hwe_pvalues <- apply(geno_matrix, 2, function(x) {
+      if (is.numeric(x)) {
+        valid <- !is.na(x)
+        if (sum(valid) < 10) return(NA)
+        n_hom1 <- sum(x[valid] == 0)
+        n_het <- sum(x[valid] == 1)
+        n_hom2 <- sum(x[valid] == 2)
+        n_total <- n_hom1 + n_het + n_hom2
+        if (n_total == 0) return(NA)
+        p <- (2 * n_hom1 + n_het) / (2 * n_total)
+        q <- 1 - p
+        exp_hom1 <- n_total * p^2
+        exp_het <- n_total * 2 * p * q
+        exp_hom2 <- n_total * q^2
+        chi_sq <- 0
+        if (exp_hom1 > 0) chi_sq <- chi_sq + ((n_hom1 - exp_hom1)^2 / exp_hom1)
+        if (exp_het > 0) chi_sq <- chi_sq + ((n_het - exp_het)^2 / exp_het)
+        if (exp_hom2 > 0) chi_sq <- chi_sq + ((n_hom2 - exp_hom2)^2 / exp_hom2)
+        return(1 - pchisq(chi_sq, df = 1))
+      }
+      
       # Remove missing genotypes
       valid_genos <- x[!is.na(x) & x != "0 0" & x != "N N" & x != ""]
       if (length(valid_genos) < 10) return(NA)  # Need sufficient sample size
@@ -3923,58 +3918,23 @@ calculate_sample_relatedness <- function(data) {
     return(data.frame(PI_HAT = numeric(0)))
   }
   
-  # Try to use plink --genome if plinkR is available
-  if (use_plinkR && requireNamespace("plinkR", quietly = TRUE)) {
+  # Prefer PLINK only for PLINK formats
+  plink_path <- if (!is.null(data$input_format) && data$input_format %in% c("plink_ped", "plink_bed")) {
+    find_plink_path()
+  } else {
+    NULL
+  }
+  if (!is.null(plink_path)) {
     tryCatch({
       # Create temporary directory for PLINK files
       tmp_dir <- tempfile(pattern = "genovieweR_relatedness_")
       dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
       prefix <- file.path(tmp_dir, "temp_data")
       
-      # Write PLINK files (.fam, .map, .ped)
-      fam_data <- data.frame(
-        FID = data$samples$Family_ID,
-        IID = data$samples$Sample_ID,
-        Father = 0,
-        Mother = 0,
-        Sex = 0,
-        Phenotype = -9,
-        stringsAsFactors = FALSE
-      )
-      write.table(fam_data, paste0(prefix, ".fam"), 
-                  row.names = FALSE, col.names = FALSE, quote = FALSE, sep = " ")
-      
-      if (ncol(data$map) >= 4) {
-        map_data <- data.frame(
-          Chromosome = data$map[, 1],
-          SNP_ID = data$map[, 2],
-          Genetic_Distance = data$map[, 3],
-          Physical_Position = data$map[, 4],
-          stringsAsFactors = FALSE
-        )
-        write.table(map_data, paste0(prefix, ".map"), 
-                    row.names = FALSE, col.names = FALSE, quote = FALSE, sep = "\t")
+      if (!write_plink_text_files(prefix, data)) {
+        unlink(tmp_dir, recursive = TRUE, force = TRUE)
+        return(NULL)
       }
-      
-      ped_data <- cbind(
-        data$samples$Family_ID,
-        data$samples$Sample_ID,
-        0, 0, 0, -9,  # Father, Mother, Sex, Phenotype
-        data$genotypes
-      )
-      write.table(ped_data, paste0(prefix, ".ped"), 
-                  row.names = FALSE, col.names = FALSE, quote = FALSE, sep = " ")
-      
-      # Find plink executable
-      plink_path <- tryCatch({
-        if (exists("find_plink", where = "package:plinkR", mode = "function")) {
-          plinkR::find_plink()
-        } else {
-          Sys.which("plink")
-        }
-      }, error = function(e) {
-        Sys.which("plink")
-      })
       
       if (!is.null(plink_path) && plink_path != "" && file.exists(plink_path)) {
         # Run plink --genome (for relatedness/IBD)
@@ -4032,39 +3992,57 @@ calculate_sample_relatedness <- function(data) {
   
   # Fallback: Simplified IBS-based calculation (if plink not available or failed)
   geno_matrix <- data$genotypes
+  geno_numeric <- is.numeric(geno_matrix)
   relatedness_pairs <- list()
   
   # For large datasets, limit pairs to avoid computation explosion
   max_pairs <- min(1000, n_samples * (n_samples - 1) / 2)
+  marker_count <- ncol(geno_matrix)
+  marker_sample <- min(1000, marker_count)
+  marker_idx <- if (marker_count > 0) sample(seq_len(marker_count), marker_sample) else integer(0)
+  min_valid <- max(20, floor(length(marker_idx) * 0.1))
   
   pair_count <- 0
-  for (i in 1:(n_samples - 1)) {
-    for (j in (i + 1):n_samples) {
+  for (i in seq_len(n_samples - 1)) {
+    for (j in seq.int(i + 1, n_samples)) {
       pair_count <- pair_count + 1
       if (pair_count > max_pairs) break
       
-      geno_i <- geno_matrix[i, ]
-      geno_j <- geno_matrix[j, ]
+      geno_i <- geno_matrix[i, marker_idx]
+      geno_j <- geno_matrix[j, marker_idx]
       
-      valid_pos <- !is.na(geno_i) & !is.na(geno_j) & 
-                  geno_i != "0 0" & geno_j != "0 0" &
-                  geno_i != "N N" & geno_j != "N N" &
-                  geno_i != "" & geno_j != ""
+      valid_pos <- if (geno_numeric) {
+        !is.na(geno_i) & !is.na(geno_j)
+      } else {
+        !is.na(geno_i) & !is.na(geno_j) & 
+          geno_i != "0 0" & geno_j != "0 0" &
+          geno_i != "N N" & geno_j != "N N" &
+          geno_i != "" & geno_j != ""
+      }
       
-      if (sum(valid_pos) < 100) next
+      if (sum(valid_pos) < min_valid) next
       
       shared_alleles <- 0
       total_alleles <- 0
       
-      for (pos in which(valid_pos)[1:min(1000, sum(valid_pos))]) {  # Limit to 1000 markers for speed
-        alleles_i <- unlist(strsplit(as.character(geno_i[pos]), " "))
-        alleles_j <- unlist(strsplit(as.character(geno_j[pos]), " "))
-        
-        if (length(alleles_i) == 2 && length(alleles_j) == 2) {
-          # Count shared alleles (simplified)
-          if (alleles_i[1] == alleles_j[1] || alleles_i[1] == alleles_j[2]) shared_alleles <- shared_alleles + 1
-          if (alleles_i[2] == alleles_j[1] || alleles_i[2] == alleles_j[2]) shared_alleles <- shared_alleles + 1
+      for (pos in which(valid_pos)) {
+        if (geno_numeric) {
+          gi <- geno_i[pos]
+          gj <- geno_j[pos]
+          if (is.na(gi) || is.na(gj)) next
+          # Similarity: 1 for same, 0.5 for one-step, 0 for two-step
+          shared_alleles <- shared_alleles + (1 - (abs(gi - gj) / 2)) * 2
           total_alleles <- total_alleles + 2
+        } else {
+          alleles_i <- unlist(strsplit(as.character(geno_i[pos]), " "))
+          alleles_j <- unlist(strsplit(as.character(geno_j[pos]), " "))
+          
+          if (length(alleles_i) == 2 && length(alleles_j) == 2) {
+            # Count shared alleles (simplified)
+            if (alleles_i[1] == alleles_j[1] || alleles_i[1] == alleles_j[2]) shared_alleles <- shared_alleles + 1
+            if (alleles_i[2] == alleles_j[1] || alleles_i[2] == alleles_j[2]) shared_alleles <- shared_alleles + 1
+            total_alleles <- total_alleles + 2
+          }
         }
       }
       
