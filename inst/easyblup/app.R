@@ -1,9 +1,5 @@
 # ================================================
 # easyblup - Interactive BLUPF90 Parameter Generator  
-# Open BreedX (OBX) Clean Three-Panel Layout
-# Version: 0.4.0 (Fixed Language Settings)
-# Created: 2025-10-22
-# Last Modified: 2025-10-31
 # ================================================
 
 library(shiny)
@@ -391,6 +387,15 @@ ui <- page_fillable(
       background-color: #7F8C8D !important;
       border-color: #7F8C8D !important;
     }
+    #download_blup_map {
+      background-color: rgba(206, 184, 136, 1) !important;
+      border-color: rgba(206, 184, 136, 1) !important;
+    }
+    #download_blup_txt {
+      background-color: rgba(206, 184, 136, 1) !important;
+      border-color: rgba(206, 184, 136, 1) !important;
+      width: 212px;
+    }
     /* Align heights for folder selection input */
     #geno_convert_output_dir,
     #geno_convert_output_dir_blup {
@@ -492,12 +497,15 @@ ui <- page_fillable(
       
       // Handle folder selection
       window.selectOutputFolder = function() {
-        // Determine which input field is active based on visible panel
-        var outputDirId = 'geno_convert_output_dir';
-        // Check if blup_to_plink panel is visible
-        var blupInput = document.getElementById('geno_convert_output_dir_blup');
-        if (blupInput && blupInput.offsetParent !== null) {
-          outputDirId = 'geno_convert_output_dir_blup';
+        var outputDirId = 'geno_convert_output_dir_blup';
+        
+        function setOutputDirValue(id, value) {
+          var el = document.getElementById(id);
+          if (el) {
+            el.value = value;
+            el.dispatchEvent(new Event('change', { bubbles: true }));
+          }
+          Shiny.setInputValue(id, value, {priority: 'event'});
         }
         
         // Try File System Access API (Chrome/Edge 86+, Safari 15.2+)
@@ -521,7 +529,7 @@ ui <- page_fillable(
             }
             
             var newPath = basePath + folderName;
-            Shiny.setInputValue(outputDirId, newPath, {priority: 'event'});
+            setOutputDirValue(outputDirId, newPath);
           }).catch(function(err) {
             // User cancelled or error occurred
             if (err.name !== 'AbortError') {
@@ -554,12 +562,12 @@ ui <- page_fillable(
               } catch(ex) {}
               
               if (fullPath) {
-                Shiny.setInputValue(outputDirId, fullPath, {priority: 'event'});
+                setOutputDirValue(outputDirId, fullPath);
               } else {
                 // Fallback: use folder name
                 var currentValue = document.getElementById(outputDirId).value || './';
                 var newPath = currentValue + (currentValue.endsWith('/') ? '' : '/') + folderName;
-                Shiny.setInputValue(outputDirId, newPath, {priority: 'event'});
+                setOutputDirValue(outputDirId, newPath);
               }
             }
             document.body.removeChild(input);
@@ -1215,9 +1223,9 @@ server <- function(input, output, session) {
     }
     
     help_title <- if (tolower(lang()) == "zh") {
-      "Need help? Genotype format 转换 (PLINK ↔ BLUPF90)"
+      "Need help? Genotype format 转换 (PLINK → BLUPF90)"
     } else {
-      "Need help? Genotype format translate (PLINK ↔ BLUPF90)"
+      "Need help? Genotype format translate (PLINK → BLUPF90)"
     }
     
     # Use actionLink so clicks are observable on the server
@@ -1330,6 +1338,22 @@ server <- function(input, output, session) {
     current_param = "",
     ai_applied = FALSE
   )
+  
+  conversion_files <- reactiveValues(
+    blup_txt = NULL,
+    blup_map = NULL
+  )
+  
+  cleanup_conversion_files <- function() {
+    if (!is.null(conversion_files$blup_txt) && file.exists(conversion_files$blup_txt)) {
+      unlink(conversion_files$blup_txt, force = TRUE)
+    }
+    if (!is.null(conversion_files$blup_map) && file.exists(conversion_files$blup_map)) {
+      unlink(conversion_files$blup_map, force = TRUE)
+    }
+    conversion_files$blup_txt <- NULL
+    conversion_files$blup_map <- NULL
+  }
   
   # Calculate animal effect number reactively
   animal_effect_number <- reactive({
@@ -2112,8 +2136,8 @@ server <- function(input, output, session) {
       modalDialog(
         title = div(
           if (tolower(lang()) == "zh") "Genotype Format 转换助手" else "Genotype Format Helper",
-          span(class = "geno-helper-arrow", "↔"),
-          span(style = "font-size: 0.9rem; font-weight: 500;", "PLINK ↔ BLUPF90")
+          span(class = "geno-helper-arrow", "→"),
+          span(style = "font-size: 0.9rem; font-weight: 500;", "PLINK → BLUPF90")
         ),
         size = "l",
         easyClose = TRUE,
@@ -2130,35 +2154,24 @@ server <- function(input, output, session) {
         tagList(
           div(class = "geno-helper-info-box",
             p(if (tolower(lang()) == "zh") {
-              "需要帮助？这里可以在 PLINK 和 BLUPF90 基因型格式之间进行转换。转换后的文件将直接保存到您选择的输出目录。"
+              "需要帮助？这里可以将 PLINK (.ped/.map) 转换为 BLUPF90 (.txt/.map/.bim)。转换后的文件将直接保存到您选择的输出目录。"
             } else {
-              "Need help? Use this tool to convert genotype format between PLINK and BLUPF90. Converted files will be saved directly to your selected output directory."
+              "Need help? Use this tool to convert PLINK (.ped/.map) to BLUPF90 (.txt/.map/.bim). Converted files will be saved directly to your selected output directory."
             })
           ),
           
           div(style = "margin-bottom: 20px;",
             h5(style = "font-weight: 700; color: #2c3e50; margin-bottom: 12px;",
-               if (tolower(lang()) == "zh") "📋 选择转换方向" else "📋 Choose Conversion Direction"),
-            radioButtons(
-              "geno_convert_direction",
-              label = NULL,
-              choices = setNames(
-                c("plink_to_blup", "blup_to_plink"),
-                if (tolower(lang()) == "zh") {
-                  c("PLINK (.ped/.map) → BLUPF90 (.txt/.map/.bim)",
-                    "BLUPF90 (.txt/.map/.bim) → PLINK (.ped/.map)")
-                } else {
-                  c("PLINK (.ped/.map) → BLUPF90 (.txt/.map/.bim)",
-                    "BLUPF90 (.txt/.map/.bim) → PLINK (.ped/.map)")
-                }
-              ),
-              selected = "plink_to_blup"
-            )
+               if (tolower(lang()) == "zh") "📋 转换方向" else "📋 Conversion Direction"),
+            p(style = "margin: 0; color: #555;",
+              if (tolower(lang()) == "zh") {
+                "PLINK (.ped/.map) → BLUPF90 (.txt/.map/.bim)"
+              } else {
+                "PLINK (.ped/.map) → BLUPF90 (.txt/.map/.bim)"
+              })
           ),
           
-          conditionalPanel(
-            condition = "input.geno_convert_direction == 'plink_to_blup'",
-            div(class = "geno-helper-direction-card",
+          div(class = "geno-helper-direction-card",
               h4(if (tolower(lang()) == "zh") "PLINK → BLUPF90" else "PLINK → BLUPF90"),
               p(if (tolower(lang()) == "zh") {
                 "请上传同一前缀的 .ped 和 .map 文件（例如 mydata.ped / mydata.map）。转换完成后，文件将保存到您选择的输出目录。"
@@ -2182,103 +2195,64 @@ server <- function(input, output, session) {
               ),
               
               div(class = "geno-helper-file-input-wrapper",
-                tags$strong(style = "font-weight: 600; color: #2c3e50; margin-bottom: 8px; display: block;",
-                   if (tolower(lang()) == "zh") "📁 选择输出目录" else "📁 Select Output Directory"),
-                div(style = "display: flex; gap: 8px; align-items: center;",
-                  div(style = "flex: 1; display: flex; align-items: center;",
-                    if (requireNamespace("shinyDirectoryInput", quietly = TRUE)) {
-                      shinyDirectoryInput::directoryInput(
-                        inputId = "geno_convert_output_dir_blup",
-                        label = NULL,
-                        value = getwd()
-                      )
-                    } else {
-                      textInput("geno_convert_output_dir_blup",
-                               label = NULL,
-                               value = getwd(),
-                               placeholder = if (tolower(lang()) == "zh") "请输入或选择输出目录路径" else "Enter or select output directory path",
-                               width = "100%")
-                    }
-                  )
-                ),
                 p(style = "font-size: 0.85rem; color: #666; margin-top: 8px; margin-bottom: 0;",
                   if (tolower(lang()) == "zh") {
-                    "💡 提示：转换后的文件将保存到此目录。如果目录不存在，系统会自动创建。"
+                    "💡 提示：转换完成后请使用下方按钮下载 BLUPF90 文件。"
                   } else {
-                    "💡 Tip: Converted files will be saved to this directory. If the directory doesn't exist, it will be created automatically."
-                  })
+                    "💡 Tip: Use the buttons below to download BLUPF90 files after conversion."
+                  }),
+                uiOutput("blup_download_ui")
               )
             )
-          ),
-          
-          conditionalPanel(
-            condition = "input.geno_convert_direction == 'blup_to_plink'",
-            div(class = "geno-helper-direction-card",
-              h4(if (tolower(lang()) == "zh") "BLUPF90 → PLINK" else "BLUPF90 → PLINK"),
-              p(if (tolower(lang()) == "zh") {
-                "请上传 BLUPF90 格式的 .txt、.map 和 .bim 文件。转换完成后，文件将保存到您选择的输出目录。"
-              } else {
-                "Upload BLUPF90 .txt, .map and .bim files. After conversion, files will be saved to your selected output directory."
-              }),
-              
-              div(class = "geno-helper-file-input-wrapper",
-                fileInput("geno_help_blup_txt", 
-                         label = tags$strong("📄 BLUPF90 .txt 文件"), 
-                         accept = c(".txt"),
-                         buttonLabel = if (tolower(lang()) == "zh") "选择文件" else "Choose File",
-                         placeholder = if (tolower(lang()) == "zh") "未选择文件" else "No file selected")
-              ),
-              div(class = "geno-helper-file-input-wrapper",
-                fileInput("geno_help_blup_map", 
-                         label = tags$strong("📄 BLUPF90 .map 文件"), 
-                         accept = c(".map"),
-                         buttonLabel = if (tolower(lang()) == "zh") "选择文件" else "Choose File",
-                         placeholder = if (tolower(lang()) == "zh") "未选择文件" else "No file selected")
-              ),
-              div(class = "geno-helper-file-input-wrapper",
-                fileInput("geno_help_blup_bim", 
-                         label = tags$strong("📄 BLUPF90 .bim 文件"), 
-                         accept = c(".bim"),
-                         buttonLabel = if (tolower(lang()) == "zh") "选择文件" else "Choose File",
-                         placeholder = if (tolower(lang()) == "zh") "未选择文件" else "No file selected")
-              ),
-              
-              div(class = "geno-helper-file-input-wrapper",
-                tags$strong(style = "font-weight: 600; color: #2c3e50; margin-bottom: 8px; display: block;",
-                   if (tolower(lang()) == "zh") "📁 选择输出目录" else "📁 Select Output Directory"),
-                div(style = "display: flex; gap: 8px; align-items: center;",
-                  div(style = "flex: 1; display: flex; align-items: center;",
-                    if (requireNamespace("shinyDirectoryInput", quietly = TRUE)) {
-                      shinyDirectoryInput::directoryInput(
-                        inputId = "geno_convert_output_dir",
-                        label = NULL,
-                        value = getwd()
-                      )
-                    } else {
-                      textInput("geno_convert_output_dir",
-                               label = NULL,
-                               value = getwd(),
-                               placeholder = if (tolower(lang()) == "zh") "请输入或选择输出目录路径" else "Enter or select output directory path",
-                               width = "100%")
-                    }
-                  )
-                ),
-                p(style = "font-size: 0.85rem; color: #666; margin-top: 8px; margin-bottom: 0;",
-                  if (tolower(lang()) == "zh") {
-                    "💡 提示：转换后的文件将保存到此目录。如果目录不存在，系统会自动创建。"
-                  } else {
-                    "💡 Tip: Converted files will be saved to this directory. If the directory doesn't exist, it will be created automatically."
-                  })
-              )
-            )
-          )
         )
       )
     )
   })
   
+  output$blup_download_ui <- renderUI({
+    if (!is.null(conversion_files$blup_txt) &&
+        !is.null(conversion_files$blup_map) &&
+        file.exists(conversion_files$blup_txt) &&
+        file.exists(conversion_files$blup_map)) {
+      div(
+        style = "margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;",
+        downloadButton(
+          "download_blup_txt",
+          if (tolower(lang()) == "zh") "下载 BLUPF90 .txt" else "Download BLUPF90 .txt",
+          class = "btn btn-success btn-sm"
+        ),
+        downloadButton(
+          "download_blup_map",
+          if (tolower(lang()) == "zh") "下载 BLUPF90 .map" else "Download BLUPF90 .map",
+          class = "btn btn-success btn-sm"
+        )
+      )
+    }
+  })
+  
+  output$download_blup_txt <- downloadHandler(
+    filename = function() {
+      basename(conversion_files$blup_txt %||% "converted.txt")
+    },
+    content = function(file) {
+      req(conversion_files$blup_txt)
+      file.copy(conversion_files$blup_txt, file, overwrite = TRUE)
+    }
+  )
+  
+  output$download_blup_map <- downloadHandler(
+    filename = function() {
+      basename(conversion_files$blup_map %||% "converted.map")
+    },
+    content = function(file) {
+      req(conversion_files$blup_map)
+      file.copy(conversion_files$blup_map, file, overwrite = TRUE)
+    }
+  )
+  
   # Handle close button click
   observeEvent(input$geno_convert_close, {
+    cleanup_conversion_files()
     removeModal()
   }, ignoreInit = TRUE)
   
@@ -2289,61 +2263,11 @@ server <- function(input, output, session) {
       return(NULL)
     }
     
-    # 先确定转换方向
-    direction <- input$geno_convert_direction %||% "plink_to_blup"
+    cleanup_conversion_files()
     
-    # 根据转换方向选择对应的输出目录输入字段
-    if (direction == "plink_to_blup") {
-      if (requireNamespace("shinyDirectoryInput", quietly = TRUE)) {
-        output_dir <- shinyDirectoryInput::readDirectoryInput(session, "geno_convert_output_dir_blup") %||% getwd()
-      } else {
-        output_dir <- input$geno_convert_output_dir_blup %||% getwd()
-      }
-    } else {
-      if (requireNamespace("shinyDirectoryInput", quietly = TRUE)) {
-        output_dir <- shinyDirectoryInput::readDirectoryInput(session, "geno_convert_output_dir") %||% getwd()
-      } else {
-        output_dir <- input$geno_convert_output_dir %||% getwd()
-      }
-    }
-    output_dir <- trimws(output_dir)
+    # 仅支持 PLINK → BLUPF90，通过下载按钮获取结果
     
-    if (output_dir == "" || !nzchar(output_dir)) {
-      output_dir <- getwd()
-    }
-    
-    # 尝试创建目录（如果不存在）
-    if (!dir.exists(output_dir)) {
-      tryCatch({
-        dir.create(output_dir, recursive = TRUE, showWarnings = FALSE)
-      }, error = function(e) {
-        showNotification(
-          if (tolower(lang()) == "zh") {
-            paste0("无法创建输出目录: ", output_dir, "。错误: ", e$message)
-          } else {
-            paste0("Cannot create output directory: ", output_dir, ". Error: ", e$message)
-          },
-          type = "error", duration = 10
-        )
-        return(NULL)
-      })
-    }
-    
-    # 验证目录是否可写
-    if (!file.access(output_dir, 2) == 0) {
-      showNotification(
-        if (tolower(lang()) == "zh") {
-          paste0("输出目录不可写: ", output_dir)
-        } else {
-          paste0("Output directory is not writable: ", output_dir)
-        },
-        type = "error", duration = 10
-      )
-      return(NULL)
-    }
-    
-    if (direction == "plink_to_blup") {
-      req(input$geno_help_plink_ped, input$geno_help_plink_map)
+    req(input$geno_help_plink_ped, input$geno_help_plink_map)
       
       withProgress(message = if (tolower(lang()) == "zh") "正在转换 PLINK → BLUPF90..." else "Converting PLINK → BLUPF90...",
                    detail = if (tolower(lang()) == "zh") "准备文件..." else "Preparing files...",
@@ -2381,149 +2305,36 @@ server <- function(input, output, session) {
         } else {
           setProgress(value = 0.7, detail = if (tolower(lang()) == "zh") "正在保存文件到输出目录..." else "Saving files to output directory...")
           
-          # 将转换后的文件复制到用户选择的输出目录
-          out_txt <- paste0(target_prefix, ".txt")
-          out_map <- paste0(target_prefix, ".map")
-          out_bim <- paste0(target_prefix, ".bim")
-          
-          saved_files <- c()
-          try({
-            if (file.exists(out_txt)) {
-              dest_txt <- file.path(output_dir, paste0(base_prefix, ".txt"))
-              file.copy(out_txt, dest_txt, overwrite = TRUE)
-              saved_files <- c(saved_files, basename(dest_txt))
-            }
-            if (file.exists(out_map)) {
-              dest_map <- file.path(output_dir, paste0(base_prefix, ".map"))
-              file.copy(out_map, dest_map, overwrite = TRUE)
-              saved_files <- c(saved_files, basename(dest_map))
-            }
-            if (file.exists(out_bim)) {
-              dest_bim <- file.path(output_dir, paste0(base_prefix, ".bim"))
-              file.copy(out_bim, dest_bim, overwrite = TRUE)
-              saved_files <- c(saved_files, basename(dest_bim))
-            }
-          }, silent = TRUE)
+        out_txt <- paste0(target_prefix, ".txt")
+        out_map <- paste0(target_prefix, ".map")
           
           setProgress(value = 1, detail = if (tolower(lang()) == "zh") "完成！" else "Complete!")
           
-          if (length(saved_files) > 0) {
-            showNotification(
-              if (tolower(lang()) == "zh") {
-                paste0("PLINK → BLUPF90 转换完成！已保存 ", length(saved_files), " 个文件到: ", output_dir, "\n文件: ", paste(saved_files, collapse = ", "))
-              } else {
-                paste0("PLINK → BLUPF90 conversion finished! Saved ", length(saved_files), " file(s) to: ", output_dir, "\nFiles: ", paste(saved_files, collapse = ", "))
-              },
-              type = "message", duration = 15
-            )
-          } else {
-            showNotification(
-              if (tolower(lang()) == "zh") {
-                "转换完成，但未能保存文件。请检查输出目录权限。"
-              } else {
-                "Conversion finished, but failed to save files. Please check output directory permissions."
-              },
-              type = "warning", duration = 10
-            )
+          download_dir <- tempfile(pattern = "easyblup_blup_download_", tmpdir = tempdir())
+          dir.create(download_dir, recursive = TRUE, showWarnings = FALSE)
+          if (file.exists(out_txt)) {
+            dl_txt <- file.path(download_dir, paste0(base_prefix, ".txt"))
+            file.copy(out_txt, dl_txt, overwrite = TRUE)
+            conversion_files$blup_txt <- dl_txt
           }
+          if (file.exists(out_map)) {
+            dl_map <- file.path(download_dir, paste0(base_prefix, ".map"))
+            file.copy(out_map, dl_map, overwrite = TRUE)
+            conversion_files$blup_map <- dl_map
+          }
+          
+        showNotification(
+          if (tolower(lang()) == "zh") {
+            "PLINK → BLUPF90 转换完成！请使用下方按钮下载 .txt 和 .map 文件。"
+          } else {
+            "PLINK → BLUPF90 conversion finished! Use the buttons below to download .txt and .map files."
+          },
+          type = "message", duration = 15
+        )
           
           unlink(tmp_dir, recursive = TRUE, force = TRUE)
         }
       })
-    } else if (direction == "blup_to_plink") {
-      req(input$geno_help_blup_txt, input$geno_help_blup_map, input$geno_help_blup_bim)
-      
-      withProgress(message = if (tolower(lang()) == "zh") "正在转换 BLUPF90 → PLINK..." else "Converting BLUPF90 → PLINK...",
-                   detail = if (tolower(lang()) == "zh") "准备文件..." else "Preparing files...",
-                   value = 0, {
-        
-        txt_name <- input$geno_help_blup_txt$name[1]
-        
-        txt_datapath <- input$geno_help_blup_txt$datapath[1]
-        map_datapath <- input$geno_help_blup_map$datapath[1]
-        bim_datapath <- input$geno_help_blup_bim$datapath[1]
-        
-        # 使用临时目录存放中间文件，转换完成后通过浏览器下载结果
-        tmp_dir <- tempfile(pattern = "easyblup_blup_", tmpdir = tempdir())
-        dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
-        
-        base_prefix <- tools::file_path_sans_ext(basename(txt_name))
-        target_prefix <- file.path(tmp_dir, base_prefix)
-        
-        geno_file <- paste0(target_prefix, ".txt")
-        map_file  <- paste0(target_prefix, ".map")
-        bim_file  <- paste0(target_prefix, ".bim")
-        
-        file.copy(txt_datapath, geno_file, overwrite = TRUE)
-        file.copy(map_datapath, map_file, overwrite = TRUE)
-        file.copy(bim_datapath, bim_file, overwrite = TRUE)
-        
-        setProgress(value = 0.1, detail = if (tolower(lang()) == "zh") "正在运行 BLUPF90 转换..." else "Running BLUPF90 conversion...")
-        
-        res <- tryCatch({
-          plinkR::blupf90_to_plink(
-            blupf90_prefix = target_prefix,
-            geno_file      = geno_file,
-            map_file       = map_file,
-            bim_file       = bim_file,
-            out_prefix     = target_prefix,
-            verbose        = TRUE
-          )
-        }, error = function(e) e)
-        
-        if (inherits(res, "error")) {
-          setProgress(value = 1)
-          showNotification(
-            paste("BLUPF90 → PLINK 转换失败:", res$message),
-            type = "error", duration = 10
-          )
-          unlink(tmp_dir, recursive = TRUE, force = TRUE)
-        } else {
-          setProgress(value = 0.7, detail = if (tolower(lang()) == "zh") "正在保存文件到输出目录..." else "Saving files to output directory...")
-          
-          ped_out <- paste0(target_prefix, ".ped")
-          map_out <- paste0(target_prefix, ".map")
-          
-          saved_files <- c()
-          try({
-            if (file.exists(ped_out)) {
-              dest_ped <- file.path(output_dir, paste0(base_prefix, ".ped"))
-              file.copy(ped_out, dest_ped, overwrite = TRUE)
-              saved_files <- c(saved_files, basename(dest_ped))
-            }
-            if (file.exists(map_out)) {
-              dest_map <- file.path(output_dir, paste0(base_prefix, ".map"))
-              file.copy(map_out, dest_map, overwrite = TRUE)
-              saved_files <- c(saved_files, basename(dest_map))
-            }
-          }, silent = TRUE)
-          
-          setProgress(value = 1, detail = if (tolower(lang()) == "zh") "完成！" else "Complete!")
-          
-          if (length(saved_files) > 0) {
-            showNotification(
-              if (tolower(lang()) == "zh") {
-                paste0("BLUPF90 → PLINK 转换完成！已保存 ", length(saved_files), " 个文件到: ", output_dir, "\n文件: ", paste(saved_files, collapse = ", "))
-              } else {
-                paste0("BLUPF90 → PLINK conversion finished! Saved ", length(saved_files), " file(s) to: ", output_dir, "\nFiles: ", paste(saved_files, collapse = ", "))
-              },
-              type = "message", duration = 15
-            )
-          } else {
-            showNotification(
-              if (tolower(lang()) == "zh") {
-                "转换完成，但未能保存文件。请检查输出目录权限。"
-              } else {
-                "Conversion finished, but failed to save files. Please check output directory permissions."
-              },
-              type = "warning", duration = 10
-            )
-          }
-          
-          unlink(tmp_dir, recursive = TRUE, force = TRUE)
-        }
-      })
-    }
   })
 
   # Mount AI server if available

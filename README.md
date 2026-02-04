@@ -5,10 +5,13 @@
        height="255"
        align="right" />
 
-
 **An Integrated R Shiny Application for Breeding Data Analysis**
-</h1>
 
+[![R-CMD-check](https://github.com/rojaslabteam-rgb/easybreedeR/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/rojaslabteam-rgb/easybreedeR/actions/workflows/R-CMD-check.yaml)
+[![License](https://img.shields.io/github/license/rojaslabteam-rgb/easybreedeR)](LICENSE)
+[![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18381723.svg)](https://doi.org/10.5281/zenodo.18381723)
+
+</h1>
 
 # Contents
 
@@ -16,10 +19,8 @@
 - [Installation](#installation)
 - [Quick start](#quick-start)
 
-
-
-
 ## Overview
+
 **easybreedeR** is a comprehensive R/Shiny application designed for breeding data quick checking, visualization, quality control and preparation. It provides an integrated platform with multiple specialized modules for phenotypic data checking, pedigree data checking, genotype data checking and blupf90 parameter files preparation.
 
 easybreedeR combines multiple Shiny applications into a unified suite, offering:
@@ -79,7 +80,6 @@ run_datavieweR()  # Phenotype preview and exploration
 run_pedivieweR()     # Pedigree viewer and pedigree quality control
 run_genovieweR()     # Genotype viewer and quality control
 run_easyblup()       # blupf90 parameter cards generator
-run_rcw()            # Visual pipeline builder (R Canvas Workflow)
 ```
 
 ## Applications and key functions
@@ -92,52 +92,43 @@ The main launcher providing unified access to all applications in the suite.
 
 **Data Preview and Exploration**
 
-- Quick data preview and summary statistics
-- Interactive data exploration tools
-- Data quality assessment
-- Export capabilities
+- Flexible data upload with column selection and missing-value handling
+- Data summary with pre/post filtering counts and statistics
+- QC filtering by threshold, SD, or IQR (global or per-column)
+- Data normal distribution test.
+- Interactive distribution plots (histogram, boxplot, QQ)
+- Downloadable plots and filtered datasets
 
 ### pedivieweR
 
 **Pedigree Viewer and Quality Control**
 
-- Interactive pedigree visualization using `visNetwork`
-- Pedigree quality control and validation
-- Relationship analysis and generation tracking
-- Export pedigree data with metadata
-- Extended pedigree analysis features - requires optional `linkbreedeR` package
+- Interactive pedigree visualization with `visNetwork` and generation highlighting
+- Pedigree QC report with download and fixed-pedigree export
+- Pedigree structure summary and downloadable report
+- Inbreeding coefficient analysis with top sire/dam summaries
+- Export relatives for selected animals
+- Extended pedigree analysis features require optional `linkbreedeR`
 
 ### genovieweR
 
 **Genotype Viewer and Quality Control**
 
-- Support for PLINK and BLUPF90 genotype formats
-- Interactive genotype data visualization and exploration
-- Per-individual quality metrics: missing rate, relatedness analysis
-- Per-marker quality metrics: SNP missing rate, Minor Allele Frequency (MAF), Hardy-Weinberg Equilibrium (HWE)
-- Genotype format conversion (PLINK ↔ BLUPF90) - requires optional `plinkR` package
-- Comprehensive QC reports and filtered data export
-- Extended analysis features - requires optional `linkbreedeR` package
+- Support for PLINK (.ped/.map, .bed/.bim/.fam), VCF, and BLUPF90 (.txt + .map) formats
+- Interactive exploration of genotype summary statistics and QC metrics
+- Per-individual diagnostics: sample missing rate and relatedness
+- Per-marker diagnostics: SNP missing rate, Minor Allele Frequency (MAF), and Hardy-Weinberg Equilibrium (HWE)
+- Configurable QC filters (geno/mind/MAF/HWE) with downloadable QC report and filtered data
+- PCA visualization of population structure with 2D/3D plots and downloads
+- PLINK-based QC is enabled when optional `plinkR` is available
 
 ### easyblup
 
 **blupf90 Parameter card Generator**
 
-- Generate BLUP (Best Linear Unbiased Prediction) and REML (Restricted Maximum Likelihood) parameters
-- AI-powered assistant for parameter configuration and optimization
-- Configurable OpenAI-compatible API integration
-- Interactive parameter tuning and model building
-- Genotype format conversion tools (PLINK ↔ BLUPF90) - requires optional `plinkR` package
-
-### RCW (R Canvas Workflow)
-
-**Visual Pipeline Builder**
-
-- Drag-and-drop interface for creating R script workflows
-- Visual connection of analysis steps
-- Export workflows as R Markdown documents
-- Import and restore saved workflows
-- Execute workflows with dependency management
+- Generate parameter files for blupf90
+- Interactive parameter writing.
+- Genotype format conversion tools (PLINK —> BLUPF90) - requires optional `plinkR` package
 
 ## License
 
@@ -152,8 +143,7 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 If you use easybreedeR in your research, please cite:
 
 ```
-Huangyi Tang (2025). easybreedeR: Breeding Data Analysis and Workflow Management Platform.
-R package version 0.4.0. https://github.com/rojaslabteam-rgb/easybreedeR
+HuangyiTang. rojaslabteam-rgb/easybreedeR: V0.5.1. v0.5.1, Zenodo, 26 Jan. 2026, https://doi.org/10.5281/zenodo.18381723.
 ```
 
 ## Support
