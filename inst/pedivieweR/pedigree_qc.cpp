@@ -1419,3 +1419,219 @@ NumericVector fast_inbreeding_cpp(CharacterVector ids,
   result.attr("names") = ids;
   return result;
 }
+
+struct TopAncestorContributionCpp {
+  int ancestor_idx;
+  double contribution;
+  double proportion;
+};
+
+static void dfs_paths_cpp(const std::vector<int>& sire_idx,
+                          const std::vector<int>& dam_idx,
+                          int current_idx,
+                          int target_idx,
+                          int depth,
+                          int max_depth,
+                          std::vector<int>& path,
+                          std::vector<std::vector<int>>& out) {
+  if (depth > max_depth) return;
+  if (current_idx == target_idx) {
+    out.push_back(path);
+    return;
+  }
+  if (depth == max_depth) return;
+
+  int s = sire_idx[current_idx];
+  int d = dam_idx[current_idx];
+  if (s >= 0) {
+    path.push_back(s);
+    dfs_paths_cpp(sire_idx, dam_idx, s, target_idx, depth + 1, max_depth, path, out);
+    path.pop_back();
+  }
+  if (d >= 0) {
+    path.push_back(d);
+    dfs_paths_cpp(sire_idx, dam_idx, d, target_idx, depth + 1, max_depth, path, out);
+    path.pop_back();
+  }
+}
+
+static std::vector<std::vector<int>> enumerate_paths_cpp(const std::vector<int>& sire_idx,
+                                                         const std::vector<int>& dam_idx,
+                                                         int start_idx,
+                                                         int target_idx,
+                                                         int max_depth) {
+  std::vector<std::vector<int>> paths;
+  std::vector<int> path;
+  path.reserve(max_depth + 1);
+  path.push_back(start_idx);
+  dfs_paths_cpp(sire_idx, dam_idx, start_idx, target_idx, 0, max_depth, path, paths);
+  return paths;
+}
+
+static bool independent_except_k_cpp(const std::vector<int>& ps,
+                                     const std::vector<int>& pd,
+                                     int k_idx) {
+  std::unordered_set<int> seen;
+  for (size_t i = 0; i + 1 < ps.size(); ++i) {
+    seen.insert(ps[i]);
+  }
+  for (size_t j = 0; j + 1 < pd.size(); ++j) {
+    int v = pd[j];
+    if (v != k_idx && seen.count(v)) return false;
+  }
+  return true;
+}
+
+// [[Rcpp::export]]
+Rcpp::DataFrame fast_top_contrib_cpp(Rcpp::CharacterVector ids,
+                                     Rcpp::CharacterVector sires,
+                                     Rcpp::CharacterVector dams,
+                                     Rcpp::NumericVector F,
+                                     std::string target_id,
+                                     int max_depth = 6,
+                                     int top_k = 5) {
+  int n = ids.size();
+  if (sires.size() != n || dams.size() != n || F.size() != n) {
+    Rcpp::stop("Length mismatch: ids, sires, dams, and F must have same length.");
+  }
+  if (n == 0) {
+    return Rcpp::DataFrame::create(
+      Rcpp::Named("ancestor_id") = Rcpp::CharacterVector(),
+      Rcpp::Named("contribution") = Rcpp::NumericVector(),
+      Rcpp::Named("proportion") = Rcpp::NumericVector()
+    );
+  }
+
+  std::unordered_map<std::string, int> id_to_index;
+  id_to_index.reserve(n * 2);
+  std::vector<std::string> id_vec(n);
+
+  for (int i = 0; i < n; ++i) {
+    if (ids[i] == NA_STRING) {
+      Rcpp::stop("IDs cannot contain NA values.");
+    }
+    std::string id = Rcpp::as<std::string>(ids[i]);
+    if (id_to_index.find(id) != id_to_index.end()) {
+      Rcpp::stop("Duplicate ID found in pedigree: " + id);
+    }
+    id_to_index[id] = i;
+    id_vec[i] = id;
+  }
+
+  auto it_target = id_to_index.find(target_id);
+  if (it_target == id_to_index.end()) {
+    return Rcpp::DataFrame::create(
+      Rcpp::Named("ancestor_id") = Rcpp::CharacterVector(),
+      Rcpp::Named("contribution") = Rcpp::NumericVector(),
+      Rcpp::Named("proportion") = Rcpp::NumericVector()
+    );
+  }
+  int target_idx = it_target->second;
+
+  std::vector<int> sire_idx(n, -1);
+  std::vector<int> dam_idx(n, -1);
+  for (int i = 0; i < n; ++i) {
+    Rcpp::String s = sires[i];
+    Rcpp::String d = dams[i];
+    if (!is_missing_parent(s)) {
+      std::string sire_id = trim_copy(std::string(s.get_cstring()));
+      auto it = id_to_index.find(sire_id);
+      if (it != id_to_index.end()) sire_idx[i] = it->second;
+    }
+    if (!is_missing_parent(d)) {
+      std::string dam_id = trim_copy(std::string(d.get_cstring()));
+      auto it = id_to_index.find(dam_id);
+      if (it != id_to_index.end()) dam_idx[i] = it->second;
+    }
+  }
+
+  int s0 = sire_idx[target_idx];
+  int d0 = dam_idx[target_idx];
+  if (s0 < 0 || d0 < 0) {
+    return Rcpp::DataFrame::create(
+      Rcpp::Named("ancestor_id") = Rcpp::CharacterVector(),
+      Rcpp::Named("contribution") = Rcpp::NumericVector(),
+      Rcpp::Named("proportion") = Rcpp::NumericVector()
+    );
+  }
+
+  std::unordered_set<int> anc_s;
+  std::unordered_set<int> anc_d;
+
+  auto collect_all = [&](int start_idx, std::unordered_set<int>& anc) {
+    std::vector<int> stack = {start_idx};
+    while (!stack.empty()) {
+      int cur = stack.back();
+      stack.pop_back();
+      if (anc.insert(cur).second) {
+        int s = sire_idx[cur];
+        int d = dam_idx[cur];
+        if (s >= 0) stack.push_back(s);
+        if (d >= 0) stack.push_back(d);
+      }
+    }
+  };
+
+  collect_all(s0, anc_s);
+  collect_all(d0, anc_d);
+
+  struct Tmp { int k_idx; double Ck; };
+  std::vector<Tmp> allC;
+  allC.reserve(128);
+
+  for (int k_idx : anc_s) {
+    if (!anc_d.count(k_idx)) continue;
+
+    auto ps = enumerate_paths_cpp(sire_idx, dam_idx, s0, k_idx, max_depth);
+    if (ps.empty()) continue;
+    auto pd = enumerate_paths_cpp(sire_idx, dam_idx, d0, k_idx, max_depth);
+    if (pd.empty()) continue;
+
+    double Ck = 0.0;
+    double factor = 1.0 + F[k_idx];
+
+    for (const auto& p1 : ps) {
+      int ns = static_cast<int>(p1.size()) - 1;
+      for (const auto& p2 : pd) {
+        int nd = static_cast<int>(p2.size()) - 1;
+        if (!independent_except_k_cpp(p1, p2, k_idx)) continue;
+        int p = ns + nd + 1;
+        Ck += std::ldexp(factor, -p);
+      }
+    }
+
+    if (Ck > 0.0) {
+      allC.push_back({k_idx, Ck});
+    }
+  }
+
+  double F_offspring = 0.0;
+  for (const auto& x : allC) F_offspring += x.Ck;
+  if (F_offspring <= 0.0) {
+    return Rcpp::DataFrame::create(
+      Rcpp::Named("ancestor_id") = Rcpp::CharacterVector(),
+      Rcpp::Named("contribution") = Rcpp::NumericVector(),
+      Rcpp::Named("proportion") = Rcpp::NumericVector()
+    );
+  }
+
+  std::sort(allC.begin(), allC.end(),
+            [](const Tmp& a, const Tmp& b) { return a.Ck > b.Ck; });
+
+  int K = std::min(top_k, static_cast<int>(allC.size()));
+  Rcpp::CharacterVector ancestor_ids(K);
+  Rcpp::NumericVector contributions(K);
+  Rcpp::NumericVector proportions(K);
+
+  for (int i = 0; i < K; ++i) {
+    ancestor_ids[i] = id_vec[allC[i].k_idx];
+    contributions[i] = allC[i].Ck;
+    proportions[i] = allC[i].Ck / F_offspring;
+  }
+
+  return Rcpp::DataFrame::create(
+    Rcpp::Named("ancestor_id") = ancestor_ids,
+    Rcpp::Named("contribution") = contributions,
+    Rcpp::Named("proportion") = proportions
+  );
+}

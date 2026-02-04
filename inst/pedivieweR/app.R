@@ -101,6 +101,11 @@ tryCatch({
     } else {
       cat("Note: fast_inbreeding_cpp not found, will use inbupgf90/pedigreeTools\n")
     }
+    if (exists("fast_top_contrib_cpp", mode = "function", envir = src_env, inherits = FALSE)) {
+      cat("✓ fast_top_contrib_cpp available - will show Top 5 contributors\n")
+    } else {
+      cat("Note: fast_top_contrib_cpp not found - Top 5 contributors disabled\n")
+    }
   } else {
     cat("Note: pedigree_qc.cpp not found at:", cpp_path, "\n")
   }
@@ -6584,6 +6589,51 @@ output$top10_dam_title <- renderText({
     related_ped <- ped %>% filter(ID %in% related_ids)
     
     if (nrow(related_ped) == 0) return(list(nodes = tibble(), edges = tibble()))
+
+    top_contrib_text <- ""
+    if (exists("fast_top_contrib_cpp", mode = "function")) {
+      f_vals <- f_values_cache()
+      cat("[TopContrib] target=", target_id, " f_cache_rows=", ifelse(is.null(f_vals), 0, nrow(f_vals)), "\n", sep = "")
+      if (!is.null(f_vals) && nrow(f_vals) > 0) {
+      f_joined <- ped %>%
+        transmute(
+          ID = as.character(ID),
+          Sire = as.character(Sire),
+          Dam = as.character(Dam)
+        ) %>%
+        left_join(f_vals %>% transmute(ID = as.character(ID), F = as.numeric(F)), by = "ID") %>%
+        mutate(F = ifelse(is.na(F), 0, F))
+
+      top_contrib <- tryCatch({
+        fast_top_contrib_cpp(
+          f_joined$ID,
+          f_joined$Sire,
+          f_joined$Dam,
+          f_joined$F,
+          target_id,
+          max_depth = search_depth,
+          top_k = 5
+        )
+      }, error = function(e) {
+        cat("[TopContrib] error:", e$message, "\n")
+        NULL
+      })
+
+      if (!is.null(top_contrib) && nrow(top_contrib) > 0) {
+        cat("[TopContrib] rows=", nrow(top_contrib), "\n", sep = "")
+        lines <- sprintf(
+          "%s (C=%.4f, P=%.1f%%)",
+          top_contrib$ancestor_id,
+          top_contrib$contribution,
+          top_contrib$proportion * 100
+        )
+        top_contrib_text <- paste0("<br><br><strong>Top 5 Inbreeding Contributors:</strong><br>",
+                                   paste(lines, collapse = "<br>"))
+      } else {
+        cat("[TopContrib] empty result\n")
+      }
+      }
+    }
     
     # Build nodes
     nodes <- related_ped %>%
@@ -6592,9 +6642,9 @@ output$top10_dam_title <- renderText({
         label = if(input$show_labels) ID else "",
         group = ifelse(!is.na(Sex), as.character(Sex), "Unknown"),
         title = paste0("ID: ", ID, 
-                       ifelse(!is.na(Sire), paste0("\nSire: ", Sire), ""),
-                       ifelse(!is.na(Dam), paste0("\nDam: ", Dam), ""),
-                       ifelse(!is.na(Sex), paste0("\nSex: ", Sex), "")),
+                       ifelse(!is.na(Sire), paste0("<br>Sire: ", Sire), ""),
+                       ifelse(!is.na(Dam), paste0("<br>Dam: ", Dam), ""),
+                       ifelse(!is.na(Sex), paste0("<br>Sex: ", Sex), "")),
         value = input$node_size,
         level = "individual",
         # Set default colors based on sex
@@ -6611,7 +6661,7 @@ output$top10_dam_title <- renderText({
       nodes <- nodes %>%
         left_join(f_values(), by = c("id" = "ID")) %>%
         mutate(
-          title = paste0(title, ifelse(!is.na(F), paste0("\nF: ", round(F, 4)), "")),
+          title = paste0(title, ifelse(!is.na(F), paste0("<br>F: ", round(F, 4)), "")),
           # Scale node size based on inbreeding coefficient (F)
           # Base size + F * scaling factor, with minimum size
           value = ifelse(!is.na(F), 
@@ -6623,7 +6673,7 @@ output$top10_dam_title <- renderText({
     # Highlight target individual
     nodes <- nodes %>%
       mutate(
-        title = ifelse(id == target_id, paste0(title, "\n\n🎯 Target Individual"), title),
+        title = ifelse(id == target_id, paste0(title, "<br><br>🎯 Target Individual", top_contrib_text), title),
         shape = ifelse(id == target_id, "star", "dot"),
         color = ifelse(id == target_id, "#FF0000", color),
         borderWidth = ifelse(id == target_id, 4, borderWidth),
