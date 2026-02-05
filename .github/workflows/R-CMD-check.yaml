@@ -19,6 +19,7 @@ jobs:
       matrix:
         config:
           - {os: windows-latest, r: 'release'}
+          - {os: macos-latest, r: 'release'}
           - {os: ubuntu-latest, r: 'release', rspm: "https://packagemanager.posit.co/cran/__linux__/jammy/latest"}
           - {os: ubuntu-latest, r: 'devel', rspm: "https://packagemanager.posit.co/cran/__linux__/jammy/latest", http-user-agent: "R-devel"}
 
