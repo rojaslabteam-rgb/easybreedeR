@@ -567,8 +567,6 @@ ui <- page_fillable(
             condition = "false",
             div(class = "panel-section",
                 h4(textOutput("smart_visualization_title"), class = "section-title"),
-                uiOutput("aggregation_level_selector"),
-                uiOutput("drill_down_navigation"),
                 hr(),
                 uiOutput("node_size_slider"),
                 uiOutput("show_labels_checkbox")
@@ -1018,14 +1016,44 @@ output$top10_dam_title <- renderText({
     # Otherwise read from uploaded file
     req(input$file)
     tryCatch({
-      read.table(input$file$datapath, 
-                 header = TRUE, 
-                 sep = input$sep, 
-                 stringsAsFactors = FALSE,
-                 quote = "",           # 禁用引号解析，支持ID中包含 ' 和 "
-                 comment.char = "",    # 禁用注释符，支持ID中包含 #
-                 check.names = FALSE,  # 保留原始列名，不自动修正
-                 encoding = "UTF-8")   # 明确编码，支持中文等字符
+      cache_base_dir <- "pedigree_cache"
+      raw_cache_dir <- file.path(cache_base_dir, "raw_data")
+      if (!dir.exists(raw_cache_dir)) {
+        dir.create(raw_cache_dir, showWarnings = FALSE, recursive = TRUE)
+      }
+      file_info <- file.info(input$file$datapath)
+      cache_key <- digest::digest(
+        list(
+          name = input$file$name,
+          size = file_info$size,
+          mtime = as.numeric(file_info$mtime),
+          sep = input$sep
+        ),
+        algo = "xxhash64"
+      )
+      cache_path <- file.path(raw_cache_dir, paste0(cache_key, ".rds"))
+      
+      if (file.exists(cache_path)) {
+        return(readRDS(cache_path))
+      }
+      
+      df <- data.table::fread(
+        input$file$datapath,
+        header = TRUE,
+        sep = input$sep,
+        data.table = FALSE,
+        stringsAsFactors = FALSE,
+        quote = "",
+        check.names = FALSE,
+        encoding = "UTF-8",
+        strip.white = TRUE,
+        fill = TRUE,
+        na.strings = c("", "NA"),
+        showProgress = TRUE
+      )
+      
+      tryCatch(saveRDS(df, cache_path), error = function(e) NULL)
+      df
     }, error = function(e) {
       showNotification(paste("Error reading file:", e$message), type = "error")
       NULL
@@ -1801,362 +1829,6 @@ output$top10_dam_title <- renderText({
     return(errors)
   }
   
-  # Smart aggregation system for large datasets
-  smart_aggregation_system <- function(ped, max_nodes_per_level = 200) {
-    n_individuals <- nrow(ped)
-    
-    # Helper function to safely count clusters
-    safe_cluster_count <- function(clustered_data) {
-      if (is.null(clustered_data) || nrow(clustered_data) == 0 || !"cluster" %in% names(clustered_data)) {
-        return(1)
-      }
-      unique_clusters <- unique(clustered_data$cluster)
-      if (length(unique_clusters) == 0) {
-        return(1)
-      }
-      return(length(unique_clusters))
-    }
-    
-    # Determine optimal aggregation strategy based on data size
-    if (n_individuals <= 100) {
-      return(list(
-        strategy = "individual",
-        levels = list(individual = ped),
-        level_info = list(individual = list(name = "Individual View", count = n_individuals))
-      ))
-      } else if (n_individuals <= 1000) {
-        family_data <- create_family_clusters(ped, k = 15, method = "louvain", force_k = FALSE)
-        return(list(
-          strategy = "family",
-          levels = list(family = family_data),
-          level_info = list(family = list(name = "Family Clusters", count = safe_cluster_count(family_data)))
-        ))
-      } else if (n_individuals <= 10000) {
-        super_family_data <- create_super_family_clusters(ped, max_size = 500)
-        family_data <- create_family_clusters(ped, k = 20, method = "louvain", force_k = FALSE)
-        return(list(
-          strategy = "multi_level",
-          levels = list(
-            super_family = super_family_data,
-            family = family_data,
-            individual = ped
-          ),
-          level_info = list(
-            super_family = list(name = "Super Families", count = safe_cluster_count(super_family_data)),
-            family = list(name = "Families", count = safe_cluster_count(family_data)),
-            individual = list(name = "Individuals", count = n_individuals)
-          )
-        ))
-      } else {
-        mega_family_data <- create_mega_family_clusters(ped, max_size = 2000)
-        super_family_data <- create_super_family_clusters(ped, max_size = 500)
-        family_data <- create_family_clusters(ped, k = 25, method = "louvain", force_k = FALSE)
-        return(list(
-          strategy = "hierarchical",
-          levels = list(
-            mega_family = mega_family_data,
-            super_family = super_family_data,
-            family = family_data,
-            individual = ped
-          ),
-          level_info = list(
-            mega_family = list(name = "Mega Families", count = safe_cluster_count(mega_family_data)),
-            super_family = list(name = "Super Families", count = safe_cluster_count(super_family_data)),
-            family = list(name = "Families", count = safe_cluster_count(family_data)),
-            individual = list(name = "Individuals", count = n_individuals)
-          )
-        ))
-      }
-  }
-  
-  # Create family clusters with robust strategies for highly related populations
-  create_family_clusters <- function(ped, 
-                                     k = 30, 
-                                     method = c("auto", "louvain", "spectral", "threshold"),
-                                     tau = 0.0625,          # kinship-like threshold if using "threshold" mode
-                                     max_gen = 5,           # depth for approximate relatedness search (unused here but reserved)
-                                     force_k = FALSE) {     # force exactly k clusters when TRUE
-    method <- match.arg(method)
-
-    # Fast path: if input is empty, return as-is with cluster=1
-    if (is.null(ped) || nrow(ped) == 0) {
-      return(tibble::as_tibble(ped) %>% dplyr::mutate(cluster = 1L))
-    }
-
-    # Build edges (parent-child), drop NAs/empties
-    edges_all <- dplyr::bind_rows(
-      ped %>% dplyr::filter(!is.na(Sire), Sire != "", Sire != "0") %>% dplyr::transmute(from = as.character(Sire), to = as.character(ID)),
-      ped %>% dplyr::filter(!is.na(Dam),  Dam  != "", Dam  != "0") %>% dplyr::transmute(from = as.character(Dam),  to = as.character(ID))
-    )
-
-    # If there are no edges, each node is its own singleton
-    if (nrow(edges_all) == 0) {
-      out <- ped %>% dplyr::transmute(ID, cluster = dplyr::row_number())
-      return(out)
-    }
-
-    # Undirected pedigree graph
-    g <- igraph::graph_from_data_frame(edges_all, directed = FALSE)
-
-    # Check connected components but always use community detection for better clustering
-    comp <- igraph::components(g, mode = "weak")
-    comp_membership <- comp$membership
-    
-    # Ensure comp_membership has names
-    if (is.null(names(comp_membership))) {
-      names(comp_membership) <- igraph::V(g)$name
-    }
-    
-    # Only use component membership if we have many small components (not one giant component)
-    if (comp$no > 5 && !isTRUE(force_k)) {
-      # Multiple small components - use them directly
-      result <- tibble::tibble(ID = names(comp_membership), cluster = as.integer(comp_membership))
-      result <- ped %>% dplyr::left_join(result, by = "ID")
-      renum <- result %>% dplyr::distinct(cluster) %>% dplyr::arrange(cluster) %>% dplyr::mutate(new_cluster = dplyr::row_number())
-      result <- result %>% dplyr::left_join(renum, by = "cluster") %>% dplyr::select(-cluster) %>% dplyr::rename(cluster = new_cluster)
-      return(result)
-    }
-    
-    # For single large component or when force_k=TRUE, use community detection
-
-    # Otherwise the whole graph is one giant component (or user wants fixed K).
-    # Choose a community strategy - prioritize methods that create more clusters
-    choose_method <- function() {
-      if (method != "auto") return(method)
-      # For highly connected pedigrees, use spectral clustering to force more clusters
-      if (isTRUE(force_k)) return("spectral")
-      # For large connected components, use Louvain with resolution tuning
-      if (igraph::vcount(g) > 100) return("louvain") else return("louvain")
-    }
-    mth <- choose_method()
-
-    # --- Community discovery helpers ----
-    run_louvain <- function(graph) {
-      # Try multiple resolution parameters to get more communities
-      resolutions <- c(0.5, 1.0, 1.5, 2.0)
-      best_comm <- NULL
-      best_modularity <- -Inf
-      
-      for (res in resolutions) {
-        tryCatch({
-          # Use edge betweenness for weighted clustering
-          comm <- igraph::cluster_louvain(graph, resolution = res)
-          mod <- igraph::modularity(comm)
-          if (mod > best_modularity) {
-            best_modularity <- mod
-            best_comm <- comm
-          }
-        }, error = function(e) {
-          # Fallback to default Louvain
-          if (is.null(best_comm)) {
-            best_comm <<- igraph::cluster_louvain(graph)
-          }
-        })
-      }
-      
-      if (is.null(best_comm)) {
-        best_comm <- igraph::cluster_louvain(graph)
-      }
-      
-      membership <- igraph::membership(best_comm)
-      # Preserve names when converting to integer
-      result <- as.integer(membership)
-      names(result) <- names(membership)
-      result
-    }
-
-    run_spectral_k <- function(graph, k_target) {
-      # Spectral embedding + kmeans for an exact K-way partition.
-      # Compute first k eigenvectors of normalized Laplacian.
-      # For stability, cap k_target at (number of vertices)
-      nV <- igraph::vcount(graph)
-      k_use <- max(1, min(k_target, nV))
-      # Use igraph's Laplacian
-      L <- igraph::laplacian_matrix(graph, normalized = TRUE, sparse = TRUE)
-      # Compute k smallest eigenvectors (excluding trivial if any)
-      # Convert to dense (small k), fallback if fails
-      emb <- try({
-        # RSpectra may not be available here; use base eigen on small dense backup
-        if (inherits(L, "dgCMatrix")) {
-          # As a fallback, convert a small dense
-          if (nV <= 5000) {
-            Ld <- as.matrix(L)
-            ev <- eigen(Ld, symmetric = TRUE)
-            # Take the last k_use columns of eigenvectors with smallest eigenvalues
-            U <- ev$vectors[, (ncol(ev$vectors) - k_use + 1):ncol(ev$vectors), drop = FALSE]
-          } else {
-            # For very large graphs, approximate with Louvain then merge to K
-            return(NULL)
-          }
-        } else {
-          ev <- eigen(L, symmetric = TRUE)
-          U <- ev$vectors[, (ncol(ev$vectors) - k_use + 1):ncol(ev$vectors), drop = FALSE]
-        }
-        U
-      }, silent = TRUE)
-
-      if (is.null(emb) || inherits(emb, "try-error")) return(NULL)
-
-      set.seed(1L)
-      km <- stats::kmeans(emb, centers = k_use, iter.max = 100, nstart = 5)
-      # Preserve vertex names from graph
-      result <- as.integer(km$cluster)
-      names(result) <- igraph::V(graph)$name
-      result
-    }
-
-    merge_to_exact_k <- function(labels, k_target) {
-      # Preserve names from input
-      label_names <- names(labels)
-      # If already equal to K, return (preserving names)
-      labs <- as.integer(labels)
-      n_groups <- length(unique(labs))
-      if (n_groups == k_target) {
-        names(labs) <- label_names
-        return(labs)
-      }
-      # Greedy round-robin merge of communities by descending size to exactly K bins
-      sizes <- sort(table(labs), decreasing = TRUE)
-      bins <- rep(0L, length(sizes))
-      names(bins) <- names(sizes)
-      # Assign initial groups to bins in round-robin
-      bin_id <- rep(1:k_target, length.out = length(sizes))
-      target_map <- setNames(bin_id, names(sizes))
-      # Map original labels to merged bins
-      merged <- target_map[as.character(labs)]
-      result <- as.integer(merged)
-      names(result) <- label_names
-      result
-    }
-
-    # --- Run the chosen method ---
-    membership <- NULL
-    if (mth == "louvain") {
-      membership <- run_louvain(g)
-      if (isTRUE(force_k)) {
-        membership <- merge_to_exact_k(membership, k)
-      }
-    } else if (mth == "spectral") {
-      membership <- run_spectral_k(g, k)
-      if (is.null(membership)) {
-        # Fallback: Louvain then merge to K
-        membership <- run_louvain(g)
-        membership <- merge_to_exact_k(membership, k)
-      }
-    } else if (mth == "threshold") {
-      # Build a similarity graph based on simple shared-parent tie-strength
-      # (Here we keep original edges; in future we could expand with cousin ties)
-      # Then prune weak bridges using edge betweenness percentile.
-      eb <- igraph::edge_betweenness(g)
-      cutoff <- stats::quantile(eb, probs = 0.90, na.rm = TRUE)
-      g2 <- igraph::delete_edges(g, which(eb >= cutoff))
-      membership <- igraph::membership(igraph::clusters(g2))
-      # Ensure membership has names (should already have them from clusters)
-      if (is.null(names(membership))) {
-        names(membership) <- igraph::V(g2)$name
-      }
-      if (isTRUE(force_k)) {
-        membership <- merge_to_exact_k(membership, k)
-      }
-    } else {
-      membership <- run_louvain(g)
-    }
-    
-    # Output as tibble in original ped order with consecutive 1..C labels
-    # Ensure membership has names
-    if (is.null(names(membership)) || length(names(membership)) == 0) {
-      names(membership) <- igraph::V(g)$name
-    }
-    mem_tbl <- tibble::tibble(ID = names(membership), cluster = as.integer(membership))
-    out <- ped %>% dplyr::left_join(mem_tbl, by = "ID")
-    
-    # Renumber clusters to 1..C by appearance order
-    renum <- out %>% dplyr::distinct(cluster) %>% dplyr::arrange(cluster) %>% dplyr::mutate(new_cluster = dplyr::row_number())
-    out <- out %>% dplyr::left_join(renum, by = "cluster") %>% dplyr::select(-cluster) %>% dplyr::rename(cluster = new_cluster)
-    
-    out
-  }
-  
-  # Create super family clusters (larger groupings)
-  create_super_family_clusters <- function(ped, max_size = 500) {
-    family_clusters <- create_family_clusters(ped)
-    
-    # If no clusters or only one cluster, return as is
-    if (nrow(family_clusters) == 0 || length(unique(family_clusters$cluster)) <= 1) {
-      return(family_clusters)
-    }
-    
-    # Group small families together
-    cluster_sizes <- family_clusters %>% 
-      group_by(cluster) %>% 
-      summarise(size = n(), .groups = "drop")
-    
-    # Create super clusters using a simpler approach
-    super_cluster_id <- 1
-    current_size <- 0
-    super_cluster_mapping <- numeric()
-    
-    for (i in 1:nrow(cluster_sizes)) {
-      cluster_id <- cluster_sizes$cluster[i]
-      cluster_size <- cluster_sizes$size[i]
-      
-      if (current_size + cluster_size > max_size && current_size > 0) {
-        super_cluster_id <- super_cluster_id + 1
-        current_size <- 0
-      }
-      
-      super_cluster_mapping[cluster_id] <- super_cluster_id
-      current_size <- current_size + cluster_size
-    }
-    
-    # Apply mapping using simple vector indexing
-    family_clusters %>%
-      mutate(super_cluster = super_cluster_mapping[cluster]) %>%
-      mutate(super_cluster = ifelse(is.na(super_cluster), 1, super_cluster)) %>%
-      select(-cluster) %>%
-      rename(cluster = super_cluster)
-  }
-  
-  # Create mega family clusters (even larger groupings)
-  create_mega_family_clusters <- function(ped, max_size = 2000) {
-    super_family_clusters <- create_super_family_clusters(ped, max_size = 500)
-    
-    # If no clusters or only one cluster, return as is
-    if (nrow(super_family_clusters) == 0 || length(unique(super_family_clusters$cluster)) <= 1) {
-      return(super_family_clusters)
-    }
-    
-    # Group super families together
-    cluster_sizes <- super_family_clusters %>% 
-      group_by(cluster) %>% 
-      summarise(size = n(), .groups = "drop")
-    
-    # Create mega clusters using a simpler approach
-    mega_cluster_id <- 1
-    current_size <- 0
-    mega_cluster_mapping <- numeric()
-    
-    for (i in 1:nrow(cluster_sizes)) {
-      cluster_id <- cluster_sizes$cluster[i]
-      cluster_size <- cluster_sizes$size[i]
-      
-      if (current_size + cluster_size > max_size && current_size > 0) {
-        mega_cluster_id <- mega_cluster_id + 1
-        current_size <- 0
-      }
-      
-      mega_cluster_mapping[cluster_id] <- mega_cluster_id
-      current_size <- current_size + cluster_size
-    }
-    
-    # Apply mapping using simple vector indexing
-    super_family_clusters %>%
-      mutate(mega_cluster = mega_cluster_mapping[cluster]) %>%
-      mutate(mega_cluster = ifelse(is.na(mega_cluster), 1, mega_cluster)) %>%
-      select(-cluster) %>%
-      rename(cluster = mega_cluster)
-  }
-  
   # Reactive value to store auto-detected columns
   detected_cols <- reactiveVal(NULL)
   
@@ -2165,11 +1837,6 @@ output$top10_dam_title <- renderText({
   
   # Reactive value to track data validation status
   data_validation_status <- reactiveVal(list(valid = FALSE, errors = c(), warnings = c()))
-  
-  # Reactive values for smart aggregation system
-  aggregation_system <- reactiveVal(NULL)
-  current_aggregation_level <- reactiveVal("auto")
-  current_drill_down_path <- reactiveVal(list())
   
   # Reactive value to track inbreeding calculation status
   f_calculation_status <- reactiveVal(list(
@@ -3052,38 +2719,6 @@ output$top10_dam_title <- renderText({
     }
   )
   
-  # Aggregation level selector UI
-  output$aggregation_level_selector <- renderUI({
-    # Non-interactive info: Auto mode only
-    div(
-      h5("Visualization Level: Auto (Recommended)", style = "margin: 0 0 6px 0; font-weight: 600;"),
-      tags$small("Auto mode selects optimal visualization for your data size.")
-    )
-  })
-  
-  # Drill down navigation UI
-  output$drill_down_navigation <- renderUI({
-    drill_path <- current_drill_down_path()
-    
-    if (is.null(drill_path) || length(drill_path) == 0) {
-      return(NULL)
-    }
-    
-    div(
-      h6("📍 Current Path:", style = "font-weight: 600; margin-bottom: 8px;"),
-      div(
-        style = "background-color: #f8f9fa; padding: 8px; border-radius: 4px; margin-bottom: 8px;",
-        tags$small(
-          paste(drill_path, collapse = " → "),
-          style = "color: #6c757d;"
-        )
-      ),
-      actionButton("reset_drill_down", "🏠 Back to Top Level", 
-                   class = "btn btn-sm btn-outline-secondary",
-                   style = "width: 100%;")
-    )
-  })
-  
   # Inbreeding calculation progress UI
   output$f_calculation_progress <- renderUI({
     status <- f_calculation_status()
@@ -3544,42 +3179,7 @@ output$top10_dam_title <- renderText({
     df$Sex[is.na(df$Sex) & df$ID %in% only_dam]  <- "F"
     # For those appearing in both roles and missing Sex, leave as NA (Unknown)
     
-    # Clear cache when new data is processed
-    # family_clusters_cache(NULL)  # Removed - no longer needed
-    
-    # Initialize smart aggregation system with detailed progress
-    n_individuals <- nrow(df)
-    
-    if (n_individuals > 1000) {
-      withProgress(message = "Initializing smart aggregation system...", value = 0, {
-        incProgress(0.1, detail = "Analyzing data structure...")
-        
-        incProgress(0.2, detail = "Creating family clusters...")
-        agg_system <- smart_aggregation_system(df)
-        
-        incProgress(0.3, detail = "Setting up aggregation levels...")
-        aggregation_system(agg_system)
-        current_aggregation_level("auto")
-        current_drill_down_path(list())
-        
-        incProgress(0.4, detail = "Finalizing system...")
-        
-        showNotification(
-          paste0("✅ Data processed! Smart aggregation enabled for ", format(n_individuals, big.mark = ","), 
-                 " individuals. Use level selector to navigate."),
-          type = "message", duration = 8
-        )
-      })
-    } else {
-      withProgress(message = "Processing data...", value = 0.5, {
-        agg_system <- smart_aggregation_system(df)
-        aggregation_system(agg_system)
-        current_aggregation_level("auto")
-        current_drill_down_path(list())
-    
     showNotification("✅ Data processed successfully!", type = "message", duration = 3)
-      })
-    }
     
     df
   })
@@ -3662,9 +3262,6 @@ output$top10_dam_title <- renderText({
     }
   })
 
-  # Reactive value to store current drill-down state
-  current_family <- reactiveVal(NULL)
-  
   # Selected individual for visualization
   selected_individual <- reactiveVal(NULL)
   
@@ -4038,101 +3635,6 @@ output$top10_dam_title <- renderText({
     }
   })
   
-  # Reactive to determine visualization mode based on data size and user choice
-  actual_viz_mode <- reactive({
-    req(ped_data())
-    n_individuals <- nrow(ped_data())
-    
-    # Auto only (UI no longer selectable)
-    viz_level <- "auto"
-    
-    if (viz_level == "auto") {
-      if (n_individuals > 100) {
-        return("family")
-      } else {
-        return("individual")
-      }
-    } else if (viz_level == "family") {
-      return("family")
-    } else {
-      return("individual")
-    }
-  })
-  
-  # Update viz mode radio buttons based on data size (optional)
-  observe({
-    req(ped_data())
-    n_individuals <- nrow(ped_data())
-    
-    # Only suggest cluster mode for large datasets
-    if (n_individuals > 100) {
-      # Don't force change, just show info
-      showNotification(
-        paste0("💡 Tip: For ", format(n_individuals, big.mark = ","), 
-               " individuals, 'Family Clusters' mode may provide better performance"),
-        type = "message",
-        duration = 5
-      )
-    }
-  })
-  
-  # Show drill-down info
-  output$drill_down_info <- renderUI({
-    req(ped_data())
-    ped <- ped_data()
-    
-    # Check if ped_data returned NULL (due to column mapping errors)
-    if (is.null(ped)) {
-      return(div(class = "alert alert-danger", style = "padding: 8px; font-size: 0.85rem; margin-bottom: 10px;",
-                 strong("❌ Error: "), "Data processing failed. Please check column mapping."))
-    }
-    
-    # Check if required columns exist
-    if (!"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
-      return(div(class = "alert alert-danger", style = "padding: 8px; font-size: 0.85rem; margin-bottom: 10px;",
-                 strong("❌ Error: "), "Required columns (ID, Sire, Dam) not found in processed data."))
-    }
-    
-    n <- nrow(ped)
-    mode <- actual_viz_mode()
-    drilled <- current_family()
-    
-    if (!is.null(drilled) && grepl("^Family_", drilled)) {
-      # Drilling into specific family
-      family_num <- gsub("Family_", "", drilled)
-      
-      # Get member count for this family
-      edges_all <- bind_rows(
-        ped_data() %>% filter(!is.na(Sire)) %>% transmute(from = as.character(Sire), to = as.character(ID)),
-        ped_data() %>% filter(!is.na(Dam)) %>% transmute(from = as.character(Dam), to = as.character(ID))
-      )
-      
-      if (nrow(edges_all) > 0) {
-        g <- graph_from_data_frame(edges_all, directed = FALSE)
-        comp <- components(g, mode = "weak")
-        clusters <- tibble(ID = names(comp$membership), cluster = comp$membership)
-        
-        family_count <- sum(clusters$cluster == as.numeric(family_num))
-        
-        div(class = "alert alert-info", style = "padding: 8px; font-size: 0.85rem; margin-bottom: 10px;",
-            strong("📍 Drill-Down View: "), 
-            paste0("Family ", family_num, " (", family_count, " members)"))
-      } else {
-        div(class = "alert alert-info", style = "padding: 8px; font-size: 0.85rem; margin-bottom: 10px;",
-            strong("📍 Drill-Down View: "), paste0("Family ", family_num))
-      }
-    } else if (mode == "family") {
-      div(class = "alert alert-info", style = "padding: 8px; font-size: 0.85rem; margin-bottom: 10px;",
-          strong("👨‍👩‍👧‍👦 Family Clusters View: "), 
-          paste0(format(n, big.mark = ","), " individuals grouped into families based on parental relationships. "),
-          "Families are defined by siblings (same parents) and half-siblings (same sire or dam). ",
-          "Double-click any family node to drill down and see individual family members.")
-    } else {
-      div(class = "alert alert-success", style = "padding: 8px; font-size: 0.85rem; margin-bottom: 10px;",
-          strong("👤 Full Pedigree View: "), paste0("Showing all ", n, " individuals"))
-    }
-  })
-  
   # Data preview - highly optimized for large datasets, shows all data with inbreeding if available
   output$data_preview <- renderDT({
     req(ped_data())
@@ -4231,7 +3733,7 @@ output$top10_dam_title <- renderText({
       }
       return(dt)
     }
-  })
+  }, server = TRUE)
   
   # QC Report - comprehensive with all issue detection
   output$qc_report <- renderPrint({
