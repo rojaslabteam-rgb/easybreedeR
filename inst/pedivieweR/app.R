@@ -25,7 +25,10 @@ get_label_local <- function(key, lang = NULL) {
 }
 library(dplyr)
 library(DT)
-library(pedigreeTools)
+pedigreeTools_available <- requireNamespace("pedigreeTools", quietly = TRUE)
+if (pedigreeTools_available) {
+  library(pedigreeTools)
+}
 library(visNetwork)
 library(igraph)
 library(digest)
@@ -43,7 +46,11 @@ tryCatch({
     cat("✓ linkbreedeR available - will use fast inbupgf90 for inbreeding calculation\n")
   }
 }, error = function(e) {
-  cat("Note: linkbreedeR not available, will use pedigreeTools for inbreeding calculation\n")
+  if (pedigreeTools_available) {
+    cat("Note: linkbreedeR not available, will use pedigreeTools for inbreeding calculation\n")
+  } else {
+    cat("Note: linkbreedeR and pedigreeTools not available; inbreeding fallback is limited\n")
+  }
   use_linkbreedeR <- FALSE
 })
 
@@ -99,7 +106,11 @@ tryCatch({
       use_fast_inbreeding_cpp <- TRUE
       cat("✓ fast inbreeding C++ available - will use Rcpp method\n")
     } else {
-      cat("Note: fast_inbreeding_cpp not found, will use inbupgf90/pedigreeTools\n")
+      if (pedigreeTools_available) {
+        cat("Note: fast_inbreeding_cpp not found, will use inbupgf90/pedigreeTools\n")
+      } else {
+        cat("Note: fast_inbreeding_cpp not found, will use inbupgf90 if available\n")
+      }
     }
     if (exists("fast_top_contrib_cpp", mode = "function", envir = src_env, inherits = FALSE)) {
       cat("✓ fast_top_contrib_cpp available - will show Top 5 contributors\n")
@@ -4881,6 +4892,9 @@ output$top10_dam_title <- renderText({
             
             result <- result_fast
           } else {
+            if (!pedigreeTools_available) {
+              stop("pedigreeTools is not installed; cannot fall back from fast method. Please install pedigreeTools or enable inbupgf90.")
+            }
             # Fall back to pedigreeTools - need to do editPed and create ped_obj
             cat("Falling back to pedigreeTools method...\n")
             
@@ -5002,6 +5016,9 @@ output$top10_dam_title <- renderText({
             
             result <- result_fast
           } else {
+            if (!pedigreeTools_available) {
+              stop("pedigreeTools is not installed; cannot fall back from inbupgf90. Please install pedigreeTools.")
+            }
             # Fall back to pedigreeTools - need to do editPed and create ped_obj
             cat("Falling back to pedigreeTools method...\n")
             
@@ -5081,6 +5098,9 @@ output$top10_dam_title <- renderText({
             result <- tibble(ID = as.character(ped_clean$ID), F = f_vec)
           }
         } else {
+          if (!pedigreeTools_available) {
+            stop("pedigreeTools is not installed; cannot compute inbreeding with the fallback method.")
+          }
           # Use pedigreeTools method (original implementation)
           # Check for missing parent references (pedigreeTools requires them)
           if (length(missing_sires) > 0 || length(missing_dams) > 0) {
@@ -5935,6 +5955,9 @@ output$top10_dam_title <- renderText({
   # Advanced function using pedigreeTools for ancestor analysis
   get_relatives_with_pedigreeTools <- function(ped, individual_id, max_depth = 1) {
     if (is.null(individual_id) || is.na(individual_id)) return(character(0))
+    if (!pedigreeTools_available) {
+      return(get_all_relatives(ped, individual_id, max_depth))
+    }
     
     tryCatch({
       # Create pedigree object using pedigreeTools

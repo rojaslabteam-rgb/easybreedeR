@@ -1,10 +1,17 @@
 # Open BreedX (OBX) Clean Three-Panel Layout
-# Version: 0.4.0 (Fixed Language Settings)
-# Created: 2025-10-22
-# Last Modified: 2025-10-31
 
 suppressPackageStartupMessages({
   library(shiny)
+  library(bslib)
+  library(shinyjs)
+  library(dplyr)
+  library(DT)
+  library(data.table)
+  library(digest)
+  library(igraph)
+  library(plotly)
+  library(visNetwork)
+  library(Rcpp)
 })
 
 # Force-load shared Language.R early to ensure get_label/TRANSLATIONS are available
