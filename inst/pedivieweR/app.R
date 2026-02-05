@@ -851,19 +851,29 @@ output$app_subtitle_ui <- renderUI({
 
   output$sep_selector <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
-    radioButtons("sep", get_label_local("separator", lang),
-                 choices = c(Comma = ",", Tab = "\t", Space = " "),
-                 selected = ",", inline = TRUE)
+    div(
+      radioButtons("sep", get_label_local("separator", lang),
+                   choices = c(Comma = ",", Tab = "\t", Space = " "),
+                   selected = ",", inline = TRUE),
+      actionButton(
+        "clear_all",
+        "Clear All",
+        class = "btn btn-secondary btn-sm",
+        style = "margin: 6.5px auto 0; width: 245px; display: block;"
+      )
+    )
   })
 
   output$auto_process_checkbox <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
-    checkboxInput("auto_process", get_label_local("auto_process", lang), value = TRUE)
+    div(
+      style = "display: none;",
+      checkboxInput("auto_process", get_label_local("auto_process", lang), value = TRUE)
+    )
   })
 
   output$auto_process_help <- renderUI({
-    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
-    helpText(get_label_local("auto_process_help", lang))
+    NULL
   })
 
   output$column_mapping_title <- renderText({
@@ -2087,6 +2097,38 @@ output$top10_dam_title <- renderText({
     pending_data(NULL)
     qc_fix_summary(NULL)
     last_fix_summary(NULL)
+  })
+  
+  # Clear all data, caches, and inputs
+  observeEvent(input$clear_all, {
+    raw_data_storage(NULL)
+    f_values_cache(NULL)
+    f_values_cache_hash(NULL)
+    analysis_started(FALSE)
+    qc_issues(NULL)
+    pending_data(NULL)
+    qc_fix_summary(NULL)
+    last_fix_summary(NULL)
+    detected_cols(NULL)
+    saved_mapping(list(id = NULL, sire = NULL, dam = NULL, sex = NULL))
+    data_validation_status(list(valid = FALSE, errors = c(), warnings = c()))
+    selected_individual(NULL)
+    highlighted_individuals(character(0))
+    
+    cache_base_dir <- "pedigree_cache"
+    if (dir.exists(cache_base_dir)) {
+      unlink(cache_base_dir, recursive = TRUE, force = TRUE)
+    }
+    
+    shinyjs::reset("file")
+    updateTextInput(session, "individual_search", value = "")
+    updateSelectInput(session, "id_col", choices = character(0), selected = character(0))
+    updateSelectInput(session, "sire_col", choices = character(0), selected = character(0))
+    updateSelectInput(session, "dam_col", choices = character(0), selected = character(0))
+    updateSelectInput(session, "sex_col", choices = c("None" = ""), selected = "")
+    updateSelectInput(session, "birthdate_col", choices = c("None" = ""), selected = "")
+    
+    showNotification("Cleared all data and caches. You can upload a new file.", type = "message", duration = 4)
   })
   
   # Handle Start Analysis button click
@@ -4094,7 +4136,7 @@ output$top10_dam_title <- renderText({
     } else {
       cat("--- INBREEDING STATISTICS ---\n")
       cat("No inbreeding coefficients calculated.\n")
-      cat("Please run 'Calculate F Coefficients' to get inbreeding statistics.\n\n")
+      cat("Inbreeding coefficients are calculated automatically after data processing.\n\n")
     }
     
     # Longest ancestral path (LAP) - calculate depth distribution
@@ -5177,9 +5219,8 @@ output$top10_dam_title <- renderText({
     cached_f <- f_values_cache()
     if (is.null(cached_f) || nrow(cached_f) == 0) {
       return(div(class = "alert alert-info", style = "padding: 8px; font-size: 0.9rem;",
-                 "To view the trend, please run ",
-                 tags$strong("Calculate F Coefficients"),
-                 " first (right panel)."))
+                 "Inbreeding coefficients are calculated automatically after data processing.",
+                 " Please wait for completion."))
     }
     
     NULL
