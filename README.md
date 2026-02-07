@@ -143,7 +143,7 @@ Contributions are welcome! Please feel free to submit issues or pull requests.
 If you use easybreedeR in your research, please cite:
 
 ```
-HuangyiTang. rojaslabteam-rgb/easybreedeR: V0.5.1. v0.5.1, Zenodo, 26 Jan. 2026, https://doi.org/10.5281/zenodo.18381723.
+HuangyiTang, & Thy. (2026). rojaslabteam-rgb/easybreedeR: easybreedeR v0.6.0 (v0.6.0). Zenodo. https://doi.org/10.5281/zenodo.18499863
 ```
 
 ## Support
