@@ -263,6 +263,23 @@ ui <- page_fillable(
         margin-bottom: 20px;
         box-shadow: 0 2px 8px rgba(206, 184, 136, 0.15);
       }
+      /* Right panel tables: contain overflow, center and truncate long IDs with ellipsis */
+      .right-panel .panel-section .dataTables_wrapper {
+        overflow-x: auto;
+        max-width: 100%;
+      }
+      .right-panel .panel-section table.dataTable {
+        table-layout: fixed;
+        width: 100% !important;
+      }
+      .right-panel .panel-section table.dataTable th.dt-id-cell,
+      .right-panel .panel-section table.dataTable td.dt-id-cell {
+        max-width: 140px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        text-align: center;
+      }
       .section-title {
         font-size: 1.1rem;
         font-weight: 700;
@@ -5516,7 +5533,11 @@ output$top10_dam_title <- renderText({
     
     datatable(
       f_values() %>% arrange(desc(F)) %>% head(10),
-      options = list(pageLength = 10, dom = 't'),
+      options = list(
+        pageLength = 10,
+        dom = 't',
+        columnDefs = list(list(className = 'dt-id-cell', targets = 0))
+      ),
       rownames = FALSE
     ) %>% formatRound("F", 4)
   })
@@ -5610,7 +5631,15 @@ output$top10_dam_title <- renderText({
       return(datatable(data.frame(Message = "No sire data available"), options = list(dom = "t"), rownames = FALSE))
     }
     df_display <- df[, 1:2, drop = FALSE]
-    datatable(head(df_display, 10), options = list(pageLength = 10, dom = "t"), rownames = FALSE)
+    datatable(
+      head(df_display, 10),
+      options = list(
+        pageLength = 10,
+        dom = "t",
+        columnDefs = list(list(className = 'dt-id-cell', targets = 0))
+      ),
+      rownames = FALSE
+    )
   })
 
   output$dam_top_table <- renderDT({
@@ -5619,7 +5648,15 @@ output$top10_dam_title <- renderText({
       return(datatable(data.frame(Message = "No dam data available"), options = list(dom = "t"), rownames = FALSE))
     }
     df_display <- df[, 1:2, drop = FALSE]
-    datatable(head(df_display, 10), options = list(pageLength = 10, dom = "t"), rownames = FALSE)
+    datatable(
+      head(df_display, 10),
+      options = list(
+        pageLength = 10,
+        dom = "t",
+        columnDefs = list(list(className = 'dt-id-cell', targets = 0))
+      ),
+      rownames = FALSE
+    )
   })
 
   output$download_sire_descendants <- downloadHandler(
