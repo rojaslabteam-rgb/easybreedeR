@@ -225,10 +225,9 @@ run_easybreedeR_Studio <- function() {
           html_content <- gsub("^### (.+)$", "<h3>\\1</h3>", html_content, perl = TRUE)
           html_content <- gsub("`([^`]+)`", "<code>\\1</code>", html_content)
           html_content <- gsub("\\*\\*([^*]+)\\*\\*", "<strong>\\1</strong>", html_content)
-          # Fix relative links to point to GitHub
-          html_content <- gsub("\\[([^\\]]+)\\]\\(([^)]+)\\)", function(m) {
-            link_text <- gsub("\\[([^\\]]+)\\]\\(([^)]+)\\)", "\\1", m, perl = TRUE)
-            link_url <- gsub("\\[([^\\]]+)\\]\\(([^)]+)\\)", "\\2", m, perl = TRUE)
+          # Fix relative links to point to GitHub (use capture groups only to avoid
+          # Windows gsub passing closure as first arg and triggering as.character error)
+          html_content <- gsub("\\[([^\\]]+)\\]\\(([^)]+)\\)", function(ignore, link_text, link_url) {
             if (!grepl("^https?://", link_url)) {
               link_url <- paste0("https://github.com/rojaslabteam-rgb/easybreedeR/blob/main/", link_url)
             }
