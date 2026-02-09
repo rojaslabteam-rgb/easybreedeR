@@ -179,9 +179,9 @@ run_easybreedeR_Studio <- function() {
       # Try to fetch from GitHub
       readme_text <- try({
         if (requireNamespace("curl", quietly = TRUE)) {
-          con <- curl::curl(readme_url)
-          on.exit(close(con), add = TRUE)
-          readLines(con, warn = FALSE, encoding = "UTF-8")
+          readme_con <- curl::curl(readme_url)
+          on.exit(close(readme_con), add = TRUE)
+          readLines(readme_con, warn = FALSE, encoding = "UTF-8")
         } else if (requireNamespace("httr", quietly = TRUE)) {
           response <- httr::GET(readme_url)
           if (httr::status_code(response) == 200) {
