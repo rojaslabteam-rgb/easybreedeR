@@ -352,17 +352,8 @@ ui <- page_fillable(
   ),
   
   # Toggle buttons
-  div(id = "toggleLeftBtn", class = "toggle-btn-left",
-      actionButton("toggleLeftPanel", HTML("&#10094;"),
-                   class = "btn btn-sm",
-                   title = "Show/Hide Data Controls")
-  ),
-  
-  div(id = "toggleRightBtn", class = "toggle-btn-right",
-      actionButton("toggleRightPanel", HTML("&#10095;"),
-                   class = "btn btn-sm",
-                   title = "Show/Hide Analysis")
-  ),
+  uiOutput("toggle_left_btn"),
+  uiOutput("toggle_right_btn"),
   
   # Three-panel layout
   div(class = "three-panel-container",
@@ -398,8 +389,7 @@ ui <- page_fillable(
               ),
               conditionalPanel(
                 condition = "input.auto_process",
-                div(class = "alert alert-info mt-2", style = "padding: 8px; font-size: 0.9rem;",
-                    "🔄 Auto-processing enabled - Data will be processed automatically when validation passes")
+                uiOutput("auto_processing_enabled_msg")
               )
           ),
           
@@ -519,7 +509,7 @@ ui <- page_fillable(
               )
             ),
             nav_panel(
-              "Inbreeding Trend",
+              textOutput("tab_inb_trend_title"),
               value = "inb_trend",
               div(style = "margin-top: 10px;",
                   uiOutput("inb_trend_controls"),
@@ -596,12 +586,11 @@ ui <- page_fillable(
               uiOutput("inbreeding_analysis_title"),
               conditionalPanel(
                 condition = "!input.auto_process",
-                actionButton("calc_f", "Calculate F Coefficients", class = "btn-primary w-100")
+                uiOutput("calc_f_btn")
               ),
               conditionalPanel(
                 condition = "input.auto_process",
-                div(class = "alert alert-success", style = "padding: 8px; font-size: 0.9rem; margin-bottom: 10px;",
-                    "✓ Auto-calculation enabled")
+                uiOutput("auto_calc_enabled_msg")
               ),
               # Progress bar for inbreeding calculation
               uiOutput("f_calculation_progress"),
@@ -614,11 +603,11 @@ ui <- page_fillable(
               hr(),
               h5(textOutput("top10_sire_title"), style = "font-size: 0.95rem; font-weight: 600;"),
               DTOutput("sire_top_table"),
-              downloadButton("download_sire_descendants", "Download All Sires", class = "btn-sm btn-secondary mt-2 w-100"),
+              uiOutput("download_sire_btn"),
               hr(),
               h5(textOutput("top10_dam_title"), style = "font-size: 0.95rem; font-weight: 600;"),
               DTOutput("dam_top_table"),
-              downloadButton("download_dam_descendants", "Download All Dams", class = "btn-sm btn-secondary mt-2 w-100")
+              uiOutput("download_dam_btn")
           ),
           
           div(class = "panel-section",
@@ -922,7 +911,7 @@ output$app_subtitle_ui <- renderUI({
                    selected = ",", inline = TRUE),
       actionButton(
         "clear_all",
-        "Clear All",
+        get_label_local("clear_all", lang),
         class = "btn btn-secondary btn-sm",
         style = "margin: 6.5px auto 0; width: 245px; display: block;"
       )
@@ -953,14 +942,19 @@ output$app_subtitle_ui <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
     div(
       style = "margin-top: 15px;",
-      actionButton("start_analysis", "🚀 Start Analysis", 
+      actionButton("start_analysis", get_label_local("start_analysis", lang),
                    class = "btn-primary w-100", 
                    style = "font-weight: bold;"),
       tags$small(
-        "Click to begin processing and analyzing the pedigree data after selecting column mappings.",
+        get_label_local("start_analysis_help", lang),
         style = "display: block; margin-top: 8px; color: #666; font-style: italic;"
       )
     )
+  })
+  output$auto_processing_enabled_msg <- renderUI({
+    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+    div(class = "alert alert-info mt-2", style = "padding: 8px; font-size: 0.9rem;",
+        get_label_local("auto_processing_enabled", lang))
   })
 
   output$process_data_button <- renderUI({
@@ -1022,11 +1016,13 @@ output$app_subtitle_ui <- renderUI({
   })
 
 output$top10_sire_title <- renderText({
-  "Top 10 Most Influential Sires"
+  lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+  get_label_local("top10_sire", lang)
 })
 
 output$top10_dam_title <- renderText({
-  "Top 10 Most Influential Dams"
+  lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+  get_label_local("top10_dam", lang)
 })
 
   output$download_all_f_button <- renderUI({
@@ -7042,6 +7038,24 @@ output$top10_dam_title <- renderText({
   # This helps prevent state conflicts when switching tabs or during rapid updates
   outputOptions(output, "pedigree_network", suspendWhenHidden = TRUE, priority = 5)
 
+  # Toggle button titles (localized)
+  output$toggle_left_btn <- renderUI({
+    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+    div(id = "toggleLeftBtn", class = "toggle-btn-left",
+        actionButton("toggleLeftPanel", HTML("&#10094;"),
+                     class = "btn btn-sm",
+                     title = get_label_local("show_hide_data_controls", lang))
+    )
+  })
+  output$toggle_right_btn <- renderUI({
+    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+    div(id = "toggleRightBtn", class = "toggle-btn-right",
+        actionButton("toggleRightPanel", HTML("&#10095;"),
+                     class = "btn btn-sm",
+                     title = get_label_local("show_hide_analysis", lang))
+    )
+  })
+
   # Dynamic localized titles for three-panel UI and tabs
   output$left_upload_title <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
@@ -7058,6 +7072,24 @@ output$top10_dam_title <- renderText({
     h4(get_label_local("inbreeding_analysis", lang), class = "section-title")
   })
 
+  output$calc_f_btn <- renderUI({
+    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+    actionButton("calc_f", get_label_local("calculate_f_coefficients", lang), class = "btn-primary w-100")
+  })
+  output$auto_calc_enabled_msg <- renderUI({
+    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+    div(class = "alert alert-success", style = "padding: 8px; font-size: 0.9rem; margin-bottom: 10px;",
+        get_label_local("auto_calculation_enabled", lang))
+  })
+  output$download_sire_btn <- renderUI({
+    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+    downloadButton("download_sire_descendants", get_label_local("download_all_sires", lang), class = "btn-sm btn-secondary mt-2 w-100")
+  })
+  output$download_dam_btn <- renderUI({
+    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+    downloadButton("download_dam_descendants", get_label_local("download_all_dams", lang), class = "btn-sm btn-secondary mt-2 w-100")
+  })
+
   output$tab_network_title <- renderText({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
     get_label_local("tab_network", lang)
@@ -7072,9 +7104,15 @@ output$top10_dam_title <- renderText({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
     get_label_local("tab_qc_report", lang)
   })
+
+  output$tab_inb_trend_title <- renderText({
+    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+    get_label_local("inbreeding_trend", lang)
+  })
   
   output$tab_structure_title <- renderText({
-    "Pedigree Structure"
+    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+    get_label_local("pedigree_structure", lang)
   })
 }
 

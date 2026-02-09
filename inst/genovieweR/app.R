@@ -26,9 +26,9 @@ if (requireNamespace("cowplot", quietly = TRUE)) {
 # Source shared language helpers (if available)
 try(source(normalizePath(file.path("..", "Language.R"), winslash = "/", mustWork = FALSE), local = TRUE), silent = TRUE)
 
-# Local wrapper to prefix translation keys for this app
+# Local wrapper to prefix translation keys for this app (matches Language.R genoviewer_* keys)
 get_label_local <- function(key, lang = NULL) {
-  prefixed <- if (startsWith(key, "genovieweR_")) key else paste0("genovieweR_", key)
+  prefixed <- if (startsWith(key, "genoviewer_")) key else paste0("genoviewer_", key)
   if (exists("get_label", mode = "function")) {
     get_label(prefixed, lang)
   } else {
@@ -276,24 +276,11 @@ ui <- page_fillable(
     "))
   ),
   
-  # Title Bar
-  div(class = "title-bar",
-      h1("genovieweR"),
-      p("Genotype Viewer and Quality Control")
-  ),
-  
-  # Floating toggle handles
-  div(id = "toggleLeftBtn", class = "toggle-btn-left",
-      actionButton("toggleLeftPanel", HTML("&#10094;"),
-                  class = "btn btn-sm",
-                  title = "Show/Hide Controls")
-  ),
-  
-  div(id = "toggleRightBtn", class = "toggle-btn-right",
-      actionButton("toggleRightPanel", HTML("&#10095;"),
-                  class = "btn btn-sm",
-                  title = "Show/Hide Settings")
-  ),
+  # Title Bar (localized)
+  uiOutput("title_bar"),
+  # Floating toggle handles (localized)
+  uiOutput("toggle_left_btn"),
+  uiOutput("toggle_right_btn"),
   
   # Three-panel layout container
   div(class = "three-panel-container",
@@ -301,10 +288,11 @@ ui <- page_fillable(
       # LEFT PANEL - Controls
       div(id = "leftPanel", class = "left-panel",
           
-          # File Upload Section
+          # File Upload Section (localized)
           div(class = "panel-section",
-              h4("Data Upload", class = "section-title"),
-              selectInput("geno_format", "Genotype Format",
+              uiOutput("data_upload_title"),
+              uiOutput("geno_format_label"),
+              selectInput("geno_format", NULL,
                          choices = list(
                            "PLINK (.ped/.map)" = "plink_ped",
                            "PLINK (.bed/.bim/.fam)" = "plink_bed",
@@ -425,20 +413,16 @@ ui <- page_fillable(
               
               br(),
               div(style = "margin-top: 15px;",
-                  actionButton("show_summary", "📊 Show Summary & Plots", 
-                             class = "btn btn-primary", 
-                             style = "width: 100%; font-weight: 600;"),
-                  helpText(style = "margin-top: 8px; font-size: 0.85rem; color: #666; text-align: center;",
-                          "Generate basic visualizations from loaded data")
+                  uiOutput("show_summary_btn"),
+                  uiOutput("show_summary_help")
               ),
               br()
           ),
           
-          # QC Options Section (for quality control only)
+          # QC Options Section (for quality control only, localized)
           div(class = "panel-section",
-              h4("Quality Control", class = "section-title"),
-              p(style = "font-size: 0.9rem; color: #666; margin-bottom: 15px;",
-                "Set quality control thresholds and filter the data."),
+              uiOutput("qc_section_title"),
+              uiOutput("qc_intro_text"),
               numericInput("geno_threshold", "--geno (SNP missing rate)", value = 0.1, min = 0, max = 1, step = 0.01),
               p(style = "font-size: 0.8rem; color: #888; margin-top: -10px; margin-bottom: 10px;",
                 "Exclude SNPs with missing rate > threshold"),
@@ -452,7 +436,7 @@ ui <- page_fillable(
               p(style = "font-size: 0.8rem; color: #888; margin-top: -10px; margin-bottom: 10px;",
                 "Exclude SNPs with HWE p-value < threshold"),
               br(),
-              actionButton("run_qc", "🔍 Run Quality Control", class = "btn btn-primary", style = "width: 100%; font-weight: 600;")
+              uiOutput("run_qc_btn")
           )
       ),
       
@@ -461,7 +445,7 @@ ui <- page_fillable(
           navset_card_tab(
             id = "mainTabs",
             nav_panel(
-              "Data Preview",
+              textOutput("tab_data_preview_title"),
               value = "preview",
               div(style = "margin-top: 20px;",
                   h4("Genotype Data Summary"),
@@ -640,17 +624,81 @@ server <- function(input, output, session) {
   geno_data <- reactiveVal(NULL)
   qc_results <- reactiveVal(NULL)
   
-  # Get current language (for future multilingual support)
-  # current_lang <- reactive({
-  #   tryCatch({
-  #     if (exists("resolve_suite_lang", mode = "function")) {
-  #       resolved <- resolve_suite_lang(session, default = "en")
-  #       map_suite_lang_for_app(resolved, app = "genovieweR")
-  #     } else {
-  #       "en"
-  #     }
-  #   }, error = function(e) "en")
-  # })
+  # Current language for localized UI
+  current_lang <- reactive({
+    tryCatch({
+      if (exists("resolve_suite_lang", mode = "function")) {
+        resolved <- resolve_suite_lang(session, default = "en")
+        if (exists("map_suite_lang_for_app", mode = "function")) {
+          map_suite_lang_for_app(resolved, app = "genoviewer")
+        } else {
+          tolower(trimws(as.character(resolved)))
+        }
+      } else {
+        "en"
+      }
+    }, error = function(e) "en")
+  })
+
+  # Localized title bar and toggles
+  output$title_bar <- renderUI({
+    lang <- current_lang()
+    div(class = "title-bar",
+        h1(get_label_local("app_name", lang)),
+        p(get_label_local("app_subtitle", lang))
+    )
+  })
+  output$toggle_left_btn <- renderUI({
+    lang <- current_lang()
+    div(id = "toggleLeftBtn", class = "toggle-btn-left",
+        actionButton("toggleLeftPanel", HTML("&#10094;"),
+                    class = "btn btn-sm",
+                    title = get_label_local("show_hide_controls", lang))
+    )
+  })
+  output$toggle_right_btn <- renderUI({
+    lang <- current_lang()
+    div(id = "toggleRightBtn", class = "toggle-btn-right",
+        actionButton("toggleRightPanel", HTML("&#10095;"),
+                    class = "btn btn-sm",
+                    title = get_label_local("show_hide_settings", lang))
+    )
+  })
+  output$data_upload_title <- renderUI({
+    lang <- current_lang()
+    h4(get_label_local("data_upload", lang), class = "section-title")
+  })
+  output$geno_format_label <- renderUI({
+    lang <- current_lang()
+    tags$label(get_label_local("genotype_format", lang), class = "control-label", `for` = "geno_format")
+  })
+  output$tab_data_preview_title <- renderText({
+    lang <- current_lang()
+    get_label_local("data_preview", lang)
+  })
+  output$show_summary_btn <- renderUI({
+    lang <- current_lang()
+    actionButton("show_summary", get_label_local("show_summary_plots", lang),
+                 class = "btn btn-primary", style = "width: 100%; font-weight: 600;")
+  })
+  output$show_summary_help <- renderUI({
+    lang <- current_lang()
+    helpText(style = "margin-top: 8px; font-size: 0.85rem; color: #666; text-align: center;",
+             get_label_local("show_summary_help", lang))
+  })
+  output$qc_section_title <- renderUI({
+    lang <- current_lang()
+    h4(get_label_local("quality_control", lang), class = "section-title")
+  })
+  output$qc_intro_text <- renderUI({
+    lang <- current_lang()
+    p(style = "font-size: 0.9rem; color: #666; margin-bottom: 15px;",
+      get_label_local("qc_intro", lang))
+  })
+  output$run_qc_btn <- renderUI({
+    lang <- current_lang()
+    actionButton("run_qc", get_label_local("run_qc", lang), class = "btn btn-primary", style = "width: 100%; font-weight: 600;")
+  })
   
   # Clear data and reset file inputs when format changes
   observeEvent(input$geno_format, {

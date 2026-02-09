@@ -170,6 +170,184 @@ run_easybreedeR_Studio <- function() {
       code <- tryCatch(language_code(lang), error = function(e) "en")
       shiny::tags$span(suite_safe_get_label("rnotebook_app_name", code))
     })
+
+    # Home page cards and sections (multi-language)
+    output$home_page_content <- shiny::renderUI({
+      lang <- suite_language()
+      code <- tryCatch(language_code(lang), error = function(e) "en")
+      l <- function(key) suite_safe_get_label(key, code)
+      shiny::tagList(
+        div(class = "cards-container",
+          div(class = "section-title",
+            shiny::h2(
+              shiny::tags$span(class = "material-symbols-outlined", "apps"),
+              l("suite_interactive_modules")
+            )
+          ),
+          shiny::fluidRow(
+            shiny::column(3,
+              div(class = "app-card",
+                div(class = "app-card-header",
+                  div(class = "app-card-icon blue",
+                    shiny::tags$span(class = "material-symbols-outlined blue", "bar_chart")
+                  ),
+                  div(class = "app-card-title-wrapper",
+                    shiny::h3(l("dataviewer_app_name")),
+                    shiny::p(l("suite_dataviewer_desc"))
+                  )
+                ),
+                shiny::actionButton("open_dataviewR", l("suite_launch"), class = "btn-primary")
+              )
+            ),
+            shiny::column(3,
+              div(class = "app-card",
+                div(class = "app-card-header",
+                  div(class = "app-card-icon green",
+                    shiny::tags$span(class = "material-symbols-outlined green", "account_tree")
+                  ),
+                  div(class = "app-card-title-wrapper",
+                    shiny::h3(l("pediviewer_app_name")),
+                    shiny::p(l("suite_pediviewer_desc"))
+                  )
+                ),
+                shiny::actionButton("open_pediviewer", l("suite_launch"), class = "btn-primary")
+              )
+            ),
+            shiny::column(3,
+              div(class = "app-card",
+                div(class = "app-card-header",
+                  div(class = "app-card-icon orange",
+                    shiny::tags$span(class = "material-symbols-outlined orange", "scatter_plot")
+                  ),
+                  div(class = "app-card-title-wrapper",
+                    shiny::h3(l("genoviewer_app_name")),
+                    shiny::p(l("suite_genoviewer_desc"))
+                  )
+                ),
+                shiny::actionButton("open_genoviewer", l("suite_launch"), class = "btn-primary")
+              )
+            ),
+            shiny::column(3,
+              div(class = "app-card",
+                div(class = "app-card-header",
+                  div(class = "app-card-icon red",
+                    shiny::tags$span(class = "material-symbols-outlined red", "show_chart")
+                  ),
+                  div(class = "app-card-title-wrapper",
+                    shiny::h3(l("easyblup_app_name")),
+                    shiny::p(l("suite_easyblup_desc"))
+                  )
+                ),
+                shiny::actionButton("open_easyblup", l("suite_launch"), class = "btn-primary")
+              )
+            )
+          ),
+          shiny::fluidRow(
+            shiny::column(3,
+              div(class = "app-card",
+                div(class = "app-card-header",
+                  div(class = "app-card-icon yellow",
+                    shiny::tags$span(class = "material-symbols-outlined yellow", "bolt")
+                  ),
+                  div(class = "app-card-title-wrapper",
+                    shiny::h3(l("rcw_app_name")),
+                    shiny::p(l("suite_rcw_card_desc"))
+                  )
+                ),
+                shiny::actionButton("open_rnotebook", l("suite_launch"), class = "btn-primary")
+              )
+            )
+          ),
+          div(class = "section-title", style = "margin-top: 48px;",
+            shiny::h2(
+              shiny::tags$span(class = "material-symbols-outlined", "extension"),
+              l("suite_optional_dependencies")
+            )
+          ),
+          shiny::fluidRow(
+            shiny::column(6,
+              div(class = "app-card dependency-card",
+                div(class = "app-card-header",
+                  div(class = "app-card-icon purple",
+                    shiny::tags$span(class = "material-symbols-outlined purple", "code")
+                  ),
+                  div(class = "app-card-title-wrapper",
+                    shiny::h3("plinkR"),
+                    shiny::p(l("suite_plinkr_desc"))
+                  )
+                ),
+                shiny::tags$a(
+                  href = "https://github.com/Thymine2001/plinkR",
+                  target = "_blank",
+                  class = "btn btn-primary",
+                  style = "width: 100%; padding: 14px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; text-decoration: none; display: block; text-align: center;",
+                  l("suite_view_on_github")
+                )
+              )
+            ),
+            shiny::column(6,
+              div(class = "app-card dependency-card",
+                div(class = "app-card-header",
+                  div(class = "app-card-icon teal",
+                    shiny::tags$span(class = "material-symbols-outlined teal", "settings")
+                  ),
+                  div(class = "app-card-title-wrapper",
+                    shiny::h3("linkbreedeR"),
+                    shiny::p(l("suite_linkbreedeR_desc"))
+                  )
+                ),
+                shiny::tags$a(
+                  href = "https://github.com/Thymine2001/linkbreedeR",
+                  target = "_blank",
+                  class = "btn btn-primary",
+                  style = "width: 100%; padding: 14px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; text-decoration: none; display: block; text-align: center;",
+                  l("suite_view_on_github")
+                )
+              )
+            )
+          ),
+          div(class = "section-title", style = "margin-top: 48px;",
+            shiny::h2(
+              shiny::tags$span(class = "material-symbols-outlined", "library_books"),
+              l("suite_required_dependencies")
+            )
+          ),
+          shiny::fluidRow(
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/rstudio/shiny", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "shiny")))),
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/rstudio/bslib", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "bslib")))),
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/rstudio/DT", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "DT")))),
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/jeroen/jsonlite", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "jsonlite"))))
+          ),
+          shiny::fluidRow(
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/ropensci/plotly", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "plotly")))),
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/thomasp85/shinyFiles", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "shinyFiles")))),
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/r-lib/fs", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "fs")))),
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/datastorm-open/visNetwork", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "visNetwork"))))
+          ),
+          shiny::fluidRow(
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/igraph/igraph", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "igraph")))),
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/tidyverse/readxl", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "readxl")))),
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/rstudio/reticulate", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "reticulate")))),
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/irudnyts/openai", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "openai"))))
+          ),
+          shiny::fluidRow(
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/jeroen/curl", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "curl")))),
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/r-lib/testthat", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "testthat")))),
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/Rpedigree/pedigreeTools", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "pedigreeTools"))))
+          ),
+          div(class = "section-title", style = "margin-top: 48px;",
+            shiny::h2(
+              shiny::tags$span(class = "material-symbols-outlined", "computer"),
+              l("suite_related_software")
+            )
+          ),
+          shiny::fluidRow(
+            shiny::column(6, div(class = "dependency-item", shiny::tags$a(href = "https://www.cog-genomics.org/plink/", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "PLINK")))),
+            shiny::column(6, div(class = "dependency-item", shiny::tags$a(href = "http://nce.ads.uga.edu/wiki/doku.php?id=readme.blupf90", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "BLUPF90"))))
+          )
+        )
+      )
+    })
     
     # Render README content from GitHub
     output$readmeContent <- shiny::renderUI({

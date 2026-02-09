@@ -77,6 +77,72 @@ TRANSLATIONS <- list(
     zh = "启动工具来探索数据、检查系谱、创建BLUP参数卡 或打开笔记本。",
     pt = "Inicie uma ferramenta para explorar dados, verificar pedigrees, executar BLUP/REML ou abrir notebooks."
   ),
+  # Suite Home: section titles and module/dependency labels
+  suite_interactive_modules = list(
+    en = "Interactive Modules",
+    zh = "交互模块",
+    pt = "Módulos Interativos"
+  ),
+  suite_dataviewer_desc = list(
+    en = "Interactive data exploration and visualization",
+    zh = "交互式数据探索与可视化",
+    pt = "Exploração e visualização interativa de dados"
+  ),
+  suite_pediviewer_desc = list(
+    en = "Pedigree viewer, pedigree quality control, inbreeding analysis, interactive visualization",
+    zh = "系谱查看、系谱质控、近交分析与交互可视化",
+    pt = "Visualizador de pedigree, controle de qualidade, análise de endogamia e visualização interativa"
+  ),
+  suite_genoviewer_desc = list(
+    en = "Genotype visualization and analysis",
+    zh = "基因型可视化与分析",
+    pt = "Visualização e análise de genótipos"
+  ),
+  suite_easyblup_desc = list(
+    en = "BLUPF90 parameter cards generator, genotype format conversion",
+    zh = "BLUPF90 参数卡生成与基因型格式转换",
+    pt = "Gerador de parâmetros BLUPF90 e conversão de formato de genótipos"
+  ),
+  suite_rcw_card_desc = list(
+    en = "R script pipeline management, visual R script pipeline management",
+    zh = "R 脚本流程管理与可视化流程管理",
+    pt = "Gerenciamento de pipeline de scripts R e pipeline visual"
+  ),
+  suite_launch = list(
+    en = "Launch",
+    zh = "启动",
+    pt = "Iniciar"
+  ),
+  suite_optional_dependencies = list(
+    en = "Optional Dependencies",
+    zh = "可选依赖",
+    pt = "Dependências Opcionais"
+  ),
+  suite_plinkr_desc = list(
+    en = "R wrapper for PLINK/PLINK2 with automatic output capture, genotype reading, and BLUPF90 format conversion",
+    zh = "PLINK/PLINK2 的 R 封装，支持自动输出捕获、基因型读取与 BLUPF90 格式转换",
+    pt = "Pacote R para PLINK/PLINK2 com captura de saída, leitura de genótipos e conversão para BLUPF90"
+  ),
+  suite_linkbreedeR_desc = list(
+    en = "R package for running genetic analysis tools (BLUPF90+, PLINK, RENUMF90) directly from R",
+    zh = "在 R 中直接运行遗传分析工具（BLUPF90+、PLINK、RENUMF90）的 R 包",
+    pt = "Pacote R para executar ferramentas de análise genética (BLUPF90+, PLINK, RENUMF90) diretamente no R"
+  ),
+  suite_view_on_github = list(
+    en = "View on GitHub",
+    zh = "在 GitHub 上查看",
+    pt = "Ver no GitHub"
+  ),
+  suite_required_dependencies = list(
+    en = "Required Dependencies",
+    zh = "必需依赖",
+    pt = "Dependências Obrigatórias"
+  ),
+  suite_related_software = list(
+    en = "Related Software",
+    zh = "相关软件",
+    pt = "Software Relacionado"
+  ),
   
   # === datavieweR ===
   dataviewer_app_title = list(
@@ -103,6 +169,86 @@ TRANSLATIONS <- list(
     en = "genovieweR",
     zh = "genovieweR",
     pt = "genovieweR"
+  ),
+  genoviewer_app_subtitle = list(
+    en = "Genotype Viewer and Quality Control",
+    zh = "基因型查看与质量控制",
+    pt = "Visualizador de Genótipos e Controle de Qualidade"
+  ),
+  genoviewer_show_hide_controls = list(
+    en = "Show/Hide Controls",
+    zh = "显示/隐藏控制",
+    pt = "Mostrar/Ocultar Controles"
+  ),
+  genoviewer_show_hide_settings = list(
+    en = "Show/Hide Settings",
+    zh = "显示/隐藏设置",
+    pt = "Mostrar/Ocultar Configurações"
+  ),
+  genoviewer_data_upload = list(
+    en = "Data Upload",
+    zh = "数据上传",
+    pt = "Upload de Dados"
+  ),
+  genoviewer_genotype_format = list(
+    en = "Genotype Format",
+    zh = "基因型格式",
+    pt = "Formato de Genótipo"
+  ),
+  genoviewer_chromosome = list(
+    en = "Chromosome",
+    zh = "染色体",
+    pt = "Cromossomo"
+  ),
+  genoviewer_chromosome_help = list(
+    en = "Maximum chromosome number to include (1 to selected number). Only chromosomes 1 to selected number will be included in analysis",
+    zh = "包含的最大染色体编号（1 到所选数字）。仅 1 到所选编号的染色体会参与分析",
+    pt = "Número máximo de cromossomos a incluir (1 ao número selecionado). Apenas cromossomos 1 ao selecionado serão incluídos na análise"
+  ),
+  genoviewer_show_summary_plots = list(
+    en = "📊 Show Summary & Plots",
+    zh = "📊 显示摘要与图表",
+    pt = "📊 Mostrar Resumo e Gráficos"
+  ),
+  genoviewer_show_summary_help = list(
+    en = "Generate basic visualizations from loaded data",
+    zh = "根据加载的数据生成基本可视化",
+    pt = "Gerar visualizações básicas a partir dos dados carregados"
+  ),
+  genoviewer_quality_control = list(
+    en = "Quality Control",
+    zh = "质量控制",
+    pt = "Controle de Qualidade"
+  ),
+  genoviewer_qc_intro = list(
+    en = "Set quality control thresholds and filter the data.",
+    zh = "设置质控阈值并筛选数据。",
+    pt = "Defina os limites de controle de qualidade e filtre os dados."
+  ),
+  genoviewer_run_qc = list(
+    en = "🔍 Run Quality Control",
+    zh = "🔍 运行质量控制",
+    pt = "🔍 Executar Controle de Qualidade"
+  ),
+  genoviewer_data_preview = list(
+    en = "Data Preview",
+    zh = "数据预览",
+    pt = "Pré-visualização de Dados"
+  ),
+  genoviewer_genotype_data_summary = list(
+    en = "Genotype Data Summary",
+    zh = "基因型数据摘要",
+    pt = "Resumo dos Dados de Genótipo"
+  ),
+  genoviewer_browse = list(
+    en = "Browse...",
+    zh = "浏览...",
+    pt = "Procurar..."
+  ),
+  genoviewer_no_file_selected = list(
+    en = "No file selected",
+    zh = "未选择文件",
+    pt = "Nenhum arquivo selecionado"
   ),
   pediviewer_tab_network = list(
     en = "Network Visualization",
@@ -268,6 +414,126 @@ TRANSLATIONS <- list(
     en = "Show Labels",
     zh = "显示标签",
     pt = "Mostrar Rótulos"
+  ),
+  pediviewer_show_hide_data_controls = list(
+    en = "Show/Hide Data Controls",
+    zh = "显示/隐藏数据控制",
+    pt = "Mostrar/Ocultar Controles de Dados"
+  ),
+  pediviewer_show_hide_analysis = list(
+    en = "Show/Hide Analysis",
+    zh = "显示/隐藏分析",
+    pt = "Mostrar/Ocultar Análise"
+  ),
+  pediviewer_calculate_f_coefficients = list(
+    en = "Calculate F Coefficients",
+    zh = "计算 F 系数",
+    pt = "Calcular Coeficientes F"
+  ),
+  pediviewer_auto_calculation_enabled = list(
+    en = "✓ Auto-calculation enabled",
+    zh = "✓ 已启用自动计算",
+    pt = "✓ Cálculo automático ativado"
+  ),
+  pediviewer_auto_processing_enabled = list(
+    en = "🔄 Auto-processing enabled - Data will be processed automatically when validation passes",
+    zh = "🔄 已启用自动处理 - 验证通过后将自动处理数据",
+    pt = "🔄 Processamento automático ativado - Os dados serão processados automaticamente quando a validação passar"
+  ),
+  pediviewer_download_pedigree_with_inbreeding = list(
+    en = "📥 Download pedigree with inbreeding",
+    zh = "📥 下载含近交系数的系谱",
+    pt = "📥 Baixar pedigree com endogamia"
+  ),
+  pediviewer_format_label = list(
+    en = "Format:",
+    zh = "格式：",
+    pt = "Formato:"
+  ),
+  pediviewer_log_format = list(
+    en = "Log",
+    zh = "日志",
+    pt = "Log"
+  ),
+  pediviewer_table_format = list(
+    en = "Table",
+    zh = "表格",
+    pt = "Tabela"
+  ),
+  pediviewer_download_qc_report = list(
+    en = "📥 Download QC Report",
+    zh = "📥 下载质控报告",
+    pt = "📥 Baixar Relatório de QC"
+  ),
+  pediviewer_download_fixed_pedigree = list(
+    en = "📥 Download Fixed Pedigree",
+    zh = "📥 下载修复后的系谱",
+    pt = "📥 Baixar Pedigree Corrigido"
+  ),
+  pediviewer_download_structure_report = list(
+    en = "📥 Download Structure Report",
+    zh = "📥 下载结构报告",
+    pt = "📥 Baixar Relatório de Estrutura"
+  ),
+  pediviewer_pedigree_structure = list(
+    en = "Pedigree Structure",
+    zh = "系谱结构",
+    pt = "Estrutura do Pedigree"
+  ),
+  pediviewer_inbreeding_trend = list(
+    en = "Inbreeding Trend",
+    zh = "近交趋势",
+    pt = "Tendência de Endogamia"
+  ),
+  pediviewer_download_all_sires = list(
+    en = "Download All Sires",
+    zh = "下载全部父系",
+    pt = "Baixar Todos os Pais"
+  ),
+  pediviewer_download_all_dams = list(
+    en = "Download All Dams",
+    zh = "下载全部母系",
+    pt = "Baixar Todas as Mães"
+  ),
+  pediviewer_download_relatives = list(
+    en = "Download Relatives",
+    zh = "下载亲属",
+    pt = "Baixar Parentes"
+  ),
+  pediviewer_clear_all = list(
+    en = "Clear All",
+    zh = "清空全部",
+    pt = "Limpar Tudo"
+  ),
+  pediviewer_start_analysis = list(
+    en = "🚀 Start Analysis",
+    zh = "🚀 开始分析",
+    pt = "🚀 Iniciar Análise"
+  ),
+  pediviewer_start_analysis_help = list(
+    en = "Click to begin processing and analyzing the pedigree data after selecting column mappings.",
+    zh = "选择列映射后点击开始处理并分析系谱数据。",
+    pt = "Clique para iniciar o processamento e análise dos dados do pedigree após selecionar o mapeamento de colunas."
+  ),
+  pediviewer_highlight_generations = list(
+    en = "🔍 Highlight Generations:",
+    zh = "🔍 高亮世代：",
+    pt = "🔍 Destacar Gerações:"
+  ),
+  pediviewer_top10_sire = list(
+    en = "Top 10 Most Influential Sires",
+    zh = "影响力最大的前10父系",
+    pt = "Top 10 Pais Mais Influentes"
+  ),
+  pediviewer_top10_dam = list(
+    en = "Top 10 Most Influential Dams",
+    zh = "影响力最大的前10母系",
+    pt = "Top 10 Mães Mais Influentes"
+  ),
+  pediviewer_animal_label = list(
+    en = "🐾 Animal:",
+    zh = "🐾 个体：",
+    pt = "🐾 Animal:"
   ),
   rcw_app_name = list(
     en = "R Canvas Workflow",

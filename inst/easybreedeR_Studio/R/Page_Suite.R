@@ -5,349 +5,28 @@ Home_UI <- function() {
       uiOutput("hero_content"),
       div(class = "container",
         div(class = "main-content-wrapper",
-          div(class = "cards-container",
-            div(class = "section-title",
-              h2(
-                tags$span(class = "material-symbols-outlined", "apps"),
-                "Interactive Modules"
-              )
-            ),
-            fluidRow(
-              column(3,
-                div(class = "app-card",
-                  div(class = "app-card-header",
-                    div(class = "app-card-icon blue",
-                      tags$span(class = "material-symbols-outlined blue", "bar_chart")
-                    ),
-                    div(class = "app-card-title-wrapper",
-                      h3("datavieweR"),
-                      p("Interactive data exploration and visualization")
-                    )
-                  ),
-                  actionButton("open_dataviewR", "Launch", class = "btn-primary")
-                )
-              ),
-              column(3,
-                div(class = "app-card",
-                  div(class = "app-card-header",
-                    div(class = "app-card-icon green",
-                      tags$span(class = "material-symbols-outlined green", "account_tree")
-                    ),
-                    div(class = "app-card-title-wrapper",
-                      h3("PedivieweR"),
-                      p("Pedigree viewer, pedigree quality control, inbreeding analysis, interactive visualization")
-                    )
-                  ),
-                  actionButton("open_pediviewer", "Launch", class = "btn-primary")
-                )
-              ),
-              column(3,
-                div(class = "app-card",
-                  div(class = "app-card-header",
-                    div(class = "app-card-icon orange",
-                      tags$span(class = "material-symbols-outlined orange", "scatter_plot")
-                    ),
-                    div(class = "app-card-title-wrapper",
-                      h3("genovieweR"),
-                      p("Genotype visualization and analysis")
-                    )
-                  ),
-                  actionButton("open_genoviewer", "Launch", class = "btn-primary")
-                )
-              ),
-              column(3,
-                div(class = "app-card",
-                  div(class = "app-card-header",
-                    div(class = "app-card-icon red",
-                      tags$span(class = "material-symbols-outlined red", "show_chart")
-                    ),
-                    div(class = "app-card-title-wrapper",
-                      h3("easyblup"),
-                      p("BLUPF90 parameter cards generator,genotype format conversion")
-                    )
-                  ),
-                  actionButton("open_easyblup", "Launch", class = "btn-primary")
-                )
-              )
-            ),
-            fluidRow(
-              column(3,
-                div(class = "app-card",
-                  div(class = "app-card-header",
-                    div(class = "app-card-icon yellow",
-                      tags$span(class = "material-symbols-outlined yellow", "bolt")
-                    ),
-                    div(class = "app-card-title-wrapper",
-                      h3("R Canvas Workflow"),
-                      p("R script pipeline management, visual R script pipeline management")
-                    )
-                  ),
-                  actionButton("open_rnotebook", "Launch", class = "btn-primary")
-                )
-              )
-            ),
-            div(class = "section-title", style = "margin-top: 48px;",
-              h2(
-                tags$span(class = "material-symbols-outlined", "extension"),
-                "Optional Dependencies"
-              )
-            ),
-            fluidRow(
-              column(6,
-                div(class = "app-card dependency-card",
-                  div(class = "app-card-header",
-                    div(class = "app-card-icon purple",
-                      tags$span(class = "material-symbols-outlined purple", "code")
-                    ),
-                    div(class = "app-card-title-wrapper",
-                      h3("plinkR"),
-                      p("R wrapper for PLINK/PLINK2 with automatic output capture, genotype reading, and BLUPF90 format conversion")
-                    )
-                  ),
-                  tags$a(
-                    href = "https://github.com/Thymine2001/plinkR",
-                    target = "_blank",
-                    class = "btn btn-primary",
-                    style = "width: 100%; padding: 14px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; text-decoration: none; display: block; text-align: center;",
-                    "View on GitHub"
-                  )
-                )
-              ),
-              column(6,
-                div(class = "app-card dependency-card",
-                  div(class = "app-card-header",
-                    div(class = "app-card-icon teal",
-                      tags$span(class = "material-symbols-outlined teal", "settings")
-                    ),
-                    div(class = "app-card-title-wrapper",
-                      h3("linkbreedeR"),
-                      p("R package for running genetic analysis tools (BLUPF90+, PLINK, RENUMF90) directly from R")
-                    )
-                  ),
-                  tags$a(
-                    href = "https://github.com/Thymine2001/linkbreedeR",
-                    target = "_blank",
-                    class = "btn btn-primary",
-                    style = "width: 100%; padding: 14px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; text-decoration: none; display: block; text-align: center;",
-                    "View on GitHub"
-                  )
-                )
-              )
-            ),
-            div(class = "section-title", style = "margin-top: 48px;",
-              h2(
-                tags$span(class = "material-symbols-outlined", "library_books"),
-                "Required Dependencies"
-              )
-            ),
-            fluidRow(
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/rstudio/shiny",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "shiny")
-                  )
-                )
-              ),
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/rstudio/bslib",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "bslib")
-                  )
-                )
-              ),
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/rstudio/DT",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "DT")
-                  )
-                )
-              ),
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/jeroen/jsonlite",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "jsonlite")
-                  )
-                )
-              )
-            ),
-            fluidRow(
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/ropensci/plotly",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "plotly")
-                  )
-                )
-              ),
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/thomasp85/shinyFiles",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "shinyFiles")
-                  )
-                )
-              ),
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/r-lib/fs",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "fs")
-                  )
-                )
-              ),
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/datastorm-open/visNetwork",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "visNetwork")
-                  )
-                )
-              )
-            ),
-            fluidRow(
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/igraph/igraph",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "igraph")
-                  )
-                )
-              ),
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/tidyverse/readxl",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "readxl")
-                  )
-                )
-              ),
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/rstudio/reticulate",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "reticulate")
-                  )
-                )
-              ),
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/irudnyts/openai",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "openai")
-                  )
-                )
-              )
-            ),
-            fluidRow(
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/jeroen/curl",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "curl")
-                  )
-                )
-              ),
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/r-lib/testthat",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "testthat")
-                  )
-                )
-              ),
-              column(3,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://github.com/Rpedigree/pedigreeTools",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "pedigreeTools")
-                  )
-                )
-              )
-            ),
-            div(class = "section-title", style = "margin-top: 48px;",
-              h2(
-                tags$span(class = "material-symbols-outlined", "computer"),
-                "Related Software"
-              )
-            ),
-            fluidRow(
-              column(6,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "https://www.cog-genomics.org/plink/",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "PLINK")
-                  )
-                )
-              ),
-              column(6,
-                div(class = "dependency-item",
-                  tags$a(
-                    href = "http://nce.ads.uga.edu/wiki/doku.php?id=readme.blupf90",
-                    target = "_blank",
-                    class = "dependency-link",
-                    tags$span(class = "dependency-name", "BLUPF90")
-                  )
-                )
-              )
+          uiOutput("home_page_content")
+        ),
+        # Right sidebar for README
+        div(id = "readmeSidebar", class = "readme-sidebar",
+          div(class = "readme-sidebar-header",
+            h3("README"),
+            tags$button(
+              id = "toggleReadmeBtn",
+              class = "readme-toggle-btn",
+              tags$span(class = "material-symbols-outlined", "close")
             )
           ),
-          # Right sidebar for README
-          div(id = "readmeSidebar", class = "readme-sidebar",
-            div(class = "readme-sidebar-header",
-              h3("README"),
-              tags$button(
-                id = "toggleReadmeBtn",
-                class = "readme-toggle-btn",
-                tags$span(class = "material-symbols-outlined", "close")
-              )
-            ),
-            div(class = "readme-sidebar-content",
-              uiOutput("readmeContent")
-            )
-          ),
-          # Toggle button to show README
-          tags$button(
-            id = "showReadmeBtn",
-            class = "show-readme-btn",
-            tags$span(class = "material-symbols-outlined", "description"),
-            "README"
+          div(class = "readme-sidebar-content",
+            uiOutput("readmeContent")
           )
+        ),
+        # Toggle button to show README
+        tags$button(
+          id = "showReadmeBtn",
+          class = "show-readme-btn",
+          tags$span(class = "material-symbols-outlined", "description"),
+          "README"
         )
       )
     )
@@ -455,16 +134,27 @@ suite_ui <- function() {
     padding-right: 24px;
   }
 
-  /* Main content wrapper with sidebar */
+  /* Main content wrapper with sidebar - prevent narrowing when language changes (e.g. Chinese) */
   .main-content-wrapper {
     display: flex;
     gap: 24px;
     position: relative;
+    width: 100%;
+    min-width: 100%;
+  }
+
+  /* Shiny output wrapper - keep full width when language changes (e.g. Chinese) */
+  #home_page_content {
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
   }
 
   .cards-container {
-    flex: 1;
+    flex: 1 0 0%;
     width: 100%;
+    min-width: 100%;
+    max-width: 100%;
   }
 
   /* Section title */
@@ -488,7 +178,7 @@ suite_ui <- function() {
     font-size: 24px;
   }
 
-  /* App cards styling - larger and more prominent */
+  /* App cards styling - larger and more prominent; fixed size so layout does not shift when language changes */
   .app-card {
     background: white;
     border: 1px solid #e0e0e0;
@@ -498,22 +188,43 @@ suite_ui <- function() {
     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
     transition: all 0.3s ease;
     min-height: 320px;
+    height: 320px;
+    max-height: 320px;
+    width: 100%;
+    min-width: 0;
+    box-sizing: border-box;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
-    height: 100%;
+    overflow: hidden;
   }
   
-  /* Grid alignment for 2x4 layout */
+  /* Grid alignment for 2x4 layout - fixed column width so cards do not narrow when language changes (e.g. Chinese) */
   .cards-container .row {
-    margin-left: 0;
-    margin-right: 0;
+    margin-left: 0 !important;
+    margin-right: 0 !important;
+    width: 100% !important;
+    max-width: 100% !important;
+    flex-wrap: nowrap !important;
+    display: flex !important;
   }
-  
-  /* Ensure columns align perfectly in grid - consistent padding for all columns */
   .cards-container .row > [class*="col-3"] {
     padding-left: 12px;
     padding-right: 12px;
+    flex: 0 0 25% !important;
+    width: 25% !important;
+    max-width: 25% !important;
+    min-width: 25% !important;
+    box-sizing: border-box;
+    overflow: hidden;
+  }
+  .cards-container .row > [class*="col-6"] {
+    flex: 0 0 50% !important;
+    width: 50% !important;
+    max-width: 50% !important;
+    min-width: 50% !important;
+    box-sizing: border-box;
+    overflow: hidden;
   }
   
   /* First column in each row: no left padding */
@@ -533,9 +244,10 @@ suite_ui <- function() {
   }
   
   .cards-container .row > [class*="col-3"] > .app-card {
-    flex: 1;
+    flex: 0 0 auto;
     display: flex;
     flex-direction: column;
+    align-self: flex-start;
   }
   
   /* Row spacing */
@@ -608,13 +320,26 @@ suite_ui <- function() {
     font-size: 14px;
     line-height: 1.5;
     margin: 0;
+    min-height: 4.5em;
+    max-height: 4.5em;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    line-clamp: 3;
   }
   .app-card p {
     color: #4a4a4a;
     font-size: 16px;
     line-height: 1.6;
     margin-bottom: 24px;
-    flex-grow: 1;
+    min-height: 4.5em;
+    max-height: 4.5em;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    line-clamp: 3;
   }
   .app-card .btn-primary {
     margin-top: auto;
@@ -625,9 +350,19 @@ suite_ui <- function() {
     border-radius: 6px;
   }
   
-  /* Dependency cards styling */
+  /* Dependency cards styling - fixed height so layout does not shift when language changes */
   .dependency-card {
     margin-top: 0;
+    min-height: 280px;
+    height: 280px;
+    max-height: 280px;
+    overflow: hidden;
+  }
+  .dependency-card .app-card-header p {
+    min-height: 5em;
+    max-height: 5em;
+    -webkit-line-clamp: 4;
+    line-clamp: 4;
   }
   
   /* Required Dependencies styling */
