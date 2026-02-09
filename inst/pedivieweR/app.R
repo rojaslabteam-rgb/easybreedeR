@@ -540,7 +540,20 @@ ui <- page_fillable(
               textOutput("tab_qc_title"),
               value = "qc",
               div(style = "margin-top: 10px;",
-                verbatimTextOutput("qc_report"),
+                div(style = "display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;",
+                  tags$strong("Format:"),
+                  radioButtons("qc_report_format", label = NULL,
+                              choices = c("Log" = "log", "Table" = "table"),
+                              selected = "table", inline = TRUE)
+                ),
+                conditionalPanel(
+                  condition = "input.qc_report_format == 'log'",
+                  verbatimTextOutput("qc_report")
+                ),
+                conditionalPanel(
+                  condition = "input.qc_report_format == 'table'",
+                  uiOutput("qc_report_tables_ui")
+                ),
                 div(style = "margin-top:10px; display: flex; gap: 10px;",
                     downloadButton("download_qc_full_report", "📥 Download QC Report",
                                    class = "btn btn-info btn-sm"),
@@ -553,7 +566,20 @@ ui <- page_fillable(
               "Pedigree Structure",
               value = "structure",
               div(style = "margin-top: 10px;",
-                verbatimTextOutput("pedigree_structure_report"),
+                div(style = "display: flex; align-items: center; gap: 12px; margin-bottom: 12px; flex-wrap: wrap;",
+                  tags$strong("Format:"),
+                  radioButtons("structure_report_format", label = NULL,
+                              choices = c("Log" = "log", "Table" = "table"),
+                              selected = "table", inline = TRUE)
+                ),
+                conditionalPanel(
+                  condition = "input.structure_report_format == 'log'",
+                  verbatimTextOutput("pedigree_structure_report")
+                ),
+                conditionalPanel(
+                  condition = "input.structure_report_format == 'table'",
+                  uiOutput("pedigree_structure_tables_ui")
+                ),
                 div(style = "margin-top:10px; display: flex; gap: 10px;",
                     downloadButton("download_structure_report", "📥 Download Structure Report",
                                    class = "btn btn-info btn-sm")
@@ -1734,12 +1760,20 @@ output$top10_dam_title <- renderText({
       }
     }
     
-    # Fix 1: Remove duplicate IDs (keep first occurrence)
+    # Fix 1: Remove duplicate IDs (keep the row with the most complete information per ID)
     if (length(issues$duplicates) > 0 && issues$duplicates$count > 0) {
       original_count <- nrow(df)
+      # Completeness = number of non-NA, non-empty values per row (vectorized for speed)
+      char_mat <- as.matrix(df)
+      char_mat[] <- as.character(char_mat)
+      trimmed <- trimws(char_mat)
+      ok <- !is.na(df) & char_mat != "" & trimmed != "0"
+      completeness <- rowSums(ok, na.rm = TRUE)
+      # Within each ID, keep the row with highest completeness; ties keep first
+      df <- df[order(df$ID, -completeness), , drop = FALSE]
       df <- df[!duplicated(df$ID), ]
       removed_count <- original_count - nrow(df)
-      fixed_summary$duplicates <- paste0("Removed ", removed_count, " duplicate record(s)")
+      fixed_summary$duplicates <- paste0("Removed ", removed_count, " duplicate record(s) (kept most complete row per ID)")
     }
     
     # Fix 2: Remove self-parenting (set to NA)
@@ -1898,6 +1932,13 @@ output$top10_dam_title <- renderText({
   # Cache for F values to avoid repeated calculations
   f_values_cache <- reactiveVal(NULL)
   f_values_cache_hash <- reactiveVal(NULL)
+  
+  # Status for "right panel / results updating" after F calculation (shows progress bar while summary/tables re-render)
+  f_results_panel_status <- reactiveVal(list(
+    updating = FALSE,
+    progress = 0,
+    message = ""
+  ))
   
   # Observe file upload and auto-detect
   observe({
@@ -2136,7 +2177,7 @@ output$top10_dam_title <- renderText({
     updateSelectInput(session, "sex_col", choices = c("None" = ""), selected = "")
     updateSelectInput(session, "birthdate_col", choices = c("None" = ""), selected = "")
     
-    showNotification("Cleared all data and caches. You can upload a new file.", type = "message", duration = 4)
+    showNotification("Data has been cleared.", type = "message", duration = 4)
   })
   
   # Handle Start Analysis button click
@@ -2281,6 +2322,9 @@ output$top10_dam_title <- renderText({
       return()
     }
     
+    # Show immediate feedback so user knows fix has started
+    id_running <- showNotification("Auto-fix running...", type = "message", duration = NULL, closeButton = FALSE)
+    
     # Apply fixes
     fix_result <- fix_qc_issues(pend_data, issues)
     
@@ -2294,6 +2338,9 @@ output$top10_dam_title <- renderText({
     
     # Close modal
     removeModal()
+    
+    # Remove "running" notification before showing success
+    if (!is.null(id_running)) removeNotification(id_running)
     
     # Show success notification with summary
     summary_text <- paste(unlist(fix_result$summary), collapse = "; ")
@@ -2769,44 +2816,81 @@ output$top10_dam_title <- renderText({
     }
   )
   
-  # Inbreeding calculation progress UI
+  # Inbreeding calculation progress UI (calculation phase + results-panel updating phase)
   output$f_calculation_progress <- renderUI({
     status <- f_calculation_status()
+    panel_status <- f_results_panel_status()
     
-    if (!status$calculating) {
-      return(NULL)
-    }
-    
-    div(
-      style = "margin-bottom: 10px;",
-      div(
-        style = "background-color: #e3f2fd; padding: 8px; border-radius: 4px; border-left: 4px solid #2196f3;",
-        tags$div(
-          style = "display: flex; align-items: center; margin-bottom: 5px;",
+    # Phase 1: F calculation in progress
+    if (status$calculating) {
+      return(div(
+        style = "margin-bottom: 10px;",
+        div(
+          style = "background-color: #e3f2fd; padding: 8px; border-radius: 4px; border-left: 4px solid #2196f3;",
           tags$div(
-            style = "flex: 1;",
-            tags$small(
-              paste0("🔄 ", status$message),
-              style = "color: #1976d2; font-weight: 500;"
+            style = "display: flex; align-items: center; margin-bottom: 5px;",
+            tags$div(
+              style = "flex: 1;",
+              tags$small(
+                paste0("🔄 ", status$message),
+                style = "color: #1976d2; font-weight: 500;"
+              )
+            ),
+            tags$div(
+              style = "margin-left: 10px;",
+              tags$small(
+                paste0(format(status$n_individuals, big.mark = ","), " individuals"),
+                style = "color: #666;"
+              )
             )
           ),
-          tags$div(
-            style = "margin-left: 10px;",
-            tags$small(
-              paste0(format(status$n_individuals, big.mark = ","), " individuals"),
-              style = "color: #666;"
+          div(
+            style = "background-color: #f5f5f5; border-radius: 10px; height: 8px; overflow: hidden;",
+            div(
+              style = paste0("background-color: #2196f3; height: 100%; width: ", status$progress * 100, "%; transition: width 0.3s ease;"),
+              ""
             )
           )
-        ),
+        )
+      ))
+    }
+    
+    # Phase 2: Results panel updating (summary + tables re-rendering)
+    if (panel_status$updating) {
+      pct <- min(100, max(0, round(panel_status$progress * 100)))
+      return(div(
+        style = "margin-bottom: 10px;",
         div(
-          style = "background-color: #f5f5f5; border-radius: 10px; height: 8px; overflow: hidden;",
+          style = "background-color: #fff3e0; padding: 8px; border-radius: 4px; border-left: 4px solid #ff9800;",
+          tags$div(
+            style = "display: flex; align-items: center; margin-bottom: 5px;",
+            tags$div(
+              style = "flex: 1;",
+              tags$small(
+                paste0("📊 ", panel_status$message),
+                style = "color: #e65100; font-weight: 500;"
+              )
+            ),
+            tags$div(
+              style = "margin-left: 10px;",
+              tags$small(
+                paste0(pct, "%"),
+                style = "color: #666;"
+              )
+            )
+          ),
           div(
-            style = paste0("background-color: #2196f3; height: 100%; width: ", status$progress * 100, "%; transition: width 0.3s ease;"),
-            ""
+            style = "background-color: #f5f5f5; border-radius: 10px; height: 8px; overflow: hidden;",
+            div(
+              style = paste0("background-color: #ff9800; height: 100%; width: ", pct, "%; transition: width 0.25s ease;"),
+              ""
+            )
           )
         )
-      )
-    )
+      ))
+    }
+    
+    return(NULL)
   })
   
   # Process data (manual mode only - requires user action)
@@ -2938,7 +3022,7 @@ output$top10_dam_title <- renderText({
             ),
             tags$p(
               style = "margin-bottom: 0; font-size: 0.9em;",
-              "Auto-fix will keep the first occurrence of each ID."
+              "Auto-fix will keep the row with the most complete information per ID (most non-empty fields); ties keep the first. Other duplicate rows are removed."
             )
           )
         },
@@ -3931,8 +4015,185 @@ output$top10_dam_title <- renderText({
     cat(qc_report_text())
   })
 
-  outputOptions(output, "qc_report", suspendWhenHidden = FALSE)
-  
+  outputOptions(output, "qc_report", suspendWhenHidden = TRUE)
+
+  # QC Report table view: automatic fix methods used by this app (软件自动修复所采用的方法)
+  QC_AUTO_FIX_METHOD <- list(
+    duplicates = "The software removes duplicate rows and keeps the row with the most complete information per ID (most non-empty fields); ties keep the first. Other rows with the same ID are deleted.",
+    self_parenting = "The software sets Sire or Dam to empty (NA) where an individual is listed as their own sire or dam. The affected parent field is cleared so the individual is treated as having that parent unknown.",
+    missing_parents = "The software sets to NA any Sire/Dam reference that does not appear as an ID in the pedigree. Those offspring are then treated as having that parent unknown (e.g. founder).",
+    birth_date_order = "The software sets the offspring’s birth date to 0 (invalid/unknown) for cases where the offspring’s date is not after the parent’s. This only applies when a birthdate column is mapped; the Sire/Dam links are left unchanged.",
+    loops = "The software breaks each cycle by clearing one parent link in the loop: the link from the second-to-last individual in the cycle to the last is set to NA (Sire or Dam, whichever points to that parent)."
+  )
+
+  qc_report_tables <- reactive({
+    req(ped_data())
+    ped <- ped_data()
+    if (is.null(ped) || !"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
+      return(NULL)
+    }
+    n <- nrow(ped)
+    stats <- get_basic_stats(ped)
+    qc_results <- detect_qc_issues(ped)
+    fix_info <- qc_fix_summary()
+
+    summary_df <- data.frame(
+      Metric = c("Total individuals", "Founders", "With both parents"),
+      Value = c(format(n, big.mark = ","), format(stats$founders, big.mark = ","), format(stats$both_parents, big.mark = ",")),
+      stringsAsFactors = FALSE
+    )
+
+    # Duplicate IDs
+    dup_has <- length(qc_results$duplicates) > 0 && qc_results$duplicates$count > 0
+    dup_status <- if (dup_has) paste0("Issue (", qc_results$duplicates$count, " unique ID(s) duplicated)") else "Pass"
+    dup_details <- if (dup_has) data.frame(Affected_ID = qc_results$duplicates$ids, stringsAsFactors = FALSE) else NULL
+
+    # Self-parenting
+    self_has <- length(qc_results$self_parenting) > 0 && qc_results$self_parenting$count > 0
+    self_status <- if (self_has) paste0("Issue (", qc_results$self_parenting$count, " case(s))") else "Pass"
+    self_details <- if (self_has) data.frame(Affected_ID = qc_results$self_parenting$ids, stringsAsFactors = FALSE) else NULL
+
+    # Missing parents
+    miss_has <- length(qc_results$missing_parents) > 0 && qc_results$missing_parents$total > 0
+    miss_sires <- if (miss_has && length(qc_results$missing_parents$sires) > 0) length(qc_results$missing_parents$sires) else 0
+    miss_dams <- if (miss_has && length(qc_results$missing_parents$dams) > 0) length(qc_results$missing_parents$dams) else 0
+    miss_status <- if (miss_has) paste0("Issue (", qc_results$missing_parents$total, " reference(s): ", miss_sires, " sires, ", miss_dams, " dams)") else "Pass"
+    miss_details <- NULL
+    if (miss_has) {
+      rows <- character()
+      if (length(qc_results$missing_parents$sires) > 0) {
+        rows <- c(rows, paste("Missing sires:", paste(head(qc_results$missing_parents$sires, 10), collapse = ", ")))
+        if (length(qc_results$missing_parents$sires) > 10) rows <- c(rows, paste("  ... and", length(qc_results$missing_parents$sires) - 10, "more"))
+      }
+      if (length(qc_results$missing_parents$dams) > 0) {
+        rows <- c(rows, paste("Missing dams:", paste(head(qc_results$missing_parents$dams, 10), collapse = ", ")))
+        if (length(qc_results$missing_parents$dams) > 10) rows <- c(rows, paste("  ... and", length(qc_results$missing_parents$dams) - 10, "more"))
+      }
+      miss_details <- data.frame(Detail = rows, stringsAsFactors = FALSE)
+    }
+
+    # Birth date order
+    bd_has <- length(qc_results$birth_date_order) > 0 && qc_results$birth_date_order$count > 0
+    bd_status <- if (bd_has) paste0("Issue (", qc_results$birth_date_order$count, " case(s))") else "Pass"
+    bd_details <- NULL
+    if (bd_has) {
+      bo <- qc_results$birth_date_order
+      rows <- character()
+      for (i in seq_along(bo$invalid_offspring_ids)) {
+        line <- paste("Offspring:", bo$invalid_offspring_ids[i])
+        if (bo$invalid_sire_ids[i] != "" && bo$invalid_sire_ids[i] != "NA") line <- paste0(line, " — Sire ", bo$invalid_sire_ids[i], " (born after or same date)")
+        if (bo$invalid_dam_ids[i] != "" && bo$invalid_dam_ids[i] != "NA") line <- paste0(line, " — Dam ", bo$invalid_dam_ids[i], " (born after or same date)")
+        rows <- c(rows, line)
+      }
+      total_bd <- length(rows)
+      if (total_bd > 15) rows <- c(rows[1:15], paste("... and", total_bd - 15, "more cases"))
+      bd_details <- data.frame(Case = rows, stringsAsFactors = FALSE)
+    }
+
+    # Loops
+    loop_has <- length(qc_results$loops) > 0 && qc_results$loops$count > 0
+    loop_status <- if (loop_has) paste0("Issue (", qc_results$loops$count, " loop(s))") else "Pass"
+    loop_details <- NULL
+    if (loop_has) {
+      cycles <- vapply(qc_results$loops$cycles, function(c) paste(c, collapse = " → "), character(1))
+      loop_details <- data.frame(Loop = cycles, stringsAsFactors = FALSE)
+    }
+
+    list(
+      summary = summary_df,
+      overall_status = if (qc_results$has_errors) "Issues detected" else "All QC checks passed",
+      fix_summary = fix_info,
+      checks = list(
+        list(name = "Duplicate IDs", status = dup_status, details = dup_details, auto_fix_method = QC_AUTO_FIX_METHOD$duplicates),
+        list(name = "Self-parenting", status = self_status, details = self_details, auto_fix_method = QC_AUTO_FIX_METHOD$self_parenting),
+        list(name = "Missing parents", status = miss_status, details = miss_details, auto_fix_method = QC_AUTO_FIX_METHOD$missing_parents),
+        list(name = "Birth date order", status = bd_status, details = bd_details, auto_fix_method = QC_AUTO_FIX_METHOD$birth_date_order),
+        list(name = "Circular references (loops)", status = loop_status, details = loop_details, auto_fix_method = QC_AUTO_FIX_METHOD$loops)
+      )
+    )
+  })
+
+  qc_df_to_html_table <- function(df) {
+    tags$table(
+      style = "width: 100%; border-collapse: collapse; margin: 0;",
+      class = "table table-bordered",
+      tags$thead(
+        tags$tr(lapply(names(df), function(h) tags$th(h, style = "padding: 8px; border: 1px solid #ddd; background: #f5f5f5; font-weight: 600; text-align: left;")))
+      ),
+      tags$tbody(
+        lapply(seq_len(nrow(df)), function(i) {
+          tags$tr(lapply(seq_len(ncol(df)), function(j) {
+            tags$td(as.character(df[i, j]), style = "padding: 8px; border: 1px solid #ddd; text-align: left;")
+          }))
+        })
+      )
+    )
+  }
+
+  output$qc_report_tables_ui <- renderUI({
+    qc <- qc_report_tables()
+    if (is.null(qc)) {
+      return(div(class = "alert alert-warning", "No pedigree data or required columns (ID, Sire, Dam) not found."))
+    }
+    section_style <- "margin-bottom: 20px; border: 1px solid #CFB991; border-radius: 8px; overflow: hidden;"
+    header_style <- "background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%); color: #000; padding: 10px 14px; font-weight: 700; font-size: 1rem;"
+    fix_box_style <- "background: #f8f9fa; border-left: 4px solid #CEB888; padding: 12px; margin-top: 10px; font-size: 0.95rem; color: #333;"
+
+    out <- list()
+
+    out[[1]] <- div(style = section_style,
+      div(style = header_style, "Summary"),
+      div(style = "padding: 12px;", qc_df_to_html_table(qc$summary)),
+      div(style = "padding: 12px; padding-top: 0;",
+        tags$strong("Overall status: "),
+        if (qc$overall_status == "All QC checks passed") {
+          span("✅ All QC checks passed", style = "color: #0d6e0d; font-weight: 600;")
+        } else {
+          span("⚠️ Issues detected. See each check below for the auto-fix method .", style = "color: #856404; font-weight: 600;")
+        }
+      )
+    )
+
+    if (!is.null(qc$fix_summary) && length(qc$fix_summary) > 0) {
+      fix_rows <- data.frame(
+        Action = names(qc$fix_summary),
+        Result = as.character(qc$fix_summary),
+        stringsAsFactors = FALSE
+      )
+      out[[2]] <- div(style = section_style,
+        div(style = header_style, "Auto-fix summary"),
+        div(style = "padding: 12px;", qc_df_to_html_table(fix_rows))
+      )
+      idx <- 3
+    } else {
+      idx <- 2
+    }
+
+    for (k in seq_along(qc$checks)) {
+      ch <- qc$checks[[k]]
+      status_color <- if (grepl("^Pass$", ch$status)) "#0d6e0d" else "#856404"
+      status_text <- if (grepl("^Pass$", ch$status)) paste0("✔ ", ch$status) else paste0("⚠️ ", ch$status)
+      block <- div(style = section_style,
+        div(style = header_style, ch$name),
+        div(style = "padding: 12px;",
+          div(style = paste0("margin-bottom: 10px; font-weight: 600; color: ", status_color), status_text),
+          if (!is.null(ch$details) && nrow(ch$details) > 0) {
+            div(style = "margin-top: 8px;", qc_df_to_html_table(ch$details))
+          },
+          div(style = fix_box_style,
+            tags$strong("Auto-fix method : "),
+            ch$auto_fix_method
+          )
+        )
+      )
+      out[[idx]] <- block
+      idx <- idx + 1
+    }
+
+    do.call(tagList, out)
+  })
+  outputOptions(output, "qc_report_tables_ui", suspendWhenHidden = FALSE)
+
   # Pedigree Structure Report - pre-compute when ped_data() is ready so tab switch is instant
   run_structure_report <- function(ped) {
     if (is.null(ped) || !"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
@@ -4245,7 +4506,241 @@ output$top10_dam_title <- renderText({
     cat(pedigree_structure_report_text())
   })
 
-  outputOptions(output, "pedigree_structure_report", suspendWhenHidden = FALSE)
+  outputOptions(output, "pedigree_structure_report", suspendWhenHidden = TRUE)
+
+  # Pedigree Structure report as structured tables (for Table view)
+  structure_report_tables <- reactive({
+    req(ped_data())
+    ped <- ped_data()
+    if (is.null(ped) || !"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
+      return(NULL)
+    }
+    n <- nrow(ped)
+    stats <- get_basic_stats(ped)
+    stats_ext <- get_extended_stats(ped)
+    founders <- stats$founders
+    non_founders <- stats$non_founders
+    both_parents <- stats$both_parents
+    only_sire <- stats$only_sire
+    only_dam <- stats$only_dam
+
+    basic <- data.frame(
+      Metric = c("Individuals in total", "Founders", "Non-founders",
+                 "With both parents", "Only with known sire", "Only with known dam"),
+      Value = c(format(n, big.mark = ","), format(founders, big.mark = ","),
+                format(non_founders, big.mark = ","), format(both_parents, big.mark = ","),
+                format(only_sire, big.mark = ","), format(only_dam, big.mark = ",")),
+      stringsAsFactors = FALSE
+    )
+
+    parent <- data.frame(
+      Metric = c("Sires in total", "  - Progeny", "Dams in total", "  - Progeny",
+                 "Individuals with progeny", "Individuals with no progeny"),
+      Value = c(format(stats_ext$unique_sires, big.mark = ","),
+                format(stats_ext$total_sire_progeny, big.mark = ","),
+                format(stats_ext$unique_dams, big.mark = ","),
+                format(stats_ext$total_dam_progeny, big.mark = ","),
+                format(stats_ext$individuals_with_progeny, big.mark = ","),
+                format(stats_ext$individuals_without_progeny, big.mark = ",")),
+      stringsAsFactors = FALSE
+    )
+
+    founder <- data.frame(
+      Metric = c("Founders", "  - Progeny", "  - Sires", "      - Progeny",
+                 "  - Dams", "      - Progeny", "  - With no progeny"),
+      Value = c(format(founders, big.mark = ","),
+                format(stats_ext$founder_total_progeny, big.mark = ","),
+                format(stats_ext$founder_sires, big.mark = ","),
+                format(stats_ext$founder_sire_progeny, big.mark = ","),
+                format(stats_ext$founder_dams, big.mark = ","),
+                format(stats_ext$founder_dam_progeny, big.mark = ","),
+                format(stats_ext$founder_no_progeny, big.mark = ",")),
+      stringsAsFactors = FALSE
+    )
+
+    non_founder <- data.frame(
+      Metric = c("Non-founders", "  - Sires", "      - Progeny", "  - Dams", "      - Progeny",
+                 "  - Only with known sire", "  - Only with known dam", "  - With known sire and dam"),
+      Value = c(format(non_founders, big.mark = ","),
+                format(stats_ext$non_founder_sires, big.mark = ","),
+                format(stats_ext$non_founder_sire_progeny, big.mark = ","),
+                format(stats_ext$non_founder_dams, big.mark = ","),
+                format(stats_ext$non_founder_dam_progeny, big.mark = ","),
+                format(only_sire, big.mark = ","), format(only_dam, big.mark = ","),
+                format(both_parents, big.mark = ",")),
+      stringsAsFactors = FALSE
+    )
+
+    full_sibs <- ped %>%
+      filter(!is.na(Sire), !is.na(Dam), Sire != "", Dam != "", Sire != "0", Dam != "0") %>%
+      group_by(Sire, Dam) %>%
+      summarise(family_size = n(), .groups = "drop") %>%
+      filter(family_size >= 2)
+    n_fs <- nrow(full_sibs)
+    full_sib <- data.frame(
+      Metric = c("Full-sib groups", "Average family size", "Maximum", "Minimum"),
+      Value = c(format(n_fs, big.mark = ","),
+                if (n_fs > 0) format(mean(full_sibs$family_size), digits = 4) else "0",
+                if (n_fs > 0) as.character(max(full_sibs$family_size)) else "—",
+                if (n_fs > 0) as.character(min(full_sibs$family_size)) else "—"),
+      stringsAsFactors = FALSE
+    )
+
+    inbreeding <- NULL
+    f_vals <- f_values()
+    if (!is.null(f_vals) && nrow(f_vals) > 0 && "F" %in% names(f_vals)) {
+      f_numeric <- f_vals$F[!is.na(f_vals$F)]
+      inbreds <- sum(f_numeric > 0)
+      inbreeding <- data.frame(
+        Metric = c("Evaluated individuals", "Inbreds in total", "Inbreds in evaluated",
+                   "Average inbreeding (F)", "Average F (inbreds only)", "Maximum F", "Minimum F"),
+        Value = c(format(length(f_numeric), big.mark = ","), format(inbreds, big.mark = ","),
+                  format(inbreds, big.mark = ","),
+                  format(mean(f_numeric), digits = 5),
+                  if (inbreds > 0) format(mean(f_numeric[f_numeric > 0]), digits = 5) else "N/A",
+                  format(max(f_numeric), digits = 5), format(min(f_numeric), digits = 5)),
+        stringsAsFactors = FALSE
+      )
+    } else {
+      inbreeding <- data.frame(
+        Metric = "Inbreeding",
+        Value = "No inbreeding coefficients calculated. They are computed automatically after data processing.",
+        stringsAsFactors = FALSE
+      )
+    }
+
+    lap_df <- data.frame(Generation = integer(), Count = integer(), stringsAsFactors = FALSE)
+    tryCatch({
+      if (exists("use_rcpp") && use_rcpp && exists("fast_lap_distribution", mode = "function")) {
+        ids_char <- as.character(ped$ID)
+        sires_char <- as.character(ifelse(is.na(ped$Sire), "", ped$Sire))
+        dams_char <- as.character(ifelse(is.na(ped$Dam), "", ped$Dam))
+        sample_size <- if (n > 10000) min(5000, n) else n
+        lap_distribution <- fast_lap_distribution(ids_char, sires_char, dams_char, sample_size, 20)
+      } else {
+        if (n > 10000) {
+          sample_size <- min(5000, n)
+          sample_ids <- sample(ped$ID, sample_size)
+        } else {
+          sample_ids <- ped$ID
+          sample_size <- n
+        }
+        lap_distribution <- numeric(20)
+        names(lap_distribution) <- 0:19
+        for (id in sample_ids) {
+          depth <- 0
+          visited <- character()
+          current_gen <- id
+          while (length(current_gen) > 0 && depth < 20) {
+            next_gen <- character()
+            for (ind in current_gen) {
+              if (ind %in% visited) next
+              visited <- c(visited, ind)
+              idx <- which(ped$ID == ind)
+              if (length(idx) > 0) {
+                sire <- ped$Sire[idx[1]]
+                dam <- ped$Dam[idx[1]]
+                if (!is.na(sire) && sire != "" && sire != "0") next_gen <- c(next_gen, sire)
+                if (!is.na(dam) && dam != "" && dam != "0") next_gen <- c(next_gen, dam)
+              }
+            }
+            if (length(next_gen) > 0) {
+              depth <- depth + 1
+              current_gen <- unique(next_gen)
+            } else break
+          }
+          if (depth < 20) lap_distribution[as.character(depth)] <- lap_distribution[as.character(depth)] + 1
+        }
+        if (n > sample_size) lap_distribution <- round(lap_distribution * (n / sample_size))
+      }
+      lap_df <- data.frame(
+        Generation = 0:19,
+        Count = as.integer(lap_distribution[as.character(0:19)]),
+        stringsAsFactors = FALSE
+      )
+      lap_df$Count[is.na(lap_df$Count)] <- 0L
+    }, error = function(e) {
+      founders_count <- sum(is_missing_parent(ped$Sire) & is_missing_parent(ped$Dam))
+      lap_df <- data.frame(
+        Generation = 0L,
+        Count = as.integer(founders_count),
+        stringsAsFactors = FALSE
+      )
+    })
+    if (is.null(lap_df) || nrow(lap_df) == 0) {
+      founders_count <- sum(is_missing_parent(ped$Sire) & is_missing_parent(ped$Dam))
+      lap_df <- data.frame(Generation = 0L, Count = as.integer(founders_count), stringsAsFactors = FALSE)
+    }
+
+    list(
+      basic = basic,
+      parent = parent,
+      founder = founder,
+      non_founder = non_founder,
+      full_sib = full_sib,
+      inbreeding = inbreeding,
+      lap = lap_df
+    )
+  })
+
+  df_to_html_table <- function(df) {
+    tags$table(
+      style = "width: 100%; border-collapse: collapse; margin: 0;",
+      class = "table table-bordered",
+      tags$thead(
+        tags$tr(lapply(names(df), function(h) tags$th(h, style = "padding: 8px; border: 1px solid #ddd; background: #f5f5f5; font-weight: 600; text-align: left;")))
+      ),
+      tags$tbody(
+        lapply(seq_len(nrow(df)), function(i) {
+          tags$tr(
+            lapply(seq_len(ncol(df)), function(j) {
+              tags$td(as.character(df[i, j]), style = "padding: 8px; border: 1px solid #ddd; text-align: left;")
+            })
+          )
+        })
+      )
+    )
+  }
+
+  output$pedigree_structure_tables_ui <- renderUI({
+    tabs <- structure_report_tables()
+    if (is.null(tabs)) {
+      return(div(class = "alert alert-warning", "No pedigree data or required columns (ID, Sire, Dam) not found."))
+    }
+    section_style <- "margin-bottom: 20px; border: 1px solid #CFB991; border-radius: 8px; overflow: hidden;"
+    header_style <- "background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%); color: #000; padding: 10px 14px; font-weight: 700; font-size: 1rem;"
+    tagList(
+      div(style = section_style,
+        div(style = header_style, "Basic statistics"),
+        div(style = "padding: 12px;", df_to_html_table(tabs$basic))
+      ),
+      div(style = section_style,
+        div(style = header_style, "Parent statistics"),
+        div(style = "padding: 12px;", df_to_html_table(tabs$parent))
+      ),
+      div(style = section_style,
+        div(style = header_style, "Founder statistics"),
+        div(style = "padding: 12px;", df_to_html_table(tabs$founder))
+      ),
+      div(style = section_style,
+        div(style = header_style, "Non-founder statistics"),
+        div(style = "padding: 12px;", df_to_html_table(tabs$non_founder))
+      ),
+      div(style = section_style,
+        div(style = header_style, "Full-sib groups"),
+        div(style = "padding: 12px;", df_to_html_table(tabs$full_sib))
+      ),
+      div(style = section_style,
+        div(style = header_style, "Inbreeding statistics"),
+        div(style = "padding: 12px;", df_to_html_table(tabs$inbreeding))
+      ),
+      div(style = section_style,
+        div(style = header_style, "Longest ancestral path (LAP)"),
+        div(style = "padding: 12px;", df_to_html_table(tabs$lap))
+      )
+    )
+  })
+  outputOptions(output, "pedigree_structure_tables_ui", suspendWhenHidden = FALSE)
 
   # Download structure report
   output$download_structure_report <- downloadHandler(
@@ -5187,15 +5682,37 @@ output$top10_dam_title <- renderText({
           n_individuals = n_individuals
         ))
         
-        # Cache the result
-        f_values_cache(result)
-        if (all(c("ID", "Sire", "Dam") %in% names(ped))) {
-          f_values_cache_hash(digest::digest(ped[, c("ID", "Sire", "Dam")], algo = "xxhash64"))
-        } else {
-          f_values_cache_hash(NULL)
-        }
+        # Show notification immediately so UI responds without waiting for downstream
+        showNotification("✅ Inbreeding coefficients calculated!", type = "message", duration = 3)
         
-        # Hide progress bar after a short delay
+        # Defer cache update to next tick so notification and progress hide before heavy downstream outputs run
+        res <- result
+        ped_for_hash <- if (all(c("ID", "Sire", "Dam") %in% names(ped))) ped[, c("ID", "Sire", "Dam")] else NULL
+        later::later(function() {
+          # Show "Updating results..." progress bar so user sees activity while summary/tables re-render
+          f_results_panel_status(list(updating = TRUE, progress = 0, message = "Updating results..."))
+          f_values_cache(res)
+          if (!is.null(ped_for_hash)) {
+            f_values_cache_hash(digest::digest(ped_for_hash, algo = "xxhash64"))
+          } else {
+            f_values_cache_hash(NULL)
+          }
+          # Animate progress bar while downstream outputs (f_summary, f_table_top, sire/dam tables) run
+          later::later(function() {
+            f_results_panel_status(list(updating = TRUE, progress = 0.25, message = "Updating summary..."))
+          }, delay = 0.2)
+          later::later(function() {
+            f_results_panel_status(list(updating = TRUE, progress = 0.5, message = "Updating tables..."))
+          }, delay = 0.5)
+          later::later(function() {
+            f_results_panel_status(list(updating = TRUE, progress = 0.85, message = "Almost done..."))
+          }, delay = 1.0)
+          later::later(function() {
+            f_results_panel_status(list(updating = FALSE, progress = 0, message = ""))
+          }, delay = 1.8)
+        }, delay = 0)
+        
+        # Hide calculation progress bar after a short delay
         later::later(function() {
           f_calculation_status(list(
             calculating = FALSE,
@@ -5205,8 +5722,8 @@ output$top10_dam_title <- renderText({
           ))
         }, delay = 2.0)
         
-        showNotification("✅ Inbreeding coefficients calculated!", type = "message", duration = 3)
-        result
+        # Return old value (or empty) so downstream don't run in this flush; cache is set in next tick
+        if (!is.null(cached_f)) cached_f else tibble(ID = character(), F = numeric())
       }, error = function(e) {
         # Update progress status - error
         f_calculation_status(list(
