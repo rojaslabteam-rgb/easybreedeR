@@ -519,9 +519,20 @@ ui <- page_fillable(
               )
             ),
             nav_panel(
+              "Inbreeding Trend",
+              value = "inb_trend",
+              div(style = "margin-top: 10px;",
+                  uiOutput("inb_trend_controls"),
+                  uiOutput("inb_trend_hint_ui"),
+                  plotlyOutput("inb_trend_plot", height = "832px")
+              )
+            ),
+            nav_panel(
               textOutput("tab_data_title"),
               value = "data",
               div(style = "margin-top: 10px;",
+                  downloadButton("download_pedigree_with_inbreeding", "📥 Download pedigree with inbreeding",
+                                 class = "btn btn-primary btn-sm mb-2"),
                   DTOutput("data_preview")
               )
             ),
@@ -1888,9 +1899,6 @@ output$top10_dam_title <- renderText({
   f_values_cache <- reactiveVal(NULL)
   f_values_cache_hash <- reactiveVal(NULL)
   
-  # Track whether the Inbreeding Trend tab is currently inserted
-  inb_trend_tab_inserted <- reactiveVal(FALSE)
-  
   # Observe file upload and auto-detect
   observe({
     if (is.null(raw_data())) return()
@@ -1948,34 +1956,6 @@ output$top10_dam_title <- renderText({
       data_validation_status(list(valid = FALSE, errors = validation_errors, warnings = c()))
       showNotification(paste("⚠️ Column mapping validation failed:", paste(validation_errors, collapse = "; ")), 
                       type = "warning", duration = 8)
-    }
-  })
-  
-  # Conditionally show/hide "Inbreeding Trend" tab
-  observe({
-    has_data <- !is.null(raw_data())
-    
-    if (isTRUE(has_data) && !isTRUE(inb_trend_tab_inserted())) {
-      insertTab(
-        inputId = "mainTabs",
-        tab = nav_panel(
-          "Inbreeding Trend",
-          value = "inb_trend",
-          div(style = "margin-top: 10px;",
-              uiOutput("inb_trend_controls"),
-              uiOutput("inb_trend_hint_ui"),
-             plotlyOutput("inb_trend_plot", height = "832px")
-          )
-        ),
-        target = "viz",
-        position = "after"
-      )
-      inb_trend_tab_inserted(TRUE)
-    }
-    
-    if (!isTRUE(has_data) && isTRUE(inb_trend_tab_inserted())) {
-      removeTab(inputId = "mainTabs", target = "inb_trend")
-      inb_trend_tab_inserted(FALSE)
     }
   })
   
@@ -3757,13 +3737,12 @@ output$top10_dam_title <- renderText({
           scrollY = "500px",
           deferRender = TRUE,
           scroller = TRUE,
-          dom = 'Bfrtip',
-          buttons = list('copy', 'csv', 'excel', 'pdf'),
+          dom = 'frtip',
           lengthMenu = list(c(10, 25, 50, 100, -1), c('10', '25', '50', '100', 'All'))
         ),
         filter = "top",
         rownames = FALSE,
-        extensions = c('Buttons', 'Scroller')
+        extensions = 'Scroller'
       )
       
       # Apply inbreeding styling if available
@@ -3784,13 +3763,11 @@ output$top10_dam_title <- renderText({
           scrollX = TRUE,
           scrollY = if(n > 100) "500px" else NULL,
           deferRender = if(n > 100) TRUE else FALSE,
-          dom = 'Bfrtip',
-          buttons = list('copy', 'csv', 'excel', 'pdf'),
+          dom = 'frtip',
           lengthMenu = list(c(10, 25, 50, 100, -1), c('10', '25', '50', '100', 'All'))
         ),
         filter = "top",
-        rownames = FALSE,
-        extensions = 'Buttons'
+        rownames = FALSE
       )
       
       # Apply inbreeding styling if available
@@ -3804,26 +3781,36 @@ output$top10_dam_title <- renderText({
       return(dt)
     }
   }, server = TRUE)
-  
-  # QC Report - comprehensive with all issue detection
-  output$qc_report <- renderPrint({
-    req(ped_data())
-    ped <- ped_data()
-    
-    # Check if ped_data returned NULL (due to column mapping errors)
-    if (is.null(ped)) {
-      cat("Error: Data processing failed. Please check column mapping.\n")
-      return()
+
+  output$download_pedigree_with_inbreeding <- downloadHandler(
+    filename = function() {
+      paste0("pedigree_with_inbreeding_", Sys.Date(), ".csv")
+    },
+    content = function(file) {
+      req(ped_data())
+      ped <- ped_data()
+      if (is.null(ped) || !"ID" %in% names(ped)) {
+        write.csv(data.frame(Message = "No pedigree data available."), file, row.names = FALSE)
+        return()
+      }
+      out <- ped
+      f_tbl <- f_values_cache()
+      if (!is.null(f_tbl) && nrow(f_tbl) > 0 && "ID" %in% names(f_tbl) && "F" %in% names(f_tbl)) {
+        out <- out %>%
+          left_join(f_tbl %>% mutate(ID = as.character(ID)), by = "ID") %>%
+          mutate(F = round(F, 6))
+      }
+      write.csv(out, file, row.names = FALSE)
     }
-    
-    # Check if required columns exist
-    if (!"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
+  )
+  
+  # QC Report - pre-compute when ped_data() is ready so tab switch is instant
+  run_qc_report <- function(ped) {
+    if (is.null(ped) || !"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
       cat("Error: Required columns (ID, Sire, Dam) not found in processed data\n")
       return()
     }
-    
     n <- nrow(ped)
-    
     cat("=== PEDIGREE QC REPORT ===\n")
     if (exists("use_rcpp") && use_rcpp) {
       cat("(Using Rcpp-accelerated QC)\n")
@@ -3831,20 +3818,13 @@ output$top10_dam_title <- renderText({
       cat("(Using optimized R functions)\n")
     }
     cat("Generated:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
-    
-    # Run comprehensive QC detection
     qc_results <- detect_qc_issues(ped)
-    
-    # Basic statistics
     stats <- get_basic_stats(ped)
     founders <- stats$founders
     both_parents <- stats$both_parents
-    
     cat("Total individuals:", format(n, big.mark = ","), "\n")
     cat("Founders:", format(founders, big.mark = ","), "\n")
     cat("With both parents:", format(both_parents, big.mark = ","), "\n\n")
-    
-    # Duplicate IDs
     if (length(qc_results$duplicates) > 0 && qc_results$duplicates$count > 0) {
       cat("❌ Duplicate IDs:", qc_results$duplicates$count, "unique ID(s) duplicated\n")
       cat("   Examples:", paste(head(qc_results$duplicates$ids, 5), collapse = ", "), "\n")
@@ -3855,8 +3835,6 @@ output$top10_dam_title <- renderText({
     } else {
       cat("✔ No duplicate IDs\n\n")
     }
-    
-    # Self-parenting
     if (length(qc_results$self_parenting) > 0 && qc_results$self_parenting$count > 0) {
       cat("⚠️ Self-Parenting:", qc_results$self_parenting$count, "case(s)\n")
       cat("   Affected IDs:", paste(head(qc_results$self_parenting$ids, 5), collapse = ", "), "\n")
@@ -3867,21 +3845,17 @@ output$top10_dam_title <- renderText({
     } else {
       cat("✔ No self-parenting issues\n\n")
     }
-    
-    # Missing parents
     if (length(qc_results$missing_parents) > 0 && qc_results$missing_parents$total > 0) {
       cat("ℹ️ Missing Parents:", qc_results$missing_parents$total, "reference(s)\n")
-      
       if (length(qc_results$missing_parents$sires) > 0) {
-        cat("   Missing sires (", length(qc_results$missing_parents$sires), "):", 
+        cat("   Missing sires (", length(qc_results$missing_parents$sires), "):",
             paste(head(qc_results$missing_parents$sires, 5), collapse = ", "), "\n")
         if (length(qc_results$missing_parents$sires) > 5) {
           cat("   ... and", length(qc_results$missing_parents$sires) - 5, "more\n")
         }
       }
-      
       if (length(qc_results$missing_parents$dams) > 0) {
-        cat("   Missing dams (", length(qc_results$missing_parents$dams), "):", 
+        cat("   Missing dams (", length(qc_results$missing_parents$dams), "):",
             paste(head(qc_results$missing_parents$dams, 5), collapse = ", "), "\n")
         if (length(qc_results$missing_parents$dams) > 5) {
           cat("   ... and", length(qc_results$missing_parents$dams) - 5, "more\n")
@@ -3892,8 +3866,6 @@ output$top10_dam_title <- renderText({
       cat("✔ All sires found\n")
       cat("✔ All dams found\n\n")
     }
-    
-    # Birth date order issues
     if (length(qc_results$birth_date_order) > 0 && qc_results$birth_date_order$count > 0) {
       cat("📅 Birth Date Order Issues:", qc_results$birth_date_order$count, "case(s)\n")
       cat("   Invalid sire cases:", qc_results$birth_date_order$invalid_sire_count, "\n")
@@ -3917,17 +3889,13 @@ output$top10_dam_title <- renderText({
       }
       cat("\n")
     }
-    
-    # Circular references (loops)
     if (length(qc_results$loops) > 0 && qc_results$loops$count > 0) {
       cat("🔄 Circular References (Loops):", qc_results$loops$count, "loop(s) detected\n")
       cat("   Ancestry chains that form cycles:\n")
-      
       for (i in seq_along(head(qc_results$loops$cycles, 3))) {
         cycle <- qc_results$loops$cycles[[i]]
         cat("   Loop", i, ":", paste(cycle, collapse = " → "), "\n")
       }
-      
       if (qc_results$loops$count > 3) {
         cat("   ... and", qc_results$loops$count - 3, "more loop(s)\n")
       }
@@ -3935,8 +3903,6 @@ output$top10_dam_title <- renderText({
     } else {
       cat("✔ No circular references detected\n\n")
     }
-    
-    # Show last fix summary if available
     fix_info <- qc_fix_summary()
     if (!is.null(fix_info) && length(fix_info) > 0) {
       cat("--- Auto-Fix Summary ---\n")
@@ -3945,38 +3911,39 @@ output$top10_dam_title <- renderText({
       }
       cat("\n")
     }
-    
-    # Overall status
     if (qc_results$has_errors) {
       cat("⚠️ STATUS: Issues detected. Use 'Download QC Report' for full details.\n")
     } else {
       cat("✅ STATUS: All QC checks passed!\n")
     }
-  })
-  
-  # Pedigree Structure Report
-  output$pedigree_structure_report <- renderPrint({
+  }
+
+  qc_report_text <- reactive({
     req(ped_data())
     ped <- ped_data()
-    
     if (is.null(ped)) {
-      cat("Error: Data processing failed. Please check column mapping.\n")
-      return()
+      return("Error: Data processing failed. Please check column mapping.\n")
     }
-    
-    if (!"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
+    paste(capture.output(run_qc_report(ped)), collapse = "\n")
+  })
+
+  output$qc_report <- renderPrint({
+    cat(qc_report_text())
+  })
+
+  outputOptions(output, "qc_report", suspendWhenHidden = FALSE)
+  
+  # Pedigree Structure Report - pre-compute when ped_data() is ready so tab switch is instant
+  run_structure_report <- function(ped) {
+    if (is.null(ped) || !"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
       cat("Error: Required columns (ID, Sire, Dam) not found in processed data\n")
       return()
     }
-    
+    n <- nrow(ped)
     cat("========================================\n")
     cat("PEDIGREE STRUCTURE REPORT\n")
     cat("Generated:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n")
     cat("========================================\n\n")
-    
-    n <- nrow(ped)
-    
-    # Basic statistics
     cat("--- BASIC STATISTICS ---\n")
     cat("Individuals in total:", format(n, big.mark = ","), "\n")
     
@@ -4259,12 +4226,27 @@ output$top10_dam_title <- renderText({
       }
     }, error = function(e) {
       cat("LAP calculation error:", e$message, "\n")
-      # Fallback: show founders only
       founders_count <- sum(is_missing_parent(ped$Sire) & is_missing_parent(ped$Dam))
       cat("Founders (LAP = 0):", format(founders_count, big.mark = ","), "\n")
     })
+  }
+
+  pedigree_structure_report_text <- reactive({
+    req(ped_data())
+    ped <- ped_data()
+    if (is.null(ped)) return("Error: Data processing failed. Please check column mapping.\n")
+    if (!"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
+      return("Error: Required columns (ID, Sire, Dam) not found in processed data\n")
+    }
+    paste(capture.output(run_structure_report(ped)), collapse = "\n")
   })
-  
+
+  output$pedigree_structure_report <- renderPrint({
+    cat(pedigree_structure_report_text())
+  })
+
+  outputOptions(output, "pedigree_structure_report", suspendWhenHidden = FALSE)
+
   # Download structure report
   output$download_structure_report <- downloadHandler(
     filename = function() {
