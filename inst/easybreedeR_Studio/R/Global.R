@@ -173,8 +173,7 @@ child_apps <- list(
   dataviewer = paste0("http://", .local_ip, ":8001"),
   pediviewer   = paste0("http://", .local_ip, ":8002"),
   genoviewer   = paste0("http://", .local_ip, ":8005"),
-  easyblupf90  = paste0("http://", .local_ip, ":8003"),
-  core_tools   = paste0("http://", .local_ip, ":8004")
+  easyblupf90  = paste0("http://", .local_ip, ":8003")
 )
 
 # Resolve app directory from the calling context (works when sourced by app.R)
@@ -195,8 +194,7 @@ child_paths <- list(
   dataviewer = normalizePath(file.path(apps_base_dir, "datavieweR"), winslash = "/", mustWork = FALSE),
   pediviewer   = normalizePath(file.path(apps_base_dir, "pedivieweR"), winslash = "/", mustWork = FALSE),
   genoviewer   = normalizePath(file.path(apps_base_dir, "genovieweR"), winslash = "/", mustWork = FALSE),
-  easyblupf90  = normalizePath(file.path(apps_base_dir, "easyblup"), winslash = "/", mustWork = FALSE),
-  core_tools   = normalizePath(file.path(apps_base_dir, "RCW"), winslash = "/", mustWork = FALSE)
+  easyblupf90  = normalizePath(file.path(apps_base_dir, "easyblup"), winslash = "/", mustWork = FALSE)
 )
 
 # Track spawned child PIDs

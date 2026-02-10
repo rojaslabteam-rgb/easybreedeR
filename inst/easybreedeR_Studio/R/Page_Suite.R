@@ -778,7 +778,6 @@ suite_ui <- function() {
     tabPanel(uiOutput("tab_pediviewer"), uiOutput("frame_pediviewer"), value = "pediviewer"),
     tabPanel(uiOutput("tab_genoviewer"), uiOutput("frame_genoviewer"), value = "genoviewer"),
     tabPanel(uiOutput("tab_easyblup"), uiOutput("frame_easyblup"), value = "easyblup"),
-    tabPanel(uiOutput("tab_rnotebook"), uiOutput("frame_rnotebook"), value = "rnotebook"),
     # (Removed bottom-right gear; using top-right gear aligned with title)
   )
 }

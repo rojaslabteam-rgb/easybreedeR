@@ -65,10 +65,6 @@ run_easybreedeR_Studio <- function() {
         pid <- start_child(child_paths$easyblupf90, 8003)
         if (!is.na(pid)) .suite_child_pids$pids <- c(.suite_child_pids$pids, pid)
       }
-      if (!is_alive(paste0("http://", check_ip, ":8004"))) {
-        pid <- start_child(child_paths$core_tools, 8004)
-        if (!is.na(pid)) .suite_child_pids$pids <- c(.suite_child_pids$pids, pid)
-      }
     }, once = TRUE)
 
     # Source language helpers if not already loaded
@@ -165,12 +161,6 @@ run_easybreedeR_Studio <- function() {
       code <- tryCatch(language_code(lang), error = function(e) "en")
       shiny::tags$span(suite_safe_get_label("easyblup_app_name", code))
     })
-    output$tab_rnotebook <- shiny::renderUI({
-      lang <- suite_language()
-      code <- tryCatch(language_code(lang), error = function(e) "en")
-      shiny::tags$span(suite_safe_get_label("rnotebook_app_name", code))
-    })
-
     # Home page cards and sections (multi-language)
     output$home_page_content <- shiny::renderUI({
       lang <- suite_language()
@@ -239,22 +229,6 @@ run_easybreedeR_Studio <- function() {
                   )
                 ),
                 shiny::actionButton("open_easyblup", l("suite_launch"), class = "btn-primary")
-              )
-            )
-          ),
-          shiny::fluidRow(
-            shiny::column(3,
-              div(class = "app-card",
-                div(class = "app-card-header",
-                  div(class = "app-card-icon yellow",
-                    shiny::tags$span(class = "material-symbols-outlined yellow", "bolt")
-                  ),
-                  div(class = "app-card-title-wrapper",
-                    shiny::h3(l("rcw_app_name")),
-                    shiny::p(l("suite_rcw_card_desc"))
-                  )
-                ),
-                shiny::actionButton("open_rnotebook", l("suite_launch"), class = "btn-primary")
               )
             )
           ),
@@ -468,10 +442,6 @@ run_easybreedeR_Studio <- function() {
     shiny::observeEvent(input$open_easyblup, ignoreInit = TRUE, {
       shiny::updateNavbarPage(session, "main_nav", selected = "easyblup")
     })
-    shiny::observeEvent(input$open_rnotebook, ignoreInit = TRUE, {
-      shiny::updateNavbarPage(session, "main_nav", selected = "rnotebook")
-    })
-
     # Remove old modal-based language selection (replaced by gear button)
 
     # Render iframes with selected language as query param, but wait until service is alive
@@ -531,7 +501,6 @@ run_easybreedeR_Studio <- function() {
     output$frame_pediviewer   <- render_waiting_iframe(8002, lang_code, "PedivieweR", session)
     output$frame_genoviewer   <- render_waiting_iframe(8005, lang_code, "genovieweR", session)
     output$frame_easyblup     <- render_waiting_iframe(8003, lang_code, "easyblup", session)
-    output$frame_rnotebook    <- render_waiting_iframe(8004, lang_code, "RNotebook", session)
 
     session$onSessionEnded(function() {
       if (length(.suite_child_pids$pids) > 0) {

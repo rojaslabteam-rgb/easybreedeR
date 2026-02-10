@@ -92,7 +92,7 @@
 #' Launch the easybreedeR Studio (suite launcher)
 #'
 #' Main entry point for the easybreedeR Shiny application suite. Provides
-#' access to all sub-applications (easyblup, pedivieweR, datavieweR, RCW).
+#' access to all sub-applications (easyblup, pedivieweR, datavieweR, genovieweR).
 #'
 #' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
 #' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
@@ -228,31 +228,3 @@ run_datavieweR <- function(host = "0.0.0.0", port = NULL) {
   .announce_urls(host, resolved_port, .get_local_ip())
   shiny::runApp(app_dir, host = host, port = resolved_port, launch.browser = TRUE)
 }
-
-#' Launch RCW (R Canvas Workflow) application
-#'
-#' @description
-#' Launches the RCW application for visual R script pipeline management.
-#'
-#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
-#' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
-#' @export
-#' @examples
-#' \dontrun{
-#'   run_rcw()
-#' }
-run_rcw <- function(host = "0.0.0.0", port = NULL) {
-  app_dir <- system.file("RCW", package = "easybreedeR")
-  if (app_dir == "") {
-    dev_dir <- file.path(getwd(), "inst", "RCW")
-    if (dir.exists(dev_dir)) {
-      app_dir <- dev_dir
-    } else {
-      stop("RCW application not found. Please reinstall the package or run from package root.")
-    }
-  }
-  resolved_port <- .resolve_port(port)
-  .announce_urls(host, resolved_port, .get_local_ip())
-  shiny::runApp(app_dir, host = host, port = resolved_port, launch.browser = TRUE)
-}
-

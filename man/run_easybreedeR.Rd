@@ -16,7 +16,7 @@ A Shiny app object (invisibly returned by \code{shiny::runApp}).
 }
 \description{
 Main entry point for the easybreedeR Shiny application suite. Provides
-access to all sub-applications (easyblup, pedivieweR, datavieweR, RCW).
+access to all sub-applications (easyblup, pedivieweR, datavieweR, genovieweR).
 }
 \examples{
 \dontrun{

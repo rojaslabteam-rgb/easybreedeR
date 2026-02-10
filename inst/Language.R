@@ -103,11 +103,6 @@ TRANSLATIONS <- list(
     zh = "BLUPF90 参数卡生成与基因型格式转换",
     pt = "Gerador de parâmetros BLUPF90 e conversão de formato de genótipos"
   ),
-  suite_rcw_card_desc = list(
-    en = "R script pipeline management, visual R script pipeline management",
-    zh = "R 脚本流程管理与可视化流程管理",
-    pt = "Gerenciamento de pipeline de scripts R e pipeline visual"
-  ),
   suite_launch = list(
     en = "Launch",
     zh = "启动",
@@ -535,125 +530,6 @@ TRANSLATIONS <- list(
     zh = "🐾 个体：",
     pt = "🐾 Animal:"
   ),
-  rcw_app_name = list(
-    en = "R Canvas Workflow",
-    zh = "R Canvas Workflow",
-    pt = "R Canvas Workflow"
-  ),
-  rcw_app_subtitle = list(
-    en = "R Code Notebook with Visual Pipeline",
-    zh = "R 代码笔记本与可视化流程",
-    pt = "Notebook de Código R com Pipeline Visual"
-  ),
-  
-  # === RCW app labels ===
-  rcw_left_header = list(
-    en = "R Code Notebooks",
-    zh = "R 代码笔记本",
-    pt = "Cadernos de Código R"
-  ),
-  rcw_tip_drag = list(
-    en = "Tip: Drag .R files to the canvas to build a workflow",
-    zh = "提示：将 .R 文件拖拽到画布以构建工作流",
-    pt = "Dica: Arraste arquivos .R para a tela para montar o fluxo"
-  ),
-  rcw_new_folder = list(
-    en = "New Folder",
-    zh = "新建文件夹",
-    pt = "Nova Pasta"
-  ),
-  rcw_new_file = list(
-    en = "New .R File",
-    zh = "新建 .R 文件",
-    pt = "Novo Arquivo .R"
-  ),
-  rcw_add_folder = list(
-    en = "Add Folder",
-    zh = "添加文件夹",
-    pt = "Adicionar Pasta"
-  ),
-  rcw_run_pipeline = list(
-    en = "Run Pipeline",
-    zh = "运行流程",
-    pt = "Executar Pipeline"
-  ),
-  rcw_clear = list(
-    en = "Clear",
-    zh = "清空",
-    pt = "Limpar"
-  ),
-  rcw_tab_output = list(
-    en = "Pipeline Output",
-    zh = "流程输出",
-    pt = "Saída do Pipeline"
-  ),
-  rcw_tab_export = list(
-    en = "Export Rmd",
-    zh = "导出 Rmd",
-    pt = "Exportar Rmd"
-  ),
-  rcw_exec_results = list(
-    en = "Execution Results",
-    zh = "执行结果",
-    pt = "Resultados da Execução"
-  ),
-  rcw_run_log = list(
-    en = "Run Log",
-    zh = "运行日志",
-    pt = "Registro de Execução"
-  ),
-  rcw_export_title = list(
-    en = "Export to R Markdown",
-    zh = "导出为 R Markdown",
-    pt = "Exportar para R Markdown"
-  ),
-  rcw_export_desc = list(
-    en = "Export canvas workflow as R Markdown with hierarchical structure based on connections.",
-    zh = "将画布工作流导出为 R Markdown，并按连接关系生成层级结构。",
-    pt = "Exporte o fluxo da tela como R Markdown com estrutura hierárquica baseada nas conexões."
-  ),
-  rcw_download_rmd = list(
-    en = "Download .Rmd",
-    zh = "下载 .Rmd",
-    pt = "Baixar .Rmd"
-  ),
-  rcw_export_svg_title = list(
-    en = "Export to SVG",
-    zh = "导出为 SVG",
-    pt = "Exportar para SVG"
-  ),
-  rcw_export_svg_desc = list(
-    en = "Export canvas workflow as an SVG file (includes all connections and nodes).",
-    zh = "将画布工作流导出为 SVG 文件（包含所有连接线和节点）。",
-    pt = "Exporte o fluxo da tela como um arquivo SVG (inclui todas as conexões e nós)."
-  ),
-  rcw_btn_export_svg = list(
-    en = "Export SVG",
-    zh = "导出 SVG",
-    pt = "Exportar SVG"
-  ),
-  rcw_svg_export_generating = list(
-    en = "Generating SVG file...",
-    zh = "正在生成SVG文件...",
-    pt = "Gerando arquivo SVG..."
-  ),
-  rcw_svg_export_success = list(
-    en = "SVG file exported successfully!",
-    zh = "SVG文件已成功导出！",
-    pt = "Arquivo SVG exportado com sucesso!"
-  ),
-  rcw_svg_export_error_msg = list(
-    en = "Error exporting SVG",
-    zh = "导出SVG时出错",
-    pt = "Erro ao exportar SVG"
-  ),
-  rcw_preview = list(
-    en = "Preview",
-    zh = "预览",
-    pt = "Pré-visualização"
-  ),
-  
-  # NOTE: RCW alias keys are defined after TRANSLATIONS is fully created below.
   dataviewer_app_subtitle = list(
     en = "Data review and QC tool",
     zh = "数据审查与质控工具",
@@ -927,11 +803,6 @@ TRANSLATIONS <- list(
     en = "easyblup",
     zh = "easyblup",
     pt = "easyblup"
-  ),
-  rnotebook_app_name = list(
-    en = "RNotebook",
-    zh = "R 笔记本",
-    pt = "RNotebook"
   ),
   language_button = list(
     en = "English / Chinese / Portuguese",
@@ -1246,30 +1117,6 @@ TRANSLATIONS <- list(
     pt = "Quadrático: 0.1 0.01 0.001"
   )
 )
-# === RCW alias keys used by app ===
-# Create alias keys after TRANSLATIONS is fully constructed to avoid
-# referencing TRANSLATIONS during its own initialization.
-TRANSLATIONS$rcw_left_notebooks <- TRANSLATIONS$rcw_left_header
-TRANSLATIONS$rcw_left_tip_drag <- TRANSLATIONS$rcw_tip_drag
-TRANSLATIONS$rcw_btn_new_folder <- TRANSLATIONS$rcw_new_folder
-TRANSLATIONS$rcw_btn_new_file <- TRANSLATIONS$rcw_new_file
-TRANSLATIONS$rcw_btn_add_folder <- TRANSLATIONS$rcw_add_folder
-TRANSLATIONS$rcw_btn_run_pipeline <- TRANSLATIONS$rcw_run_pipeline
-TRANSLATIONS$rcw_btn_clear <- TRANSLATIONS$rcw_clear
-TRANSLATIONS$rcw_tab_pipeline_output <- TRANSLATIONS$rcw_tab_output
-TRANSLATIONS$rcw_tab_export_rmd <- TRANSLATIONS$rcw_tab_export
-TRANSLATIONS$rcw_right_exec_results <- TRANSLATIONS$rcw_exec_results
-TRANSLATIONS$rcw_right_run_log <- TRANSLATIONS$rcw_run_log
-TRANSLATIONS$rcw_right_export_rmd_title <- TRANSLATIONS$rcw_export_title
-TRANSLATIONS$rcw_right_export_rmd_desc <- TRANSLATIONS$rcw_export_desc
-TRANSLATIONS$rcw_right_export_svg_title <- TRANSLATIONS$rcw_export_svg_title
-TRANSLATIONS$rcw_right_export_svg_desc <- TRANSLATIONS$rcw_export_svg_desc
-TRANSLATIONS$rcw_right_preview <- TRANSLATIONS$rcw_preview
-TRANSLATIONS$rcw_btn_download_rmd <- TRANSLATIONS$rcw_download_rmd
-TRANSLATIONS$rcw_btn_export_svg <- TRANSLATIONS$rcw_btn_export_svg
-TRANSLATIONS$rcw_svg_export_generating <- TRANSLATIONS$rcw_svg_export_generating
-TRANSLATIONS$rcw_svg_export_success <- TRANSLATIONS$rcw_svg_export_success
-TRANSLATIONS$rcw_svg_export_error_msg <- TRANSLATIONS$rcw_svg_export_error_msg
 
 # === datavieweR alias keys used by app ===
 # Map generic keys used in inst/datavieweR/app.R to the centralized dataviewer_* entries
