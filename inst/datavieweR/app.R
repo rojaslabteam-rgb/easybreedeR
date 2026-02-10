@@ -20,6 +20,17 @@ suppressPackageStartupMessages({
   library(tools)
 })
 
+# Check if plotly is available for interactive comparison plots
+use_plotly <- FALSE
+tryCatch({
+  if (requireNamespace("plotly", quietly = TRUE)) {
+    library(plotly)
+    use_plotly <- TRUE
+  }
+}, error = function(e) {
+  use_plotly <- FALSE
+})
+
 # ============================================================================
 # HELPER FUNCTIONS
 # ============================================================================
@@ -576,7 +587,7 @@ ui <- page_fillable(
               div(style = "margin-top: 20px;",
                   uiOutput("dataSummaryUI"),
                   uiOutput("plotDownloadUI"),
-                  plotOutput("preDistPlot", height = "500px"),
+                  uiOutput("preDistPlotContainer"),
                   br(),
                   DTOutput("previewTable")
               )
@@ -1117,58 +1128,150 @@ server <- function(input, output, session) {
     selectedData()
   }, options = list(pageLength = 10, dom = 't'))
   
-  # Preview plot
-  output$preDistPlot <- renderPlot({
+  pre_plot_data <- reactive({
     req(selectedData(), input$plotType)
     numeric_cols <- selectedData() %>% dplyr::select_if(is.numeric)
-    if (ncol(numeric_cols) == 0) {
-      showNotification(get_label("no_data_plot", current_lang()), type = "warning")
-      return(NULL)
-    }
-    
+    if (ncol(numeric_cols) == 0) return(NULL)
     df_long <- numeric_cols %>%
       tidyr::pivot_longer(everything(), names_to = "Column", values_to = "Value") %>%
       dplyr::filter(!is.na(Value))
-    plot_ready(TRUE)
-    
-    if (nrow(df_long) == 0) {
-      showNotification(get_label("no_data_plot", current_lang()), type = "warning")
-      return(NULL)
-    }
-    
-    if (input$plotType == "histogram") {
-      ggplot(df_long, aes(x = Value)) +
-        geom_histogram(bins = input$bins, fill = preFilterColor(), alpha = 0.7) +
-        facet_wrap(~ Column, scales = "free") +
-        labs(title = "Pre-Filter Data Distribution", x = "Value", y = "Frequency") +
-        theme_minimal(base_size = 14) +
-        theme(plot.title = element_text(hjust = 0.5))
-    } else if (input$plotType == "boxplot") {
-      ggplot(df_long, aes(y = Value)) +
-        geom_boxplot(fill = preFilterColor(), alpha = 0.7) +
-        facet_wrap(~ Column, scales = "free") +
-        labs(title = "Pre-Filter Data Distribution (Boxplot)", x = "Column", y = "Value") +
-        theme_minimal(base_size = 14) +
-        theme(
-          plot.title = element_text(hjust = 0.5),
-          axis.text.x = element_blank(),
-          axis.ticks.x = element_blank()
+    if (nrow(df_long) == 0) return(NULL)
+    list(df_long = df_long, cols = unique(df_long$Column))
+  })
+  
+  .build_one_pre_plot <- function(df_long, col, pre_col, bins, plot_type) {
+    d <- df_long %>% dplyr::filter(Column == col)
+    if (plot_type == "histogram") {
+      xrange <- range(d$Value, na.rm = TRUE)
+      bin_width <- (diff(xrange) + 1e-8) / max(1L, as.integer(bins))
+      xbins <- list(start = xrange[1], end = xrange[2], size = bin_width)
+      plotly::plot_ly(d, x = ~Value) %>%
+        plotly::add_histogram(marker = list(color = pre_col), opacity = 0.7, xbins = xbins) %>%
+        plotly::layout(
+          title = list(text = ""),
+          xaxis = list(title = list(text = "Value")),
+          yaxis = list(title = list(text = "Frequency")),
+          margin = list(t = 55, b = 50, l = 50, r = 80)
+        )
+    } else if (plot_type == "boxplot") {
+      plotly::plot_ly(d, y = ~Value, type = "box",
+                      marker = list(color = pre_col), line = list(color = pre_col)) %>%
+        plotly::layout(
+          title = list(text = ""),
+          xaxis = list(showticklabels = FALSE),
+          yaxis = list(title = list(text = "Value")),
+          margin = list(t = 55, b = 50, l = 50, r = 80)
         )
     } else {
-      ggplot(df_long, aes(sample = Value)) +
-        stat_qq(color = preFilterColor(), alpha = 0.7) +
-        stat_qq_line(color = "#333333", linewidth = 0.6) +
-        facet_wrap(~ Column, scales = "free") +
-        labs(
-          title = "Pre-Filter Q-Q Plot",
-          subtitle = "X: Theoretical Quantiles (Normal) | Y: Sample Quantiles",
-          x = "Theoretical Quantiles",
-          y = "Sample Quantiles"
-        ) +
-        theme_minimal(base_size = 14) +
-        theme(plot.title = element_text(hjust = 0.5))
+      if (nrow(d) < 2) return(plotly::plot_ly() %>% plotly::layout(title = list(text = "")))
+      qq <- qqnorm(d$Value, plot.it = FALSE)
+      df_qq <- data.frame(Theoretical = qq$x, Sample = qq$y)
+      p <- plotly::plot_ly(df_qq, x = ~Theoretical, y = ~Sample) %>%
+        plotly::add_markers(marker = list(color = pre_col, opacity = 0.7))
+      probs <- c(0.25, 0.75)
+      q_th <- stats::qnorm(probs)
+      q_sam <- stats::quantile(d$Value, probs = probs, na.rm = TRUE)
+      slope <- (q_sam[2L] - q_sam[1L]) / (q_th[2L] - q_th[1L])
+      intercept <- q_sam[1L] - slope * q_th[1L]
+      x_line <- range(qq$x, na.rm = TRUE)
+      y_line <- intercept + slope * x_line
+      p <- p %>% plotly::add_lines(x = x_line, y = y_line, line = list(dash = "dash", color = "#333"), name = "Normal") %>%
+        plotly::layout(
+          title = list(text = ""),
+          xaxis = list(title = list(text = "Theoretical Quantiles")),
+          yaxis = list(title = list(text = "Sample Quantiles")),
+          margin = list(t = 55, b = 50, l = 50, r = 80)
+        )
+    }
+  }
+  
+  output$preDistPlotContainer <- renderUI({
+    data <- pre_plot_data()
+    if (is.null(data)) {
+      plot_ready(FALSE)
+      return(div(style = "text-align: center; padding: 20px; color: #666;", get_label("no_data_plot", current_lang())))
+    }
+    plot_ready(TRUE)
+    if (use_plotly) {
+      pt <- input$plotType
+      pre_sub <- if (pt == "histogram") " — Pre-Filter Distribution (Frequency)"
+        else if (pt == "boxplot") " — Pre-Filter Distribution (Boxplot)"
+        else " — Pre-Filter Q-Q Plot"
+      tagList(lapply(seq_along(data$cols), function(i) {
+        div(
+          style = "margin-bottom: 28px;",
+          h4(paste0(data$cols[i], pre_sub), style = "font-weight: bold; font-size: 16px; margin-bottom: 8px; font-family:'Times New Roman', 'SimSun', serif;"),
+          plotly::plotlyOutput(paste0("preDistPlot_", i), height = "400px")
+        )
+      }))
+    } else {
+      plotOutput("preDistPlot", height = "500px")
     }
   })
+  
+  if (use_plotly) {
+    observe({
+      data <- pre_plot_data()
+      if (is.null(data)) return()
+      cols <- data$cols
+      for (i in seq_along(cols)) {
+        local({
+          idx <- i
+          output_id <- paste0("preDistPlot_", idx)
+          output[[output_id]] <- renderPlotly({
+            data2 <- pre_plot_data()
+            if (is.null(data2)) return(plotly::plot_ly())
+            col_name <- data2$cols[idx]
+            .build_one_pre_plot(
+              data2$df_long, col_name,
+              preFilterColor(), input$bins %||% 30L, input$plotType
+            ) %>% plotly::toWebGL() %>% plotly::config(displayModeBar = TRUE)
+          })
+        })
+      }
+    })
+  } else {
+    output$preDistPlot <- renderPlot({
+      data <- pre_plot_data()
+      if (is.null(data)) {
+        showNotification(get_label("no_data_plot", current_lang()), type = "warning")
+        return(NULL)
+      }
+      df_long <- data$df_long
+      if (input$plotType == "histogram") {
+        ggplot(df_long, aes(x = Value)) +
+          geom_histogram(bins = input$bins, fill = preFilterColor(), alpha = 0.7) +
+          facet_wrap(~ Column, scales = "free") +
+          labs(title = "Pre-Filter Data Distribution (Frequency)", x = "Value", y = "Frequency") +
+          theme_minimal(base_size = 14) +
+          theme(plot.title = element_text(hjust = 0.5))
+      } else if (input$plotType == "boxplot") {
+        ggplot(df_long, aes(y = Value)) +
+          geom_boxplot(fill = preFilterColor(), alpha = 0.7) +
+          facet_wrap(~ Column, scales = "free") +
+          labs(title = "Pre-Filter Data Distribution (Boxplot)", x = "Column", y = "Value") +
+          theme_minimal(base_size = 14) +
+          theme(
+            plot.title = element_text(hjust = 0.5),
+            axis.text.x = element_blank(),
+            axis.ticks.x = element_blank()
+          )
+      } else {
+        ggplot(df_long, aes(sample = Value)) +
+          stat_qq(color = preFilterColor(), alpha = 0.7) +
+          stat_qq_line(color = "#333333", linewidth = 0.6) +
+          facet_wrap(~ Column, scales = "free") +
+          labs(
+            title = "Pre-Filter Q-Q Plot",
+            subtitle = "X: Theoretical Quantiles (Normal) | Y: Sample Quantiles",
+            x = "Theoretical Quantiles",
+            y = "Sample Quantiles"
+          ) +
+          theme_minimal(base_size = 14) +
+          theme(plot.title = element_text(hjust = 0.5))
+      }
+    })
+  }
   
   output$plotDownloadUI <- renderUI({
     if (plot_ready()) {
@@ -1195,7 +1298,7 @@ server <- function(input, output, session) {
         p <- ggplot(df_long, aes(x = Value)) +
           geom_histogram(bins = input$bins, fill = preFilterColor(), alpha = 0.7) +
           facet_wrap(~ Column, scales = "free") +
-          labs(title = "Pre-Filter Data Distribution", x = "Value", y = "Frequency") +
+          labs(title = "Pre-Filter Data Distribution (Frequency)", x = "Value", y = "Frequency") +
           theme_minimal(base_size = 14) +
           theme(plot.title = element_text(hjust = 0.5))
       } else if (input$plotType == "boxplot") {
@@ -1422,12 +1525,17 @@ server <- function(input, output, session) {
       post_mean <- mean(post_vals, na.rm = TRUE)
       post_sd   <- sd(post_vals, na.rm = TRUE)
       
+      pre_cv  <- if (is.finite(pre_mean) && pre_mean != 0) 100 * pre_sd / abs(pre_mean) else NA_real_
+      post_cv <- if (is.finite(post_mean) && post_mean != 0) 100 * post_sd / abs(post_mean) else NA_real_
+      
       data.frame(
         Column      = col,
         Pre_Mean    = pre_mean,
         Pre_SD      = pre_sd,
+        Pre_CV_pct  = pre_cv,
         Post_Mean   = post_mean,
         Post_SD     = post_sd,
+        Post_CV_pct = post_cv,
         Delta_Mean  = post_mean - pre_mean,
         Delta_SD    = post_sd - pre_sd,
         stringsAsFactors = FALSE
@@ -1440,7 +1548,8 @@ server <- function(input, output, session) {
   output$qcSummaryTable <- renderDT({
     req(qcSummary())
     datatable(qcSummary(), rownames = FALSE, options = list(pageLength = 10, autoWidth = TRUE)) %>%
-      formatRound(c("Pre_Mean","Pre_SD","Post_Mean","Post_SD","Delta_Mean","Delta_SD"), 3)
+      formatRound(c("Pre_Mean","Pre_SD","Post_Mean","Post_SD","Delta_Mean","Delta_SD"), 3) %>%
+      formatRound(c("Pre_CV_pct","Post_CV_pct"), 2)
   })
 
   # Normality test (Pre/Post)
@@ -1527,74 +1636,182 @@ server <- function(input, output, session) {
       formatSignif(p_col, 3)
   })
   
-  # Comparison plots
-  output$comparisonPlots <- renderPlot({
+  # Comparison plots (interactive with plotly when available, else static ggplot)
+  .build_comparison_combined <- function() {
     req(filteredData(), input$plotType, input$columns)
-    
     selected_cols <- input$columns
     if (is.null(selected_cols) || length(selected_cols) == 0) return(NULL)
-    
     pre_data <- selectedData()
     pre_numeric <- pre_data[, selected_cols, drop = FALSE]
     pre_numeric <- pre_numeric[, sapply(pre_numeric, is.numeric), drop = FALSE]
-    
     post_data <- filteredData()$data
     post_numeric <- post_data[, selected_cols, drop = FALSE]
     post_numeric <- post_numeric[, sapply(post_numeric, is.numeric), drop = FALSE]
-    
-    if (ncol(pre_numeric) == 0 || ncol(post_numeric) == 0) {
-      showNotification(get_label("no_data_comparison", current_lang()), type = "warning")
-      return(NULL)
-    }
-    
+    if (ncol(pre_numeric) == 0 || ncol(post_numeric) == 0) return(NULL)
     pre_long <- pre_numeric %>%
       tidyr::pivot_longer(everything(), names_to = "Column", values_to = "Value") %>%
       dplyr::filter(!is.na(Value)) %>%
       dplyr::mutate(Type = "Pre-Filter")
-    
     post_long <- post_numeric %>%
       tidyr::pivot_longer(everything(), names_to = "Column", values_to = "Value") %>%
       dplyr::filter(!is.na(Value)) %>%
       dplyr::mutate(Type = "Post-Filter")
-    
     combined <- dplyr::bind_rows(pre_long, post_long)
-    if (nrow(combined) == 0) {
-      showNotification(get_label("no_data_comparison", current_lang()), type = "warning")
-      return(NULL)
-    }
-    
-    if (input$plotType == "histogram") {
-      ggplot(combined, aes(x = Value, fill = Type)) +
-        geom_histogram(bins = input$bins, alpha = 0.7, position = "dodge") +
-        facet_wrap(~ Column, scales = "free") +
-        scale_fill_manual(values = c("Pre-Filter" = preFilterColor(), "Post-Filter" = postFilterColor())) +
-        labs(title = "Pre-Filter vs Post-Filter Data Distribution", x = "Value", y = "Frequency") +
-        theme_minimal(base_size = 14) +
-        theme(plot.title = element_text(hjust = 0.5))
-    } else if (input$plotType == "boxplot") {
-      ggplot(combined, aes(y = Value, x = Type, fill = Type)) +
-        geom_boxplot(alpha = 0.7) +
-        facet_wrap(~ Column, scales = "free") +
-        scale_fill_manual(values = c("Pre-Filter" = preFilterColor(), "Post-Filter" = postFilterColor())) +
-        labs(title = "Pre-Filter vs Post-Filter Data Distribution (Boxplot)", x = "Type", y = "Value") +
-        theme_minimal(base_size = 14) +
-        theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.title = element_text(hjust = 0.5))
-    } else {
-      ggplot(combined, aes(sample = Value, color = Type)) +
-        stat_qq(alpha = 0.6) +
-        stat_qq_line(linewidth = 0.6) +
-        facet_wrap(~ Column, scales = "free") +
-        scale_color_manual(values = c("Pre-Filter" = preFilterColor(), "Post-Filter" = postFilterColor())) +
-        labs(
-          title = "Pre-Filter vs Post-Filter Q-Q Plot",
-          subtitle = "X: Theoretical Quantiles (Normal) | Y: Sample Quantiles",
-          x = "Theoretical Quantiles",
-          y = "Sample Quantiles"
-        ) +
-        theme_minimal(base_size = 14) +
-        theme(plot.title = element_text(hjust = 0.5))
-    }
+    if (nrow(combined) == 0) return(NULL)
+    combined
+  }
+
+  comparison_plot_data <- reactive({
+    combined <- .build_comparison_combined()
+    if (is.null(combined)) return(NULL)
+    list(combined = combined, cols = unique(combined$Column))
   })
+
+  .build_one_comparison_plot <- function(combined, col, pre_col, post_col, bins, plot_type) {
+    d <- combined %>% dplyr::filter(Column == col)
+    if (plot_type == "histogram") {
+      d_pre <- d %>% dplyr::filter(Type == "Pre-Filter")
+      d_post <- d %>% dplyr::filter(Type == "Post-Filter")
+      xrange <- range(d$Value, na.rm = TRUE)
+      bin_width <- (diff(xrange) + 1e-8) / max(1L, as.integer(bins))
+      xbins_common <- list(start = xrange[1], end = xrange[2], size = bin_width)
+      p <- plotly::plot_ly()
+          if (nrow(d_pre) > 0) {
+            p <- p %>% plotly::add_histogram(data = d_pre, x = ~Value, name = "Pre-Filter",
+                                            marker = list(color = pre_col), opacity = 0.7,
+                                            xbins = xbins_common)
+          }
+          if (nrow(d_post) > 0) {
+            p <- p %>% plotly::add_histogram(data = d_post, x = ~Value, name = "Post-Filter",
+                                            marker = list(color = post_col), opacity = 0.7,
+                                            xbins = xbins_common)
+          }
+          p %>% plotly::layout(
+            barmode = "overlay",
+            title = list(text = ""),
+            xaxis = list(title = list(text = "Value")),
+            yaxis = list(title = list(text = "Frequency")),
+        showlegend = TRUE,
+        legend = list(orientation = "v", x = 1.02, xanchor = "left", y = 0.5, yanchor = "middle"),
+        margin = list(t = 55, b = 50, l = 50, r = 100)
+      )
+    } else if (plot_type == "boxplot") {
+      plotly::plot_ly(d, x = ~Type, y = ~Value, color = ~Type, type = "box",
+                      colors = c("Pre-Filter" = pre_col, "Post-Filter" = post_col)) %>%
+        plotly::layout(
+          title = list(text = ""),
+          xaxis = list(title = list(text = "Type")),
+          yaxis = list(title = list(text = "Value")),
+          showlegend = TRUE,
+          legend = list(orientation = "v", x = 1.02, xanchor = "left", y = 0.5, yanchor = "middle"),
+          margin = list(t = 55, b = 50, l = 50, r = 100)
+        )
+    } else {
+      d_pre <- d %>% dplyr::filter(Type == "Pre-Filter")
+      d_post <- d %>% dplyr::filter(Type == "Post-Filter")
+      p <- plotly::plot_ly()
+      all_th <- numeric(0)
+      all_sam <- numeric(0)
+      if (nrow(d_pre) >= 2) {
+        qq_pre <- qqnorm(d_pre$Value, plot.it = FALSE)
+        df_pre <- data.frame(Theoretical = qq_pre$x, Sample = qq_pre$y, Type = "Pre-Filter")
+        p <- p %>% plotly::add_markers(data = df_pre, x = ~Theoretical, y = ~Sample, name = "Pre-Filter",
+                                        marker = list(color = pre_col, opacity = 0.6))
+        all_th <- c(all_th, df_pre$Theoretical)
+        all_sam <- c(all_sam, df_pre$Sample)
+      }
+      if (nrow(d_post) >= 2) {
+        qq_post <- qqnorm(d_post$Value, plot.it = FALSE)
+        df_post <- data.frame(Theoretical = qq_post$x, Sample = qq_post$y, Type = "Post-Filter")
+        p <- p %>% plotly::add_markers(data = df_post, x = ~Theoretical, y = ~Sample, name = "Post-Filter",
+                                       marker = list(color = post_col, opacity = 0.6))
+        all_th <- c(all_th, df_post$Theoretical)
+        all_sam <- c(all_sam, df_post$Sample)
+      }
+      if (length(all_th) >= 2) {
+        probs <- c(0.25, 0.75)
+        q_th <- stats::qnorm(probs)
+        q_sam <- stats::quantile(d$Value, probs = probs, na.rm = TRUE)
+        slope <- (q_sam[2L] - q_sam[1L]) / (q_th[2L] - q_th[1L])
+        intercept <- q_sam[1L] - slope * q_th[1L]
+        x_line <- range(all_th, na.rm = TRUE)
+        y_line <- intercept + slope * x_line
+        p <- p %>% plotly::add_lines(x = x_line, y = y_line, line = list(dash = "dash", color = "#333"), name = "Normal")
+      }
+      p <- p %>% plotly::layout(
+        title = list(text = ""),
+        xaxis = list(title = list(text = "Theoretical Quantiles")),
+        yaxis = list(title = list(text = "Sample Quantiles")),
+        showlegend = TRUE,
+        legend = list(orientation = "v", x = 1.02, xanchor = "left", y = 0.5, yanchor = "middle"),
+        margin = list(t = 55, b = 50, l = 50, r = 100)
+      )
+    }
+  }
+
+  if (use_plotly) {
+    observe({
+      data <- comparison_plot_data()
+      if (is.null(data)) return()
+      combined <- data$combined
+      cols <- data$cols
+      for (i in seq_along(cols)) {
+        local({
+          idx <- i
+          output_id <- paste0("comparisonPlot_", idx)
+          output[[output_id]] <- renderPlotly({
+            data2 <- comparison_plot_data()
+            if (is.null(data2)) return(plotly::plot_ly())
+            col_name <- data2$cols[idx]
+            .build_one_comparison_plot(
+              data2$combined, col_name,
+              preFilterColor(), postFilterColor(),
+              input$bins %||% 30L, input$plotType
+            ) %>% plotly::toWebGL() %>% plotly::config(displayModeBar = TRUE)
+          })
+        })
+      }
+    })
+  } else {
+    output$comparisonPlots <- renderPlot({
+      combined <- .build_comparison_combined()
+      if (is.null(combined)) {
+        showNotification(get_label("no_data_comparison", current_lang()), type = "warning")
+        return(NULL)
+      }
+      if (input$plotType == "histogram") {
+        ggplot(combined, aes(x = Value, fill = Type)) +
+          geom_histogram(bins = input$bins, alpha = 0.7, position = "identity") +
+          facet_wrap(~ Column, scales = "free") +
+          scale_fill_manual(values = c("Pre-Filter" = preFilterColor(), "Post-Filter" = postFilterColor())) +
+          labs(title = "Pre-Filter vs Post-Filter Data Distribution (Frequency)", x = "Value", y = "Frequency") +
+          theme_minimal(base_size = 14) +
+          theme(plot.title = element_text(hjust = 0.5))
+      } else if (input$plotType == "boxplot") {
+        ggplot(combined, aes(y = Value, x = Type, fill = Type)) +
+          geom_boxplot(alpha = 0.7) +
+          facet_wrap(~ Column, scales = "free") +
+          scale_fill_manual(values = c("Pre-Filter" = preFilterColor(), "Post-Filter" = postFilterColor())) +
+          labs(title = "Pre-Filter vs Post-Filter Data Distribution (Boxplot)", x = "Type", y = "Value") +
+          theme_minimal(base_size = 14) +
+          theme(axis.text.x = element_text(angle = 45, hjust = 1), plot.title = element_text(hjust = 0.5))
+      } else {
+        ggplot(combined, aes(sample = Value, color = Type)) +
+          stat_qq(alpha = 0.6) +
+          stat_qq_line(linewidth = 0.6) +
+          facet_wrap(~ Column, scales = "free") +
+          scale_color_manual(values = c("Pre-Filter" = preFilterColor(), "Post-Filter" = postFilterColor())) +
+          labs(
+            title = "Pre-Filter vs Post-Filter Q-Q Plot",
+            subtitle = "X: Theoretical Quantiles (Normal) | Y: Sample Quantiles",
+            x = "Theoretical Quantiles",
+            y = "Sample Quantiles"
+          ) +
+          theme_minimal(base_size = 14) +
+          theme(plot.title = element_text(hjust = 0.5))
+      }
+    })
+  }
   
   # Switch to QC Results tab after applying filter
   observeEvent(input$applyFilter, {
@@ -1637,10 +1854,10 @@ server <- function(input, output, session) {
       
       if (input$plotType == "histogram") {
         p <- ggplot(combined, aes(x = Value, fill = Type)) +
-          geom_histogram(bins = input$bins, alpha = 0.7, position = "dodge") +
+          geom_histogram(bins = input$bins, alpha = 0.7, position = "identity") +
           facet_wrap(~ Column, scales = "free") +
           scale_fill_manual(values = c("Pre-Filter" = preFilterColor(), "Post-Filter" = postFilterColor())) +
-          labs(title = "Pre vs Post Filter Data Distribution", x = "Value", y = "Frequency") +
+          labs(title = "Pre vs Post Filter Data Distribution (Frequency)", x = "Value", y = "Frequency") +
           theme_minimal(base_size = 14) +
           theme(plot.title = element_text(hjust = 0.5))
       } else if (input$plotType == "boxplot") {
@@ -1753,9 +1970,28 @@ server <- function(input, output, session) {
       div(style = "display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;",
           div("Distribution Comparison Plots",
               style = "font-weight:bold; font-family:'Times New Roman', 'SimSun', serif; font-size:18px;"),
-          downloadButton("downloadComparisonPlot", get_label("download_comparison", lang), 
+          downloadButton("downloadComparisonPlot", get_label("download_comparison", lang),
                         class = "btn btn-sm btn-outline-primary")),
-      plotOutput("comparisonPlots", height = "600px")
+      if (use_plotly) {
+        data <- comparison_plot_data()
+        if (is.null(data) || length(data$cols) == 0) {
+          div(style = "text-align: center; padding: 20px; color: #666;", get_label("no_data_comparison", lang))
+        } else {
+          pt <- input$plotType
+          cmp_sub <- if (pt == "histogram") " — Pre vs Post-Filter (Frequency)"
+            else if (pt == "boxplot") " — Pre vs Post-Filter (Boxplot)"
+            else " — Pre vs Post-Filter (Q-Q Plot)"
+          tagList(lapply(seq_along(data$cols), function(i) {
+            div(
+              style = "margin-bottom: 28px;",
+              h4(paste0(data$cols[i], cmp_sub), style = "font-weight: bold; font-size: 16px; margin-bottom: 8px; font-family:'Times New Roman', 'SimSun', serif;"),
+              plotly::plotlyOutput(paste0("comparisonPlot_", i), height = "400px")
+            )
+          }))
+        }
+      } else {
+        plotOutput("comparisonPlots", height = "600px")
+      }
     )
   })
   
