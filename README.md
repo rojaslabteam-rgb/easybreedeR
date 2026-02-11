@@ -10,8 +10,13 @@
 [![R-CMD-check](https://github.com/rojaslabteam-rgb/easybreedeR/actions/workflows/R-CMD-check.yaml/badge.svg)](https://github.com/rojaslabteam-rgb/easybreedeR/actions/workflows/R-CMD-check.yaml)
 [![License](https://img.shields.io/github/license/rojaslabteam-rgb/easybreedeR)](LICENSE)
 [![DOI](https://zenodo.org/badge/DOI/10.5281/zenodo.18381723.svg)](https://doi.org/10.5281/zenodo.18381723)
+[![Online easybreedeR Studio](https://img.shields.io/badge/Online-easybreedeR%20Studio-red?logo=R)](https://vb6clt-huangyi-tang.shinyapps.io/easybreeder-suite/)
+# Online version is now open!
+<h2 style="color:#B22222;">
+Try easybreedeR here:
+</h2>
+https://vb6clt-huangyi-tang.shinyapps.io/easybreeder-suite/
 
-</h1>
 
 # Contents
 - [Deploy](#deploy)
