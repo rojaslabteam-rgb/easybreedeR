@@ -2056,6 +2056,12 @@ server <- function(input, output, session) {
 }
 
 # ============================================================================
-# RUN APP
+# APP ENTRYPOINTS
 # ============================================================================
-shinyApp(ui = ui, server = server)
+run_dataviewer_app <- function() {
+  list(ui = ui, server = server)
+}
+
+if (!identical(Sys.getenv("EASYBREEDER_SOURCE_ONLY", ""), "1")) {
+  shinyApp(ui = ui, server = server)
+}

@@ -22,12 +22,17 @@ try({
     this_file <- normalizePath(sys.frames()[[1]]$ofile)
     normalizePath(file.path(dirname(this_file), "..", "Language.R"))
   }, error = function(e) NA)
-  if (!is.na(lang_candidate) && file.exists(lang_candidate)) {
-    source(lang_candidate, local = FALSE)
-  } else {
-    # Fallback to cwd/.. pattern
-    lang_candidate2 <- normalizePath(file.path(suite_dir, "..", "Language.R"), mustWork = FALSE)
-    if (file.exists(lang_candidate2)) source(lang_candidate2, local = FALSE)
+  lang_candidates <- unique(c(
+    if (!is.na(lang_candidate)) lang_candidate else character(0),
+    normalizePath(file.path(suite_dir, "inst", "Language.R"), mustWork = FALSE),
+    normalizePath(file.path(suite_dir, "Language.R"), mustWork = FALSE),
+    normalizePath(file.path(suite_dir, "..", "Language.R"), mustWork = FALSE)
+  ))
+  for (cand in lang_candidates) {
+    if (file.exists(cand)) {
+      source(cand, local = FALSE)
+      break
+    }
   }
 }, silent = TRUE)
 
@@ -50,6 +55,22 @@ try({
 
 APP_DIR <- .resolve_app_dir()
 
+# On shinyapps.io, appPrimaryDoc may run from project root. Resolve to the
+# actual suite folder if R scripts are not under APP_DIR directly.
+if (!file.exists(file.path(APP_DIR, "R", "Global.R"))) {
+  app_candidates <- c(
+    file.path(APP_DIR, "inst", "easybreedeR_Studio"),
+    file.path(getwd(), "inst", "easybreedeR_Studio"),
+    file.path(dirname(APP_DIR), "inst", "easybreedeR_Studio")
+  )
+  for (cand in unique(app_candidates)) {
+    if (file.exists(file.path(cand, "R", "Global.R"))) {
+      APP_DIR <- normalizePath(cand, winslash = "/", mustWork = FALSE)
+      break
+    }
+  }
+}
+
 # Ensure LAN access is enabled by default
 # This ensures the app listens on 0.0.0.0 even if .Rprofile is not loaded
 if (is.null(getOption("shiny.host"))) {
@@ -64,5 +85,3 @@ source(file.path(APP_DIR, "R/run_easybreedeR_Studio.R"), local = FALSE)
 
 runner <- run_easybreedeR_Studio()
 shinyApp(ui = runner$ui, server = runner$server)
-
-

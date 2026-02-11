@@ -4117,6 +4117,12 @@ calculate_sample_relatedness <- function(data) {
 }
 
 # ============================================================================
-# RUN APP
+# APP ENTRYPOINTS
 # ============================================================================
-shinyApp(ui = ui, server = server)
+run_genoviewer_app <- function() {
+  list(ui = ui, server = server)
+}
+
+if (!identical(Sys.getenv("EASYBREEDER_SOURCE_ONLY", ""), "1")) {
+  shinyApp(ui = ui, server = server)
+}
