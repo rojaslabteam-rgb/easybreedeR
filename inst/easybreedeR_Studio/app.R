@@ -1,5 +1,3 @@
-# Open BreedX (OBX) Clean Three-Panel Layout
-
 suppressPackageStartupMessages({
   library(shiny)
   library(bslib)

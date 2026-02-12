@@ -1,8 +1,3 @@
-# genovieweR - Genotype Viewer and Quality Control
-# Version: 0.1.0
-# Created: 2025-01-XX
-# A Shiny application for genotype data visualization and quality control
-
 # ============================================================================
 # LIBRARIES
 # ============================================================================

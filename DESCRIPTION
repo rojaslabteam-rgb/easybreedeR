@@ -1,7 +1,7 @@
 Package: easybreedeR
 Type: Package
 Title: An Integrated R Shiny Application for Breeding Data Analysis
-Version: 0.6.0
+Version: 0.6.1
 Author: Huangyi Tang
 Maintainer: Huangyi Tang <tang749@purdue.edu>
 Description: easybreedeR is a modular R-Shiny application for rapid quality control, visualization, and preparation of breeding data across phenotypes, pedigrees, and genotypes.
