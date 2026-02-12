@@ -67,10 +67,6 @@ child_specs <- list(
     env = "EASYBREEDER_EASYBLUP_URL",
     files = c(
       "inst/easyblup/app.R",
-      "inst/easyblup/ai_assistant.R",
-      "inst/easyblup/ai_rules.json",
-      "inst/easyblup/global.R",
-      "inst/easyblup/mcp_tools.R",
       "inst/easyblup/www"
     )
   )
