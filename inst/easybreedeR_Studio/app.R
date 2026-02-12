@@ -69,22 +69,6 @@ APP_DIR <- .resolve_app_dir()
 }
 SUITE_DIR <- .resolve_suite_dir(APP_DIR)
 
-# On shinyapps.io, appPrimaryDoc may run from project root. Resolve to the
-# actual suite folder if R scripts are not under APP_DIR directly.
-if (!file.exists(file.path(APP_DIR, "R", "Global.R"))) {
-  app_candidates <- c(
-    file.path(APP_DIR, "inst", "easybreedeR_Studio"),
-    file.path(getwd(), "inst", "easybreedeR_Studio"),
-    file.path(dirname(APP_DIR), "inst", "easybreedeR_Studio")
-  )
-  for (cand in unique(app_candidates)) {
-    if (file.exists(file.path(cand, "R", "Global.R"))) {
-      APP_DIR <- normalizePath(cand, winslash = "/", mustWork = FALSE)
-      break
-    }
-  }
-}
-
 # Ensure LAN access is enabled by default
 # This ensures the app listens on 0.0.0.0 even if .Rprofile is not loaded
 if (is.null(getOption("shiny.host"))) {

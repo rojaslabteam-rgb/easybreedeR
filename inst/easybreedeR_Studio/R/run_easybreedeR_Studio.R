@@ -296,8 +296,8 @@ run_easybreedeR_Studio <- function() {
           shiny::fluidRow(
             shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/igraph/igraph", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "igraph")))),
             shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/tidyverse/readxl", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "readxl")))),
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/rstudio/reticulate", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "reticulate")))),
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/irudnyts/openai", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "openai"))))
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/RcppCore/Rcpp", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "Rcpp")))),
+            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/Rdatatable/data.table", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "data.table"))))
           ),
           shiny::fluidRow(
             shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/jeroen/curl", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "curl")))),

@@ -1929,12 +1929,28 @@ output$top10_dam_title <- renderText({
   f_values_cache <- reactiveVal(NULL)
   f_values_cache_hash <- reactiveVal(NULL)
   
-  # Status for "right panel / results updating" after F calculation (shows progress bar while summary/tables re-render)
-  f_results_panel_status <- reactiveVal(list(
-    updating = FALSE,
-    progress = 0,
-    message = ""
-  ))
+  # Post-F caches to keep large-data navigation responsive
+  descendant_summary_cache <- reactiveVal(list(hash = NULL, sire = NULL, dam = NULL))
+  generation_depth_cache <- reactiveVal(list(hash = NULL, data = NULL))
+  qc_issue_cache <- reactiveVal(list(hash = NULL, data = NULL))
+  qc_modal_open <- reactiveVal(FALSE)
+  qc_modal_signature <- reactiveVal(NULL)
+  
+  pedigree_hash <- function(ped) {
+    if (is.null(ped) || !all(c("ID", "Sire", "Dam") %in% names(ped))) return(NULL)
+    digest::digest(ped[, c("ID", "Sire", "Dam")], algo = "xxhash64")
+  }
+  
+  reset_post_f_caches <- function() {
+    descendant_summary_cache(list(hash = NULL, sire = NULL, dam = NULL))
+    generation_depth_cache(list(hash = NULL, data = NULL))
+    qc_issue_cache(list(hash = NULL, data = NULL))
+  }
+
+  reset_qc_modal_guard <- function() {
+    qc_modal_open(FALSE)
+    qc_modal_signature(NULL)
+  }
   
   # Observe file upload and auto-detect
   observe({
@@ -2134,24 +2150,32 @@ output$top10_dam_title <- renderText({
   
   # Reset storage when new file is uploaded
   observeEvent(input$file, {
+    removeModal()
     raw_data_storage(NULL)
     f_values_cache(NULL)  # Clear inbreeding cache when new file uploaded
     f_values_cache_hash(NULL)
+    f_calculation_status(list(calculating = FALSE, progress = 0, message = "", n_individuals = 0))
+    reset_post_f_caches()
     analysis_started(FALSE)  # Reset analysis started flag
     qc_issues(NULL)
     pending_data(NULL)
+    reset_qc_modal_guard()
     qc_fix_summary(NULL)
     last_fix_summary(NULL)
   })
   
   # Clear all data, caches, and inputs
   observeEvent(input$clear_all, {
+    removeModal()
     raw_data_storage(NULL)
     f_values_cache(NULL)
     f_values_cache_hash(NULL)
+    f_calculation_status(list(calculating = FALSE, progress = 0, message = "", n_individuals = 0))
+    reset_post_f_caches()
     analysis_started(FALSE)
     qc_issues(NULL)
     pending_data(NULL)
+    reset_qc_modal_guard()
     qc_fix_summary(NULL)
     last_fix_summary(NULL)
     detected_cols(NULL)
@@ -2236,10 +2260,12 @@ output$top10_dam_title <- renderText({
         if (!is.null(cached_hash) && !identical(current_hash, cached_hash)) {
           f_values_cache(NULL)
           f_values_cache_hash(NULL)
+          reset_post_f_caches()
         }
       } else {
         f_values_cache(NULL)
         f_values_cache_hash(NULL)
+        reset_post_f_caches()
       }
     }
   })
@@ -2292,8 +2318,9 @@ output$top10_dam_title <- renderText({
       data_validation_status(list(valid = TRUE, errors = c(), warnings = c()))
       
       # Clear inbreeding cache to trigger recalculation with fixed data
-    f_values_cache(NULL)
-    f_values_cache_hash(NULL)
+      f_values_cache(NULL)
+      f_values_cache_hash(NULL)
+      reset_post_f_caches()
       
       # If auto_process is enabled, data will be automatically reprocessed
       # and inbreeding will be recalculated
@@ -2334,6 +2361,7 @@ output$top10_dam_title <- renderText({
     
     # Close modal
     removeModal()
+    reset_qc_modal_guard()
     
     # Remove "running" notification before showing success
     if (!is.null(id_running)) removeNotification(id_running)
@@ -2367,6 +2395,7 @@ output$top10_dam_title <- renderText({
     
     # Close modal
     removeModal()
+    reset_qc_modal_guard()
     
     # Show warning notification
     showNotification(
@@ -2388,6 +2417,7 @@ output$top10_dam_title <- renderText({
     
     # Close modal
     removeModal()
+    reset_qc_modal_guard()
     
     # Show info notification
     showNotification(
@@ -2575,8 +2605,8 @@ output$top10_dam_title <- renderText({
         return()
       }
       
-      # Run comprehensive QC detection
-      qc_results <- detect_qc_issues(ped)
+      # Run comprehensive QC detection (cached by pedigree hash)
+      qc_results <- get_qc_issues_cached(ped)
       
       # Basic statistics
       n <- nrow(ped)
@@ -2812,12 +2842,11 @@ output$top10_dam_title <- renderText({
     }
   )
   
-  # Inbreeding calculation progress UI (calculation phase + results-panel updating phase)
+  # Inbreeding calculation progress UI (calculation phase only)
   output$f_calculation_progress <- renderUI({
     status <- f_calculation_status()
-    panel_status <- f_results_panel_status()
     
-    # Phase 1: F calculation in progress
+    # F calculation in progress
     if (status$calculating) {
       return(div(
         style = "margin-bottom: 10px;",
@@ -2844,41 +2873,6 @@ output$top10_dam_title <- renderText({
             style = "background-color: #f5f5f5; border-radius: 10px; height: 8px; overflow: hidden;",
             div(
               style = paste0("background-color: #2196f3; height: 100%; width: ", status$progress * 100, "%; transition: width 0.3s ease;"),
-              ""
-            )
-          )
-        )
-      ))
-    }
-    
-    # Phase 2: Results panel updating (summary + tables re-rendering)
-    if (panel_status$updating) {
-      pct <- min(100, max(0, round(panel_status$progress * 100)))
-      return(div(
-        style = "margin-bottom: 10px;",
-        div(
-          style = "background-color: #fff3e0; padding: 8px; border-radius: 4px; border-left: 4px solid #ff9800;",
-          tags$div(
-            style = "display: flex; align-items: center; margin-bottom: 5px;",
-            tags$div(
-              style = "flex: 1;",
-              tags$small(
-                paste0("📊 ", panel_status$message),
-                style = "color: #e65100; font-weight: 500;"
-              )
-            ),
-            tags$div(
-              style = "margin-left: 10px;",
-              tags$small(
-                paste0(pct, "%"),
-                style = "color: #666;"
-              )
-            )
-          ),
-          div(
-            style = "background-color: #f5f5f5; border-radius: 10px; height: 8px; overflow: hidden;",
-            div(
-              style = paste0("background-color: #ff9800; height: 100%; width: ", pct, "%; transition: width 0.25s ease;"),
               ""
             )
           )
@@ -2986,7 +2980,7 @@ output$top10_dam_title <- renderText({
         detail = paste("Analyzing", format(n_rows, big.mark = ","), "records"),
         value = 0.5,
         {
-          detect_qc_issues(df)
+          get_qc_issues_cached(df)
         }
       )
     } else {
@@ -2996,6 +2990,17 @@ output$top10_dam_title <- renderText({
     
     # If issues found, show modal and store pending data
     if (detected_issues$has_errors) {
+      issue_signature <- digest::digest(
+        list(pedigree_hash(df), detected_issues),
+        algo = "xxhash64"
+      )
+      # Guard against duplicate modal popups caused by rapid reactive invalidations.
+      if (isTRUE(qc_modal_open()) && identical(qc_modal_signature(), issue_signature)) {
+        return(NULL)
+      }
+
+      qc_modal_signature(issue_signature)
+      qc_modal_open(TRUE)
       qc_issues(detected_issues)
       pending_data(df)
       
@@ -3276,6 +3281,8 @@ output$top10_dam_title <- renderText({
       
       return(NULL)  # Don't process data yet, wait for user action
     }
+
+    qc_modal_open(FALSE)
     
     # Handle Sex column - only add if not already present
     if (!"Sex" %in% names(df)) {
@@ -3885,6 +3892,17 @@ output$top10_dam_title <- renderText({
   )
   
   # QC Report - pre-compute when ped_data() is ready so tab switch is instant
+  get_qc_issues_cached <- function(ped) {
+    ph <- pedigree_hash(ped)
+    cache <- qc_issue_cache()
+    if (!is.null(ph) && identical(cache$hash, ph) && !is.null(cache$data)) {
+      return(cache$data)
+    }
+    issues <- detect_qc_issues(ped)
+    qc_issue_cache(list(hash = ph, data = issues))
+    issues
+  }
+
   run_qc_report <- function(ped) {
     if (is.null(ped) || !"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
       cat("Error: Required columns (ID, Sire, Dam) not found in processed data\n")
@@ -3898,7 +3916,7 @@ output$top10_dam_title <- renderText({
       cat("(Using optimized R functions)\n")
     }
     cat("Generated:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
-    qc_results <- detect_qc_issues(ped)
+    qc_results <- get_qc_issues_cached(ped)
     stats <- get_basic_stats(ped)
     founders <- stats$founders
     both_parents <- stats$both_parents
@@ -4030,7 +4048,7 @@ output$top10_dam_title <- renderText({
     }
     n <- nrow(ped)
     stats <- get_basic_stats(ped)
-    qc_results <- detect_qc_issues(ped)
+    qc_results <- get_qc_issues_cached(ped)
     fix_info <- qc_fix_summary()
 
     summary_df <- data.frame(
@@ -5236,7 +5254,7 @@ output$top10_dam_title <- renderText({
       return(NULL)  # Signal to use fallback
     })
   }
-  
+
   # Calculate F (automatically when auto_process is enabled, or manually)
   f_values <- reactive({
     # Manual mode: requires button click
@@ -5247,14 +5265,14 @@ output$top10_dam_title <- renderText({
     req(ped_data())
     ped <- ped_data()
     
+    current_hash <- pedigree_hash(ped)
+    
     # Check if we have cached values for this exact pedigree
     cached_f <- f_values_cache()
     cached_hash <- f_values_cache_hash()
-    if (!is.null(cached_f) && all(c("ID", "Sire", "Dam") %in% names(ped))) {
-      current_hash <- digest::digest(ped[, c("ID", "Sire", "Dam")], algo = "xxhash64")
-      if (!is.null(cached_hash) && identical(current_hash, cached_hash)) {
-        return(cached_f)
-      }
+    if (!is.null(cached_f) && !is.null(current_hash) &&
+        !is.null(cached_hash) && identical(current_hash, cached_hash)) {
+      return(cached_f)
     }
     
     # Check if ped_data returned NULL (due to column mapping errors or validation failure)
@@ -5668,9 +5686,10 @@ output$top10_dam_title <- renderText({
           result <- tibble(ID = as.character(ped_clean$ID), F = f_vec)
         }
         
-        incProgress(1.0, detail = "Complete!")
+        incProgress(0.2, detail = "Complete!")
+        f_values_cache(result)
+        f_values_cache_hash(current_hash)
         
-        # Update progress status - calculation complete
         f_calculation_status(list(
           calculating = FALSE,
           progress = 1.0,
@@ -5678,37 +5697,12 @@ output$top10_dam_title <- renderText({
           n_individuals = n_individuals
         ))
         
-        # Show notification immediately so UI responds without waiting for downstream
-        showNotification("✅ Inbreeding coefficients calculated!", type = "message", duration = 3)
+        showNotification(
+          "✅ Inbreeding coefficients calculated successfully.",
+          type = "message",
+          duration = 3
+        )
         
-        # Defer cache update to next tick so notification and progress hide before heavy downstream outputs run
-        res <- result
-        ped_for_hash <- if (all(c("ID", "Sire", "Dam") %in% names(ped))) ped[, c("ID", "Sire", "Dam")] else NULL
-        later::later(function() {
-          # Show "Updating results..." progress bar so user sees activity while summary/tables re-render
-          f_results_panel_status(list(updating = TRUE, progress = 0, message = "Updating results..."))
-          f_values_cache(res)
-          if (!is.null(ped_for_hash)) {
-            f_values_cache_hash(digest::digest(ped_for_hash, algo = "xxhash64"))
-          } else {
-            f_values_cache_hash(NULL)
-          }
-          # Animate progress bar while downstream outputs (f_summary, f_table_top, sire/dam tables) run
-          later::later(function() {
-            f_results_panel_status(list(updating = TRUE, progress = 0.25, message = "Updating summary..."))
-          }, delay = 0.2)
-          later::later(function() {
-            f_results_panel_status(list(updating = TRUE, progress = 0.5, message = "Updating tables..."))
-          }, delay = 0.5)
-          later::later(function() {
-            f_results_panel_status(list(updating = TRUE, progress = 0.85, message = "Almost done..."))
-          }, delay = 1.0)
-          later::later(function() {
-            f_results_panel_status(list(updating = FALSE, progress = 0, message = ""))
-          }, delay = 1.8)
-        }, delay = 0)
-        
-        # Hide calculation progress bar after a short delay
         later::later(function() {
           f_calculation_status(list(
             calculating = FALSE,
@@ -5716,10 +5710,9 @@ output$top10_dam_title <- renderText({
             message = "",
             n_individuals = 0
           ))
-        }, delay = 2.0)
-        
-        # Return old value (or empty) so downstream don't run in this flush; cache is set in next tick
-        if (!is.null(cached_f)) cached_f else tibble(ID = character(), F = numeric())
+        }, delay = 0.4)
+
+        result
       }, error = function(e) {
         # Update progress status - error
         f_calculation_status(list(
@@ -5779,9 +5772,10 @@ output$top10_dam_title <- renderText({
     }
   })
 
-  generation_depths <- reactive({
-    req(ped_data())
-    ped <- ped_data()
+  compute_generation_depths_from_ped <- function(ped) {
+    if (is.null(ped) || !"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
+      return(tibble(ID = character(), Generation = integer()))
+    }
     ids <- as.character(ped$ID)
     depths <- NULL
     if (exists("use_rcpp") && use_rcpp && exists("fast_lap_depths", mode = "function")) {
@@ -5798,6 +5792,19 @@ output$top10_dam_title <- renderText({
       depths <- sapply(ids, function(id) get_ancestor_depth(ped, id))
     }
     tibble(ID = ids, Generation = as.integer(depths))
+  }
+
+  generation_depths <- reactive({
+    req(ped_data())
+    ped <- ped_data()
+    ph <- pedigree_hash(ped)
+    cache <- generation_depth_cache()
+    if (!is.null(ph) && identical(cache$hash, ph) && !is.null(cache$data)) {
+      return(cache$data)
+    }
+    gen_df <- compute_generation_depths_from_ped(ped)
+    generation_depth_cache(list(hash = ph, data = gen_df))
+    gen_df
   })
   
   inb_trend_data <- reactive({
@@ -5886,7 +5893,7 @@ output$top10_dam_title <- renderText({
     attr(out, "x_label") <- "Birthdate"
     out
   })
-  
+
   output$inb_trend_plot <- renderPlotly({
     req(requireNamespace("plotly", quietly = TRUE))
     
@@ -5939,6 +5946,7 @@ output$top10_dam_title <- renderText({
         legend = list(orientation = "h", x = 0, y = -0.15)
       )
   })
+  outputOptions(output, "inb_trend_plot", suspendWhenHidden = TRUE)
   
   # F summary
   output$f_summary <- renderPrint({
@@ -6016,9 +6024,12 @@ output$top10_dam_title <- renderText({
   
   # Top 10 table
   output$f_table_top <- renderDT({
-    req(f_values())
+    f_tbl <- f_values_cache()
+    if (is.null(f_tbl)) {
+      f_tbl <- f_values()
+    }
     
-    if (nrow(f_values()) == 0) {
+    if (is.null(f_tbl) || nrow(f_tbl) == 0) {
       return(datatable(
         data.frame(Message = "No F values available"),
         options = list(dom = 't'),
@@ -6027,7 +6038,7 @@ output$top10_dam_title <- renderText({
     }
     
     datatable(
-      f_values() %>% arrange(desc(F)) %>% head(10),
+      f_tbl %>% arrange(desc(F)) %>% head(10),
       options = list(
         pageLength = 10,
         dom = 't',
@@ -6057,8 +6068,7 @@ output$top10_dam_title <- renderText({
     list(total = length(visited), counts = counts)
   }
 
-  build_descendant_summary <- function(parent_col, id_label) {
-    ped <- ped_data()
+  build_descendant_summary_from_ped <- function(ped, parent_col, id_label) {
     if (is.null(ped) || !"ID" %in% names(ped) || !parent_col %in% names(ped)) {
       return(data.frame())
     }
@@ -6113,11 +6123,31 @@ output$top10_dam_title <- renderText({
   }
 
   sire_descendants <- reactive({
-    build_descendant_summary("Sire", "Sire_ID")
+    req(ped_data())
+    ped <- ped_data()
+    ph <- pedigree_hash(ped)
+    cache <- descendant_summary_cache()
+    if (!is.null(ph) && identical(cache$hash, ph) && !is.null(cache$sire)) {
+      return(cache$sire)
+    }
+    sire_df <- build_descendant_summary_from_ped(ped, "Sire", "Sire_ID")
+    dam_df <- build_descendant_summary_from_ped(ped, "Dam", "Dam_ID")
+    descendant_summary_cache(list(hash = ph, sire = sire_df, dam = dam_df))
+    sire_df
   })
 
   dam_descendants <- reactive({
-    build_descendant_summary("Dam", "Dam_ID")
+    req(ped_data())
+    ped <- ped_data()
+    ph <- pedigree_hash(ped)
+    cache <- descendant_summary_cache()
+    if (!is.null(ph) && identical(cache$hash, ph) && !is.null(cache$dam)) {
+      return(cache$dam)
+    }
+    sire_df <- build_descendant_summary_from_ped(ped, "Sire", "Sire_ID")
+    dam_df <- build_descendant_summary_from_ped(ped, "Dam", "Dam_ID")
+    descendant_summary_cache(list(hash = ph, sire = sire_df, dam = dam_df))
+    dam_df
   })
 
   output$sire_top_table <- renderDT({
@@ -6811,10 +6841,10 @@ output$top10_dam_title <- renderText({
       return(list(nodes = tibble(), edges = tibble(), status = "waiting"))
     }
     
-    # Check if ped_data is available
+    # Check if ped_data is available (e.g. not processed yet)
     ped <- ped_data()
     if (is.null(ped)) {
-      return(list(nodes = tibble(), edges = tibble(), status = "error"))
+      return(list(nodes = tibble(), edges = tibble(), status = "waiting"))
     }
     
     # Check if required columns exist
@@ -6848,7 +6878,7 @@ output$top10_dam_title <- renderText({
       
       # If waiting for data (raw_data is NULL)
       if (status == "waiting") {
-        return(visNetwork(data.frame(id = 1, label = "Waiting for data"), data.frame()) %>%
+        return(visNetwork(data.frame(id = 1, label = "Waiting for loading data..."), data.frame()) %>%
                  visNodes(shape = "text", color = list(background = "white")) %>%
                  visOptions(manipulation = FALSE))
       }
@@ -7022,12 +7052,12 @@ output$top10_dam_title <- renderText({
     }, error = function(e) {
       # Check if error is due to missing raw_data
       if (is.null(raw_data())) {
-        return(visNetwork(data.frame(id = 1, label = "Waiting for data"), data.frame()) %>%
+        return(visNetwork(data.frame(id = 1, label = "Waiting for loading data..."), data.frame()) %>%
                  visNodes(shape = "text", color = list(background = "white")) %>%
                  visOptions(manipulation = FALSE))
       }
-      # Return error message for other errors
-      return(visNetwork(data.frame(id = 1, label = "Error loading network"), data.frame()) %>%
+      # Keep network placeholder friendly while widgets initialize.
+      return(visNetwork(data.frame(id = 1, label = "Network is loading, please wait..."), data.frame()) %>%
                visNodes(shape = "text", color = list(background = "white")) %>%
                visOptions(manipulation = FALSE))
     })

@@ -5,9 +5,6 @@
 library(shiny)
 library(bslib)
 
-# Declare stub globals to silence R CMD check when loaded before modules
-utils::globalVariables(c("aiAssistantUI", "aiAssistantServer", "language_code"))
-
 # Declare externally provided helpers to silence lintr visibility warnings
 utils::globalVariables(c("resolve_suite_lang", "map_suite_lang_for_app"))
 
@@ -59,54 +56,97 @@ derive_plink_prefix <- function(file_names) {
   tools::file_path_sans_ext(candidate)
 }
 
-# ====== AI Assistant (optional) ======
-load_app_rules <- function(app_name) {
-  rules_path <- file.path("apps", app_name, "ai_rules.json")
-  # Fallback to local app folder (easybreedeR/easyblup)
-  if (!file.exists(rules_path)) {
-    rules_path <- file.path(".", "ai_rules.json")
-  }
-  if (file.exists(rules_path)) {
-    tryCatch(jsonlite::fromJSON(rules_path, simplifyVector = TRUE), error = function(e) list())
-  } else list()
-}
-
-  # Look for ai_assistant module in either ../modules/ (shared) or local app folder (easyblup)
-  ai_module_candidates <- c(
-    normalizePath(file.path("..", "modules", "ai_assistant.R"), winslash = "/", mustWork = FALSE),
-    normalizePath(file.path(".", "ai_assistant.R"), winslash = "/", mustWork = FALSE)
-  )
-  ai_modules_path <- NULL
-  for (p in ai_module_candidates) {
-    if (file.exists(p)) { ai_modules_path <- p; break }
-  }
-  if (!is.null(ai_modules_path)) {
-    # Load assistant module into global env so aiAssistantUI/Server are visible to exists()
-    try(source(ai_modules_path, local = FALSE), silent = TRUE)
-    # If language_code is still missing but TRANSLATIONS loaded, define a light fallback
-    if (!exists("language_code", mode = "function")) {
-      language_code <- function(name) {
-        if (is.null(name)) return("en")
-        nm <- tolower(trimws(as.character(name)))
-        if (grepl("zh", nm)) return("zh")
-        if (grepl("portugu", nm) || grepl("pt", nm)) return("pt")
-        "en"
+# Optional Rcpp fallback for PLINK(.ped/.map) -> BLUPF90 conversion.
+# This mirrors PLINK-style additive coding (0/1/2 minor-allele copies; 5 for missing).
+use_rcpp_blup_convert <- FALSE
+tryCatch({
+  if (requireNamespace("Rcpp", quietly = TRUE)) {
+    cpp_candidates <- c(
+      "plink_blup_convert.cpp",
+      file.path("inst", "easyblup", "plink_blup_convert.cpp")
+    )
+    cpp_file <- cpp_candidates[file.exists(cpp_candidates)][1]
+    if (!is.na(cpp_file) && nzchar(cpp_file)) {
+      Rcpp::sourceCpp(cpp_file)
+      if (exists("eb_ped_to_blup_codes_cpp", mode = "function")) {
+        use_rcpp_blup_convert <- TRUE
       }
     }
-    # Provide lightweight fallbacks for UI/server to avoid "no visible global" errors during static checks
-    if (!exists("aiAssistantUI", mode = "function")) {
-      aiAssistantUI <- function(id) { shiny::div(id = shiny::NS(id, "ai_placeholder"), "AI module not loaded") }
-    }
-    if (!exists("aiAssistantServer", mode = "function")) {
-      aiAssistantServer <- function(id, ...) { shiny::moduleServer(id, function(input, output, session) { }) }
+  }
+}, error = function(e) {
+  use_rcpp_blup_convert <- FALSE
+})
+
+convert_plink_to_blupf90_rcpp <- function(ped_path, map_path, out_prefix) {
+  if (!exists("eb_ped_to_blup_codes_cpp", mode = "function")) {
+    stop("Rcpp converter is not available. Please ensure plink_blup_convert.cpp is loaded.", call. = FALSE)
+  }
+
+  read_tab <- function(path) {
+    if (requireNamespace("data.table", quietly = TRUE)) {
+      data.table::fread(path, header = FALSE, data.table = FALSE, showProgress = FALSE, colClasses = "character")
+    } else {
+      read.table(path, header = FALSE, stringsAsFactors = FALSE, colClasses = "character", fill = TRUE, comment.char = "")
     }
   }
 
-  # MCP-style tool definitions for easyblup (optional)
-  mcp_tools_path <- normalizePath(file.path(".", "mcp_tools.R"), winslash = "/", mustWork = FALSE)
-  if (file.exists(mcp_tools_path)) {
-    try(source(mcp_tools_path, local = FALSE), silent = TRUE)
+  map_df <- read_tab(map_path)
+  if (ncol(map_df) < 4 || nrow(map_df) == 0) {
+    stop("Invalid .map file: need at least 4 columns and >=1 marker row.", call. = FALSE)
   }
+  map_df <- map_df[, 1:4, drop = FALSE]
+  colnames(map_df) <- c("CHR", "SNP", "CM", "BP")
+  marker_n <- nrow(map_df)
+
+  ped_df <- read_tab(ped_path)
+  if (ncol(ped_df) < 7 || nrow(ped_df) == 0) {
+    stop("Invalid .ped file: need >=7 columns and >=1 sample row.", call. = FALSE)
+  }
+
+  expected_cols <- 6 + marker_n * 2
+  if (ncol(ped_df) < expected_cols) {
+    stop(sprintf("PED/MAP mismatch: ped has %d cols, expected at least %d for %d markers.", ncol(ped_df), expected_cols, marker_n), call. = FALSE)
+  }
+
+  ped_df <- ped_df[, seq_len(expected_cols), drop = FALSE]
+  sample_id <- as.character(ped_df[[2]])
+  sample_id[!nzchar(sample_id) | is.na(sample_id)] <- as.character(ped_df[[1]][!nzchar(sample_id) | is.na(sample_id)])
+
+  allele1_idx <- seq(7, expected_cols - 1, by = 2)
+  allele2_idx <- seq(8, expected_cols, by = 2)
+  allele1 <- as.matrix(ped_df[, allele1_idx, drop = FALSE])
+  allele2 <- as.matrix(ped_df[, allele2_idx, drop = FALSE])
+
+  conv <- eb_ped_to_blup_codes_cpp(allele1, allele2)
+  dosage <- conv$dosage
+  a1 <- as.character(conv$a1)
+  a2 <- as.character(conv$a2)
+
+  out_txt <- paste0(out_prefix, ".txt")
+  out_map <- paste0(out_prefix, ".map")
+  out_bim <- paste0(out_prefix, ".bim")
+
+  txt_df <- data.frame(ID = sample_id, dosage, check.names = FALSE, stringsAsFactors = FALSE)
+  write.table(txt_df, file = out_txt, quote = FALSE, row.names = FALSE, col.names = FALSE, sep = " ")
+  write.table(map_df, file = out_map, quote = FALSE, row.names = FALSE, col.names = FALSE, sep = " ")
+
+  bim_df <- data.frame(
+    CHR = map_df$CHR,
+    SNP = map_df$SNP,
+    CM = map_df$CM,
+    BP = map_df$BP,
+    A1 = a1,
+    A2 = a2,
+    stringsAsFactors = FALSE
+  )
+  write.table(bim_df, file = out_bim, quote = FALSE, row.names = FALSE, col.names = FALSE, sep = "\t")
+
+  list(
+    txt = out_txt,
+    map = out_map,
+    bim = out_bim
+  )
+}
 
 # ====== UI Definition ======
 ui <- page_fillable(
@@ -226,17 +266,6 @@ ui <- page_fillable(
     @media (max-width: 768px) {
       .left-panel.hidden, .right-panel.hidden { display: none; }
     }
-    /* AI floating assistant */
-    .ai-fab { position: fixed; right: 20px; bottom: 30px; z-index: 1200; }
-    .ai-fab .btn { border-radius: 50%; width: 56px; height: 56px; font-size: 24px; padding: 0; display:flex; align-items:center; justify-content:center; }
-    #aiFabBox { cursor: pointer; }
-    #aiFabBox.dragging { cursor: grabbing; }
-    .ai-panel { position: fixed; right: 20px; bottom: 88px; width: 360px; max-width: 92vw; height: 60vh; max-height: 78vh; background:#fff; border:2px solid #CFB991; border-radius: 10px; box-shadow:0 8px 24px rgba(0,0,0,.2); z-index: 1199; display:none; overflow:hidden; }
-    .ai-panel-header { padding:10px 12px; border-bottom:2px solid #CFB991; background:linear-gradient(135deg,#FFF9F0 0%,#FFF5E6 100%); font-weight:700; }
-    .ai-panel-body { padding:10px; height: calc(100% - 48px); overflow:auto; }
-    .ai-gear { float:right; margin-top:-2px; }
-    .ai-gear .btn { border-radius:4px; padding:4px 8px; font-size:14px; }
-    
     /* Genotype Format Helper Modal Styles */
     .geno-helper-modal .modal-header {
       background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%);
@@ -654,189 +683,6 @@ ui <- page_fillable(
         $('#toggleLeftPanel').on('click', toggleLeft);
         $('#toggleRightPanel').on('click', toggleRight);
       });
-      function initAIFabInteractions(){
-        var box = document.getElementById('aiFabBox');
-        if (!box || box.__fabInit) return; box.__fabInit = true;
-
-        // Unified behavior: RIGHT-CLICK opens (or closes) the AI assistant panel + settings on ALL platforms.
-        // Left click is reserved purely for dragging (handled below). This makes UX consistent.
-        $(document).off('click.aiFab');      // remove any prior left-click toggles
-        $(document).off('dblclick.aiFabWin');
-        $(document).off('contextmenu.aiFabUnified').on('contextmenu.aiFabUnified', '#aiFabToggle, #aiFabBox', function(e){
-          e.preventDefault(); e.stopPropagation();
-          var p = document.getElementById('aiPanel');
-          if (!p) return;
-          if (p.style.display === 'block') { p.style.display = 'none'; return; }
-          p.style.display = 'block';
-          alignPanelToFab();
-          // Always show settings when opened via right-click
-          setTimeout(function(){
-            try {
-              var s = document.getElementById('aiSettings');
-              if (s) s.style.display = 'block';
-              if (typeof loadAiSettings === 'function') loadAiSettings();
-            } catch(_){ }
-          }, 20);
-        });
-
-  var startX=0, startY=0, origLeft=0, origTop=0, dragging=false, moved=false;
-  // On some Windows touchpads/mice there is tiny jitter during click; use a larger threshold
-  // to avoid treating normal clicks as drags which suppresses the toggle click.
-  var dragThreshold = 8; // pixels (was 2)
-        function alignPanelToFab(){
-          var p = document.getElementById('aiPanel');
-          if (!p || p.style.display !== 'block') return;
-          var rect = box.getBoundingClientRect();
-          var px = rect.left;
-          var py = rect.top - p.offsetHeight - 12; // show above
-          if (py < 8) py = rect.bottom + 12; // otherwise below
-          var vw = window.innerWidth, pw = p.offsetWidth;
-          if (px + pw + 8 > vw) px = Math.max(8, vw - pw - 8);
-          p.style.left = px + 'px'; p.style.top = py + 'px';
-          p.style.right = 'auto'; p.style.bottom = 'auto';
-        }
-        function pointerDown(e){
-          var isOnButton = false;
-          try {
-            var t = e.target;
-            isOnButton = !!(t && (t.id === 'aiFabToggle' || (t.closest && t.closest('#aiFabToggle'))));
-          } catch(_) { isOnButton = false; }
-
-          // Only left button initiates drag; allow right click to open settings on Windows
-          if (e.button !== 0) { return; }
-
-          // For clicks starting on the button, don't immediately prevent default so the click can fire
-          // if there is no drag. For drags starting elsewhere, prevent default to avoid text selection.
-          if (!isOnButton) {
-            e.preventDefault();
-            e.stopPropagation();
-          }
-          var rect = box.getBoundingClientRect();
-          startX = e.clientX; startY = e.clientY;
-          box.style.left = rect.left + 'px'; box.style.top = rect.top + 'px';
-          box.style.right = 'auto'; box.style.bottom = 'auto';
-          origLeft = rect.left; origTop = rect.top; dragging = true; moved = false;
-          box.classList.add('dragging');
-          try { box.setPointerCapture && box.setPointerCapture(e.pointerId); } catch(_){ }
-          document.addEventListener('pointermove', pointerMove);
-          document.addEventListener('pointerup', pointerUp, { once: true });
-        }
-        function pointerMove(e){
-          if (!dragging) return;
-          e.preventDefault();
-          var dx = e.clientX - startX; var dy = e.clientY - startY;
-          if (Math.abs(dx) + Math.abs(dy) > dragThreshold) moved = true;
-          var nx = origLeft + dx; var ny = origTop + dy;
-          var vw = window.innerWidth, vh = window.innerHeight, bw = box.offsetWidth, bh = box.offsetHeight;
-          nx = Math.max(8, Math.min(nx, vw - bw - 8));
-          ny = Math.max(8, Math.min(ny, vh - bh - 8));
-          box.style.left = nx + 'px'; box.style.top = ny + 'px';
-          alignPanelToFab();
-        }
-        function pointerUp(e){
-          if (!dragging) return;
-          e.preventDefault();
-          e.stopPropagation();
-          dragging = false; box.classList.remove('dragging');
-          try { box.releasePointerCapture && box.releasePointerCapture(e.pointerId); } catch(_){ }
-          document.removeEventListener('pointermove', pointerMove);
-          // Only suppress the immediate click if a genuine drag happened (beyond threshold)
-          if (moved) {
-            window.__aiFabSuppressClick = true;
-            // Keep suppression window short to avoid swallowing real clicks on slower browsers
-            setTimeout(function(){ window.__aiFabSuppressClick = false; }, 80);
-          }
-        }
-        box.addEventListener('pointerdown', pointerDown, { passive: false });
-        window.addEventListener('resize', alignPanelToFab);
-
-        // Settings gear toggle
-        $(document).off('click.aiGear').on('click.aiGear', '#aiSettingsGear', function(){
-          var s = document.getElementById('aiSettings'); if (!s) return; s.style.display = (s.style.display==='block'?'none':'block');
-          if (s.style.display === 'block') setTimeout(loadAiSettings, 10);
-        });
-        // Save settings to localStorage
-        $(document).off('click.aiSave').on('click.aiSave', '#aiSaveSettings', function(){
-          try {
-            var b = $('#ai_api_base').val()||'';
-            var k = $('#ai_api_key').val()||'';
-            localStorage.setItem('ai_base', b);
-            localStorage.setItem('ai_key', k);
-            localStorage.setItem('ai_model', $('#ai_model').val()||'');
-            localStorage.setItem('ai_temperature', $('#ai_temperature').val()||'');
-            localStorage.setItem('ai_max_tokens', $('#ai_max_tokens').val()||'');
-            localStorage.setItem('ai_system_prompt', $('#ai_system_prompt').val()||'');
-            // Propagate values to Shiny so server-side inputs reflect saved settings
-            try { Shiny.setInputValue('ai_api_base', b, {priority: 'event'}); } catch(e) {}
-            try { Shiny.setInputValue('ai_api_key', k, {priority: 'event'}); } catch(e) {}
-            try { Shiny.setInputValue('ai_model', $('#ai_model').val()||'', {priority: 'event'}); } catch(e) {}
-            try { Shiny.setInputValue('ai_temperature', $('#ai_temperature').val()||'', {priority: 'event'}); } catch(e) {}
-            try { Shiny.setInputValue('ai_max_tokens', $('#ai_max_tokens').val()||'', {priority: 'event'}); } catch(e) {}
-            try { Shiny.setInputValue('ai_system_prompt', $('#ai_system_prompt').val()||'', {priority: 'event'}); } catch(e) {}
-            alert('AI settings saved');
-          } catch(e) { console.warn('save ai settings failed', e); }
-        });
-        // Reset to defaults
-        $(document).off('click.aiReset').on('click.aiReset', '#aiResetSettings', function(){
-          $('#ai_api_base').val('');
-          $('#ai_api_key').val('');
-          // Ensure Shiny server sees the reset values
-          try { Shiny.setInputValue('ai_api_base', '', {priority: 'event'}); } catch(e) {}
-          try { Shiny.setInputValue('ai_api_key', '', {priority: 'event'}); } catch(e) {}
-          $('#ai_model').val('gpt-4o-mini');
-          $('#ai_temperature').val(0.2);
-          $('#ai_max_tokens').val(2048);
-          $('#ai_system_prompt').val('');
-        });
-        // Close panel
-        $(document).off('click.aiClose').on('click.aiClose', '#aiCloseSettings', function(){
-          var s = document.getElementById('aiSettings'); if (!s) return; s.style.display = 'none';
-        });
-        function loadAiSettings(){
-          try {
-            var b = localStorage.getItem('ai_base')||'';
-            var k = localStorage.getItem('ai_key')||'';
-            var m = localStorage.getItem('ai_model')||'gpt-4o-mini';
-            var t = localStorage.getItem('ai_temperature');
-            var x = localStorage.getItem('ai_max_tokens');
-            var s = localStorage.getItem('ai_system_prompt')||'';
-            if ($('#ai_api_base').length) { $('#ai_api_base').val(b); try { Shiny.setInputValue('ai_api_base', b, {priority: 'event'}); } catch(e) {} }
-            if ($('#ai_api_key').length) { $('#ai_api_key').val(k); try { Shiny.setInputValue('ai_api_key', k, {priority: 'event'}); } catch(e) {} }
-            if ($('#ai_model').length) $('#ai_model').val(m);
-            if ($('#ai_temperature').length) $('#ai_temperature').val(t || 0.2);
-            if ($('#ai_max_tokens').length) $('#ai_max_tokens').val(x || 2048);
-            if ($('#ai_system_prompt').length) $('#ai_system_prompt').val(s);
-          } catch(e) {}
-        }
-      }
-
-      // initialize after DOM exists and whenever overlay is (re)rendered
-      setTimeout(initAIFabInteractions, 300);
-      $(document).on('shiny:value', function(ev){ if (ev.name === 'ai_overlay_ui') setTimeout(initAIFabInteractions, 50); });
-
-      // Forward module test button clicks to Shiny as a robust fallback in case native
-      // click events are swallowed by overlay dragging/pointer capture. This listens for
-      // clicks on the namespaced button id '#ai_blup-test' and explicitly sets the
-      // corresponding Shiny input value (timestamp) so the server observeEvent fires.
-      $(document).off('click.aiModuleTest').on('click.aiModuleTest', '#ai_blup-test', function(e){
-        try {
-          Shiny.setInputValue('ai_blup-test', Math.floor(Date.now()/1000), {priority: 'event'});
-        } catch (err) { /* ignore */ }
-      });
-      // Forward Ask button clicks and sync the user prompt value in case native clicks are blocked
-      $(document).off('click.aiModuleAsk').on('click.aiModuleAsk', '#ai_blup-ask', function(e){
-        try {
-          var p = $('#ai_blup-user_prompt').val() || '';
-          try { Shiny.setInputValue('ai_blup-user_prompt', p, {priority: 'event'}); } catch(_) {}
-          Shiny.setInputValue('ai_blup-ask', Math.floor(Date.now()/1000), {priority: 'event'});
-        } catch (err) { /* ignore */ }
-      });
-      // Forward Apply button clicks so server apply callback triggers reliably
-      $(document).off('click.aiModuleApply').on('click.aiModuleApply', '#ai_blup-apply', function(e){
-        try {
-          Shiny.setInputValue('ai_blup-apply', Math.floor(Date.now()/1000), {priority: 'event'});
-        } catch (err) { /* ignore */ }
-      });
     "))
   ),
   
@@ -851,9 +697,6 @@ ui <- page_fillable(
       actionButton("toggleLeftPanel", HTML("&#10094;"), class = "btn btn-sm", title = "Toggle left panel")),
   div(id = "toggleRightBtn", class = "toggle-btn-right",
       actionButton("toggleRightPanel", HTML("&#10095;"), class = "btn btn-sm", title = "Toggle right panel")),
-
-  # Floating AI assistant (overlay)
-  uiOutput("ai_overlay_ui"),
 
   # Three-Panel Container
   div(class = "three-panel-container",
@@ -961,8 +804,7 @@ ui <- page_fillable(
         uiOutput("right_accuracy_ui"),
         uiOutput("right_genomic_ui"),
         uiOutput("right_hetres_ui"),
-        uiOutput("right_renumf90_ui"),
-        uiOutput("right_ai_ui")
+        uiOutput("right_renumf90_ui")
       )
   )
 )
@@ -1096,90 +938,6 @@ server <- function(input, output, session) {
     )
   })
 
-  # ====== AI Assistant (easyblup) - floating overlay ======
-  output$ai_overlay_ui <- renderUI({
-    if (!exists("aiAssistantUI")) return(NULL)
-    tagList(
-      # include assistant CSS (served from easybreedeR/easyblup/www/ai_assistant.css)
-      tags$head(tags$link(rel = "stylesheet", type = "text/css", href = "ai_assistant.css")),
-  div(id = "aiFabBox", class = "ai-fab", actionButton("aiFabToggle", label = HTML('<img src="ai_icon.png" class="ai-fab-icon" alt="assistant"/>'), class = "btn btn-primary", title = "AI Assistant")),
-      div(id = "aiPanel", class = "ai-panel",
-          div(class = "ai-panel-header",
-              span(class = "ai-panel-title", "🐰 AI Assistant"),
-              span(class = "ai-gear", actionButton("aiSettingsGear", label = HTML("⚙️"), class = "btn btn-secondary btn-sm", title = "Settings"))
-          ),
-          div(class = "ai-panel-body",
-              # Settings panel (hidden by default)
-              div(id = "aiSettings", style = "display:none; margin-bottom:10px;",
-                  fluidRow(
-                    column(
-                      12,
-                      tags$input(id = "ai_provider", type = "hidden", value = "openai"),
-            div(style = "margin-top:-6px;color:#6c757d;font-size:12px;",
-              "Provider: OpenAI (other providers removed). Configure the OpenAI Base URL and API Key here.")
-                    ),
-                    column(
-                      12,
-                      selectizeInput(
-                        "ai_model", "Model",
-                        choices = c(
-                          "gpt-4o-mini", "gpt-4o", "gpt-4.1-mini", "gpt-4.1",
-                          "o3-mini", "o4-mini",
-                          "deepseek-chat",
-                          "gemini-2.0-flash", "gemini-2.5-flash", "gemini-2.5-flash-lite-preview-06-17"
-                        ),
-                        selected = "gpt-4o-mini",
-                        options = list(create = TRUE, placeholder = "Enter model or deployment ID")
-                      ),
-            div(style = "margin-top:-6px;color:#6c757d;font-size:12px;",
-              "You can enter a custom model or deployment ID (e.g., Claude, qwen) compatible with OpenAI.")
-                    ),
-                    column(
-                      12,
-                      textInput("ai_api_base", "API Base URL", value = "", width = "100%"),
-            div(style = "margin-top:-6px;color:#6c757d;font-size:12px;",
-              "Defaults: OpenAI: https://api.openai.com/v1; DeepSeek: https://api.deepseek.com/v1; Gemini endpoints may include /v1beta.")
-                    ),
-                    column(
-                      12,
-                      passwordInput("ai_api_key", "API Key", value = "", width = "100%"),
-                      fileInput("ai_key_file", "Import API Key (.txt)", multiple = FALSE,
-                                accept = c("text/plain", ".txt"), buttonLabel = "Browse", width = "100%"),
-            div(style = "margin-top:-6px;color:#6c757d;font-size:12px;",
-              "API Key is stored in browser localStorage and is not uploaded to the server.")
-                    ),
-                    column(
-                      12,
-                      textInput("ai_organization", "OpenAI Organization (optional)", value = "", width = "100%"),
-            div(style = "margin-top:-6px;color:#6c757d;font-size:12px;",
-              "Optional: enter your OpenAI Organization ID here if applicable.")
-                    ),
-                    column(6, numericInput("ai_temperature", "Temperature", value = 0.2, min = 0, max = 2, step = 0.1, width = "100%")),
-                    column(6, numericInput("ai_max_tokens", "Max Tokens", value = 2048, min = 128, max = 32768, step = 128, width = "100%")),
-                    column(12, textAreaInput("ai_system_prompt", "System Prompt", value = "", resize = "vertical", width = "100%", height = "90px")),
-                    column(12,
-                      div(style = "display:flex; gap:8px; flex-wrap:wrap;",
-                          actionButton("aiSaveSettings", "Save", class = "btn-primary btn-sm"),
-                          actionButton("aiResetSettings", "Reset", class = "btn-secondary btn-sm"),
-                          actionButton("aiCloseSettings", "Close", class = "btn-light btn-sm")
-                      )
-                    )
-          )
-        ),
-        # Chat wrapper (default visible area) — styled by ai_assistant.css to match provided mock
-        div(id = "aiChatWrapper", class = "ai-chat-wrapper",
-          # render the assistant module UI here so it's visible when settings hidden
-          get("aiAssistantUI")("ai_blup")
-        )
-          )
-      ),
-      # JS handler to let server request returning to chat after settings saved
-      tags$script(HTML(
-        "Shiny.addCustomMessageHandler('ai_show_chat', function(msg){ try{ $('#aiSettings').hide(); $('#aiChatWrapper').show(); $('#aiPanel .ai-panel-body').show(); } catch(e){} });"
-      ))
-    )
-  })
-
   # ====== Dynamic UI Elements (Language-aware) ======
   
   # Title bar
@@ -1213,12 +971,13 @@ server <- function(input, output, session) {
   })
   
   output$geno_format_label_ui <- renderUI({
-    # If optional dependency plinkR is available, show a small helper "?" icon
-    # that opens a modal for PLINK <-> BLUPF90 format conversion.
+    # Show a small helper icon when PLINK conversion backend is available:
+    # preferred plinkR/PLINK path, or Rcpp fallback path.
     label_text <- get_label("genotype_format", lang())
     has_plinkr <- requireNamespace("plinkR", quietly = TRUE)
+    has_rcpp <- isTRUE(use_rcpp_blup_convert) && exists("eb_ped_to_blup_codes_cpp", mode = "function")
     
-    if (!has_plinkr) {
+    if (!has_plinkr && !has_rcpp) {
       return(label_text)
     }
     
@@ -1335,13 +1094,14 @@ server <- function(input, output, session) {
     animal = c(),
     random = c(),
     default_param = "",
-    current_param = "",
-    ai_applied = FALSE
+    current_param = ""
   )
   
   conversion_files <- reactiveValues(
     blup_txt = NULL,
-    blup_map = NULL
+    blup_map = NULL,
+    blup_bim = NULL,
+    backend = NULL
   )
   
   cleanup_conversion_files <- function() {
@@ -1351,8 +1111,13 @@ server <- function(input, output, session) {
     if (!is.null(conversion_files$blup_map) && file.exists(conversion_files$blup_map)) {
       unlink(conversion_files$blup_map, force = TRUE)
     }
+    if (!is.null(conversion_files$blup_bim) && file.exists(conversion_files$blup_bim)) {
+      unlink(conversion_files$blup_bim, force = TRUE)
+    }
     conversion_files$blup_txt <- NULL
     conversion_files$blup_map <- NULL
+    conversion_files$blup_bim <- NULL
+    conversion_files$backend <- NULL
   }
   
   # Calculate animal effect number reactively
@@ -2065,12 +1830,7 @@ server <- function(input, output, session) {
     }
     
       values$default_param <- param_text
-      # If an AI suggestion was just applied, skip overwriting current_param once
-      if (isTRUE(values$ai_applied)) {
-        values$ai_applied <- FALSE
-      } else {
-        values$current_param <- param_text
-      }
+      values$current_param <- param_text
     }
     
     session$sendCustomMessage("update_textarea", list(content = values$current_param))
@@ -2123,13 +1883,40 @@ server <- function(input, output, session) {
     }
   })
   
-  # ====== Genotype format help: PLINK <-> BLUPF90 conversion (requires plinkR) ======
+  # ====== Genotype format help: PLINK -> BLUPF90 conversion ======
   observeEvent(input$geno_format_help, {
-    # Extra safety: check plinkR availability at runtime
-    if (!requireNamespace("plinkR", quietly = TRUE)) {
-      showNotification("Optional package 'plinkR' is not installed. 请先安装 plinkR 才能使用基因型格式转换助手。", 
-                       type = "error", duration = 8)
+    has_plinkr <- requireNamespace("plinkR", quietly = TRUE)
+    has_rcpp <- isTRUE(use_rcpp_blup_convert) && exists("eb_ped_to_blup_codes_cpp", mode = "function")
+    if (!has_plinkr && !has_rcpp) {
+      showNotification(
+        if (tolower(lang()) == "zh") {
+          "未检测到可用的转换后端：请安装 plinkR/PLINK，或启用 Rcpp 转换器。"
+        } else {
+          "No conversion backend available. Install plinkR/PLINK or enable the Rcpp converter."
+        },
+        type = "error", duration = 8
+      )
       return(NULL)
+    }
+
+    backend_text <- if (has_plinkr && has_rcpp) {
+      if (tolower(lang()) == "zh") {
+        "可用后端：PLINK（优先）+ Rcpp（回退）"
+      } else {
+        "Available backend: PLINK (preferred) + Rcpp fallback"
+      }
+    } else if (has_plinkr) {
+      if (tolower(lang()) == "zh") {
+        "可用后端：PLINK"
+      } else {
+        "Available backend: PLINK"
+      }
+    } else {
+      if (tolower(lang()) == "zh") {
+        "可用后端：Rcpp（未检测到 plinkR/PLINK）"
+      } else {
+        "Available backend: Rcpp (plinkR/PLINK not detected)"
+      }
     }
     
     showModal(
@@ -2157,7 +1944,8 @@ server <- function(input, output, session) {
               "需要帮助？这里可以将 PLINK (.ped/.map) 转换为 BLUPF90 (.txt/.map/.bim)。转换后的文件将直接保存到您选择的输出目录。"
             } else {
               "Need help? Use this tool to convert PLINK (.ped/.map) to BLUPF90 (.txt/.map/.bim). Converted files will be saved directly to your selected output directory."
-            })
+            }),
+            p(style = "margin-bottom:0;color:#4a4a4a;font-size:0.9rem;", backend_text)
           ),
           
           div(style = "margin-bottom: 20px;",
@@ -2215,7 +2003,19 @@ server <- function(input, output, session) {
         file.exists(conversion_files$blup_txt) &&
         file.exists(conversion_files$blup_map)) {
       div(
-        style = "margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap;",
+        style = "margin-top: 10px;",
+        if (!is.null(conversion_files$backend) && nzchar(conversion_files$backend)) {
+          div(
+            style = "font-size:0.85rem;color:#5a5a5a;margin-bottom:6px;",
+            if (tolower(lang()) == "zh") {
+              paste0("已完成转换（后端：", conversion_files$backend, "）")
+            } else {
+              paste0("Conversion completed (backend: ", conversion_files$backend, ")")
+            }
+          )
+        },
+        div(
+          style = "display: flex; gap: 8px; flex-wrap: wrap;",
         downloadButton(
           "download_blup_txt",
           if (tolower(lang()) == "zh") "下载 BLUPF90 .txt" else "Download BLUPF90 .txt",
@@ -2225,6 +2025,14 @@ server <- function(input, output, session) {
           "download_blup_map",
           if (tolower(lang()) == "zh") "下载 BLUPF90 .map" else "Download BLUPF90 .map",
           class = "btn btn-success btn-sm"
+        ),
+        if (!is.null(conversion_files$blup_bim) && file.exists(conversion_files$blup_bim)) {
+          downloadButton(
+            "download_blup_bim",
+            if (tolower(lang()) == "zh") "下载 BLUPF90 .bim" else "Download BLUPF90 .bim",
+            class = "btn btn-success btn-sm"
+          )
+        }
         )
       )
     }
@@ -2249,6 +2057,16 @@ server <- function(input, output, session) {
       file.copy(conversion_files$blup_map, file, overwrite = TRUE)
     }
   )
+
+  output$download_blup_bim <- downloadHandler(
+    filename = function() {
+      basename(conversion_files$blup_bim %||% "converted.bim")
+    },
+    content = function(file) {
+      req(conversion_files$blup_bim)
+      file.copy(conversion_files$blup_bim, file, overwrite = TRUE)
+    }
+  )
   
   # Handle close button click
   observeEvent(input$geno_convert_close, {
@@ -2257,15 +2075,21 @@ server <- function(input, output, session) {
   }, ignoreInit = TRUE)
   
   observeEvent(input$geno_convert_run, {
-    if (!requireNamespace("plinkR", quietly = TRUE)) {
-      showNotification("Optional package 'plinkR' is not installed. 请先安装 plinkR。", 
-                       type = "error", duration = 8)
+    has_plinkr <- requireNamespace("plinkR", quietly = TRUE)
+    has_rcpp <- isTRUE(use_rcpp_blup_convert) && exists("eb_ped_to_blup_codes_cpp", mode = "function")
+    if (!has_plinkr && !has_rcpp) {
+      showNotification(
+        if (tolower(lang()) == "zh") {
+          "未检测到可用后端：请安装 plinkR/PLINK，或启用 Rcpp 转换器。"
+        } else {
+          "No conversion backend available. Install plinkR/PLINK or enable the Rcpp converter."
+        },
+        type = "error", duration = 10
+      )
       return(NULL)
     }
     
     cleanup_conversion_files()
-    
-    # 仅支持 PLINK → BLUPF90，通过下载按钮获取结果
     
     req(input$geno_help_plink_ped, input$geno_help_plink_map)
       
@@ -2289,157 +2113,114 @@ server <- function(input, output, session) {
         file.copy(ped_datapath, ped_target, overwrite = TRUE)
         file.copy(map_datapath, map_target, overwrite = TRUE)
         
-        setProgress(value = 0.1, detail = if (tolower(lang()) == "zh") "正在运行 PLINK 转换..." else "Running PLINK conversion...")
-        
-        res <- tryCatch({
-          plinkR::plink_to_blupf90(prefix = target_prefix, out_prefix = target_prefix, verbose = TRUE)
-        }, error = function(e) e)
-        
-        if (inherits(res, "error")) {
-          setProgress(value = 1)
-          showNotification(
-            paste("PLINK → BLUPF90 转换失败:", res$message),
-            type = "error", duration = 10
+        backend_used <- NULL
+        conversion_error <- NULL
+
+        if (has_plinkr) {
+          setProgress(
+            value = 0.2,
+            detail = if (tolower(lang()) == "zh") "正在运行 PLINK 转换（首选）..." else "Running PLINK conversion (preferred)..."
           )
-          unlink(tmp_dir, recursive = TRUE, force = TRUE)
-        } else {
-          setProgress(value = 0.7, detail = if (tolower(lang()) == "zh") "正在保存文件到输出目录..." else "Saving files to output directory...")
-          
+
+          plink_res <- tryCatch({
+            plinkR::plink_to_blupf90(prefix = target_prefix, out_prefix = target_prefix, verbose = TRUE)
+            TRUE
+          }, error = function(e) e)
+
+          out_txt <- paste0(target_prefix, ".txt")
+          out_map <- paste0(target_prefix, ".map")
+          out_bim <- paste0(target_prefix, ".bim")
+          plink_ok <- isTRUE(plink_res) && file.exists(out_txt) && file.exists(out_map)
+
+          if (plink_ok) {
+            backend_used <- "PLINK"
+          } else {
+            conversion_error <- if (inherits(plink_res, "error")) plink_res$message else "PLINK output files not found."
+            if (has_rcpp) {
+              showNotification(
+                if (tolower(lang()) == "zh") {
+                  paste0("PLINK 转换失败，自动回退到 Rcpp：", conversion_error)
+                } else {
+                  paste0("PLINK conversion failed. Falling back to Rcpp: ", conversion_error)
+                },
+                type = "warning", duration = 10
+              )
+            }
+          }
+        }
+
+        if (is.null(backend_used) && has_rcpp) {
+          setProgress(
+            value = 0.45,
+            detail = if (tolower(lang()) == "zh") "正在运行 Rcpp 转换（回退）..." else "Running Rcpp conversion (fallback)..."
+          )
+          rcpp_res <- tryCatch({
+            convert_plink_to_blupf90_rcpp(
+              ped_path = ped_target,
+              map_path = map_target,
+              out_prefix = target_prefix
+            )
+          }, error = function(e) e)
+
+          if (inherits(rcpp_res, "error")) {
+            conversion_error <- rcpp_res$message
+          } else {
+            backend_used <- "Rcpp"
+          }
+        }
+
         out_txt <- paste0(target_prefix, ".txt")
         out_map <- paste0(target_prefix, ".map")
-          
-          setProgress(value = 1, detail = if (tolower(lang()) == "zh") "完成！" else "Complete!")
-          
-          download_dir <- tempfile(pattern = "easyblup_blup_download_", tmpdir = tempdir())
-          dir.create(download_dir, recursive = TRUE, showWarnings = FALSE)
-          if (file.exists(out_txt)) {
-            dl_txt <- file.path(download_dir, paste0(base_prefix, ".txt"))
-            file.copy(out_txt, dl_txt, overwrite = TRUE)
-            conversion_files$blup_txt <- dl_txt
-          }
-          if (file.exists(out_map)) {
-            dl_map <- file.path(download_dir, paste0(base_prefix, ".map"))
-            file.copy(out_map, dl_map, overwrite = TRUE)
-            conversion_files$blup_map <- dl_map
-          }
-          
+        out_bim <- paste0(target_prefix, ".bim")
+
+        if (is.null(backend_used) || !file.exists(out_txt) || !file.exists(out_map)) {
+          setProgress(value = 1)
+          showNotification(
+            if (tolower(lang()) == "zh") {
+              paste0("PLINK → BLUPF90 转换失败：", conversion_error %||% "未知错误")
+            } else {
+              paste0("PLINK -> BLUPF90 conversion failed: ", conversion_error %||% "Unknown error")
+            },
+            type = "error", duration = 12
+          )
+          unlink(tmp_dir, recursive = TRUE, force = TRUE)
+          return(NULL)
+        }
+
+        setProgress(value = 0.8, detail = if (tolower(lang()) == "zh") "正在准备下载文件..." else "Preparing download files...")
+
+        download_dir <- tempfile(pattern = "easyblup_blup_download_", tmpdir = tempdir())
+        dir.create(download_dir, recursive = TRUE, showWarnings = FALSE)
+
+        dl_txt <- file.path(download_dir, paste0(base_prefix, ".txt"))
+        dl_map <- file.path(download_dir, paste0(base_prefix, ".map"))
+        file.copy(out_txt, dl_txt, overwrite = TRUE)
+        file.copy(out_map, dl_map, overwrite = TRUE)
+        conversion_files$blup_txt <- dl_txt
+        conversion_files$blup_map <- dl_map
+
+        if (file.exists(out_bim)) {
+          dl_bim <- file.path(download_dir, paste0(base_prefix, ".bim"))
+          file.copy(out_bim, dl_bim, overwrite = TRUE)
+          conversion_files$blup_bim <- dl_bim
+        }
+        conversion_files$backend <- backend_used
+
+        setProgress(value = 1, detail = if (tolower(lang()) == "zh") "完成！" else "Complete!")
+
         showNotification(
           if (tolower(lang()) == "zh") {
-            "PLINK → BLUPF90 转换完成！请使用下方按钮下载 .txt 和 .map 文件。"
+            paste0("PLINK → BLUPF90 转换完成（后端：", backend_used, "）。请使用下方按钮下载文件。")
           } else {
-            "PLINK → BLUPF90 conversion finished! Use the buttons below to download .txt and .map files."
+            paste0("PLINK -> BLUPF90 conversion finished (backend: ", backend_used, "). Use buttons below to download files.")
           },
           type = "message", duration = 15
         )
-          
-          unlink(tmp_dir, recursive = TRUE, force = TRUE)
-        }
+
+        unlink(tmp_dir, recursive = TRUE, force = TRUE)
       })
   })
 
-  # Mount AI server if available
-  if (exists("aiAssistantServer")) {
-    # reactive data snapshot for AI
-    blup_ai_data <- reactive({
-      list(
-        traits = values$traits,
-        fixed = values$fixed,
-        random = values$random,
-        animal = values$animal,
-        opt = list(
-          method = input$opt_method,
-          mat = isTRUE(input$opt_mat),
-          pe = isTRUE(input$opt_pe),
-          mpe = isTRUE(input$opt_mpe)
-        ),
-        current_param = values$current_param
-      )
-    })
-    # callback to apply AI suggestion to editor
-    blup_apply <- function(suggestion) {
-      # Defensive apply: ensure suggestion has usable text, log size and a preview for debugging
-      if (!is.list(suggestion) || is.null(suggestion$param_text)) {
-        showNotification("Apply aborted: suggestion missing param_text", type = "error", duration = 4)
-        return()
-      }
-      txt <- as.character(suggestion$param_text)
-      if (!nzchar(txt)) {
-        showNotification("Apply aborted: suggestion param_text is empty", type = "error", duration = 4)
-        return()
-      }
-  # Mark that an AI suggestion was applied so auto-regeneration doesn't immediately overwrite it
-  values$ai_applied <- TRUE
-  # Update reactive value and push to front-end textarea
-  values$current_param <- txt
-      session$sendCustomMessage("update_textarea", list(content = values$current_param))
-      # Notify with a short preview to confirm what was applied
-      preview <- substr(gsub("\n", " ", trimws(txt)), 1, 140)
-      showNotification(paste0("Applied AI suggestion to parameter editor — preview: ", preview), type = "message", duration = 5)
-    }
-    # collect AI settings from UI (provider fixed to OpenAI)
-    ai_settings <- reactive({
-      default_model <- "gpt-4o-mini"
-      list(
-        provider = "openai",
-        base_url = trimws(input$ai_api_base %||% ""),
-        api_key = input$ai_api_key %||% "",
-        model = trimws(input$ai_model %||% default_model),
-        temperature = suppressWarnings(as.numeric(input$ai_temperature %||% 0.2)),
-        max_tokens = suppressWarnings(as.integer(input$ai_max_tokens %||% 2048)),
-        system_prompt = input$ai_system_prompt %||% "",
-        deployment = "",
-        api_version = "",
-        organization = ""
-      )
-    })
-
-    observeEvent(input$ai_key_file, {
-      req(input$ai_key_file)
-      tryCatch({
-        key_lines <- readLines(input$ai_key_file$datapath, warn = FALSE, encoding = "UTF-8")
-        key_text <- trimws(paste(key_lines, collapse = "\n"))
-        updateTextInput(session, "ai_api_key", value = key_text)
-        showNotification("API key imported from file", type = "message")
-      }, error = function(e) {
-        showNotification(paste("无法读取 API key 文件：", conditionMessage(e)), type = "error")
-      })
-    })
-
-    # When the user saves AI settings, return to the chat view (hide settings panel)
-    observeEvent(input$aiSaveSettings, {
-      # small delay to allow UI fields to settle client-side
-      session$sendCustomMessage("ai_show_chat", list())
-      showNotification("AI settings saved. Returning to chat.", type = "message", duration = 2)
-    })
-
-    rules <- load_app_rules("easyblupf90")
-    # MCP tools: allow the assistant to directly control Shiny inputs (whitelisted)
-    easyblup_tools <- reactive({
-      if (exists("easyblup_openai_tools", mode = "function")) {
-        get("easyblup_openai_tools", mode = "function")()
-      } else {
-        NULL
-      }
-    })
-    easyblup_tool_call <- function(tool_name, args) {
-      if (!exists("easyblup_mcp_call_tool", mode = "function")) {
-        return(list(ok = FALSE, error = "MCP tools not loaded"))
-      }
-      get("easyblup_mcp_call_tool", mode = "function")(
-        name = tool_name,
-        arguments = args,
-        session = session,
-        input = input,
-        values = values
-      )
-    }
-
-    get("aiAssistantServer")("ai_blup", blup_ai_data, blup_apply, app_context = reactive(list(
-      app_name = "easyblupf90",
-      locale = tryCatch({ if (exists("language_code", mode = "function")) get("language_code")(lang()) else "zh" }, error = function(e) "zh"),
-      rules = rules
-    )), ai_settings = ai_settings, tool_specs = easyblup_tools, tool_call = easyblup_tool_call)
-  }
 }
 
 # App entrypoints
