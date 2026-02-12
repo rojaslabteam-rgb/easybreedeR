@@ -22,14 +22,17 @@ try({
     this_file <- normalizePath(sys.frames()[[1]]$ofile)
     normalizePath(file.path(dirname(this_file), "..", "Language.R"))
   }, error = function(e) NA)
-  if (!is.na(lang_candidate) && file.exists(lang_candidate)) {
-    source(lang_candidate, local = FALSE)
-  } else {
-    # Fallbacks for local run and shinyapps bundle root
-    lang_candidate2 <- normalizePath(file.path(suite_dir, "..", "Language.R"), mustWork = FALSE)
-    lang_candidate3 <- normalizePath(file.path(suite_dir, "inst", "Language.R"), mustWork = FALSE)
-    if (file.exists(lang_candidate2)) source(lang_candidate2, local = FALSE)
-    if (file.exists(lang_candidate3)) source(lang_candidate3, local = FALSE)
+  lang_candidates <- unique(c(
+    if (!is.na(lang_candidate)) lang_candidate else character(0),
+    normalizePath(file.path(suite_dir, "inst", "Language.R"), mustWork = FALSE),
+    normalizePath(file.path(suite_dir, "Language.R"), mustWork = FALSE),
+    normalizePath(file.path(suite_dir, "..", "Language.R"), mustWork = FALSE)
+  ))
+  for (cand in lang_candidates) {
+    if (file.exists(cand)) {
+      source(cand, local = FALSE)
+      break
+    }
   }
 }, silent = TRUE)
 
@@ -80,4 +83,3 @@ source(file.path(SUITE_DIR, "R/run_easybreedeR_Studio.R"), local = FALSE)
 
 runner <- run_easybreedeR_Studio()
 shinyApp(ui = runner$ui, server = runner$server)
-

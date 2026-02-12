@@ -19,10 +19,16 @@ https://vb6clt-huangyi-tang.shinyapps.io/easybreeder-suite/
 
 
 # Contents
-
+- [Deploy](#deploy)
 - [Overview](#overview)
 - [Installation](#installation)
 - [Quick start](#quick-start)
+
+## Deploy
+```r
+source("scripts/deploy_remote_children.R")
+deploy_unified_suite(account = "shiny.io account", appName = "easybreeder-suite")
+```
 
 ## Overview
 

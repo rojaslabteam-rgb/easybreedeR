@@ -7116,4 +7116,10 @@ output$top10_dam_title <- renderText({
   })
 }
 
-shinyApp(ui, server)
+run_pediviewer_app <- function() {
+  list(ui = ui, server = server)
+}
+
+if (!identical(Sys.getenv("EASYBREEDER_SOURCE_ONLY", ""), "1")) {
+  shinyApp(ui, server)
+}

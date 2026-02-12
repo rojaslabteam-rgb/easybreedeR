@@ -2442,5 +2442,11 @@ server <- function(input, output, session) {
   }
 }
 
-# Run the app
-shinyApp(ui = ui, server = server)
+# App entrypoints
+run_easyblup_app <- function() {
+  list(ui = ui, server = server)
+}
+
+if (!identical(Sys.getenv("EASYBREEDER_SOURCE_ONLY", ""), "1")) {
+  shinyApp(ui = ui, server = server)
+}
