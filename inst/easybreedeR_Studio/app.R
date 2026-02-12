@@ -25,9 +25,11 @@ try({
   if (!is.na(lang_candidate) && file.exists(lang_candidate)) {
     source(lang_candidate, local = FALSE)
   } else {
-    # Fallback to cwd/.. pattern
+    # Fallbacks for local run and shinyapps bundle root
     lang_candidate2 <- normalizePath(file.path(suite_dir, "..", "Language.R"), mustWork = FALSE)
+    lang_candidate3 <- normalizePath(file.path(suite_dir, "inst", "Language.R"), mustWork = FALSE)
     if (file.exists(lang_candidate2)) source(lang_candidate2, local = FALSE)
+    if (file.exists(lang_candidate3)) source(lang_candidate3, local = FALSE)
   }
 }, silent = TRUE)
 
@@ -49,6 +51,20 @@ try({
 }
 
 APP_DIR <- .resolve_app_dir()
+.resolve_suite_dir <- function(app_dir) {
+  candidates <- unique(c(
+    app_dir,
+    file.path(app_dir, "inst", "easybreedeR_Studio"),
+    file.path(getwd(), "inst", "easybreedeR_Studio")
+  ))
+  for (d in candidates) {
+    if (dir.exists(d) && file.exists(file.path(d, "R", "Global.R"))) {
+      return(normalizePath(d, winslash = "/", mustWork = FALSE))
+    }
+  }
+  normalizePath(app_dir, winslash = "/", mustWork = FALSE)
+}
+SUITE_DIR <- .resolve_suite_dir(APP_DIR)
 
 # Ensure LAN access is enabled by default
 # This ensures the app listens on 0.0.0.0 even if .Rprofile is not loaded
@@ -58,11 +74,10 @@ if (is.null(getOption("shiny.host"))) {
 
 # Source all scripts in global environment (packages load globally anyway)
 # But ensure suite_language reactiveVal is accessible everywhere
-source(file.path(APP_DIR, "R/Global.R"), local = FALSE)
-source(file.path(APP_DIR, "R/Page_Suite.R"), local = FALSE)
-source(file.path(APP_DIR, "R/run_easybreedeR_Studio.R"), local = FALSE)
+source(file.path(SUITE_DIR, "R/Global.R"), local = FALSE)
+source(file.path(SUITE_DIR, "R/Page_Suite.R"), local = FALSE)
+source(file.path(SUITE_DIR, "R/run_easybreedeR_Studio.R"), local = FALSE)
 
 runner <- run_easybreedeR_Studio()
 shinyApp(ui = runner$ui, server = runner$server)
-
 
