@@ -54,6 +54,20 @@ try({
 }
 
 APP_DIR <- .resolve_app_dir()
+.resolve_suite_dir <- function(app_dir) {
+  candidates <- unique(c(
+    app_dir,
+    file.path(app_dir, "inst", "easybreedeR_Studio"),
+    file.path(getwd(), "inst", "easybreedeR_Studio")
+  ))
+  for (d in candidates) {
+    if (dir.exists(d) && file.exists(file.path(d, "R", "Global.R"))) {
+      return(normalizePath(d, winslash = "/", mustWork = FALSE))
+    }
+  }
+  normalizePath(app_dir, winslash = "/", mustWork = FALSE)
+}
+SUITE_DIR <- .resolve_suite_dir(APP_DIR)
 
 # On shinyapps.io, appPrimaryDoc may run from project root. Resolve to the
 # actual suite folder if R scripts are not under APP_DIR directly.
@@ -79,9 +93,9 @@ if (is.null(getOption("shiny.host"))) {
 
 # Source all scripts in global environment (packages load globally anyway)
 # But ensure suite_language reactiveVal is accessible everywhere
-source(file.path(APP_DIR, "R/Global.R"), local = FALSE)
-source(file.path(APP_DIR, "R/Page_Suite.R"), local = FALSE)
-source(file.path(APP_DIR, "R/run_easybreedeR_Studio.R"), local = FALSE)
+source(file.path(SUITE_DIR, "R/Global.R"), local = FALSE)
+source(file.path(SUITE_DIR, "R/Page_Suite.R"), local = FALSE)
+source(file.path(SUITE_DIR, "R/run_easybreedeR_Studio.R"), local = FALSE)
 
 runner <- run_easybreedeR_Studio()
 shinyApp(ui = runner$ui, server = runner$server)
