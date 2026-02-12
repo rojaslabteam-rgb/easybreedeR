@@ -2572,6 +2572,7 @@ server <- function(input, output, session) {
                  if (!evt || !evt.points || !evt.points.length) return;
                  var sid = getSid(evt.points[0]);
                  if (sid != null && typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                   el.__lastSid = String(sid);
                    Shiny.setInputValue('pca_plotly_click_sample', {sample: sid, color: getPickerColor(), nonce: Date.now()}, {priority:'event'});
                  }
                } catch(e) {}
@@ -2595,21 +2596,32 @@ server <- function(input, output, session) {
                  if (!evt || !evt.points || !evt.points.length) return;
                  var sid = getSid(evt.points[0]);
                  if (sid != null && typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                   el.__lastSid = String(sid);
                    Shiny.setInputValue('pca_last_hover_sample_js', {sample: String(sid), nonce: Date.now()}, {priority:'event'});
                  }
                } catch(e) {}
              });
-             el.addEventListener('contextmenu', function(ev) {
-               ev.preventDefault();
+             function emitRightClickSample() {
                var sid = null;
                try {
                  var hd = el._hoverdata;
-                 if (hd && hd.length && hd[0] && hd[0].customdata != null) sid = String(hd[0].customdata);
-                 } catch(e) {}
-                 if (typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                 if (hd && hd.length && hd[0]) sid = getSid(hd[0]);
+               } catch(e) {}
+               if (sid == null && el.__lastSid != null) sid = String(el.__lastSid);
+               if (typeof Shiny !== 'undefined' && Shiny.setInputValue) {
                  Shiny.setInputValue('pca_right_click_sample', {sample: sid, color: getPickerColor(), nonce: Date.now()}, {priority:'event'});
-                 }
-               });
+               }
+             }
+             el.addEventListener('contextmenu', function(ev) {
+               ev.preventDefault();
+               emitRightClickSample();
+             });
+             el.addEventListener('mousedown', function(ev) {
+               if (ev && ev.button === 2) {
+                 ev.preventDefault();
+                 emitRightClickSample();
+               }
+             });
              }"
         )
         p <- plotly::event_register(p, "plotly_selected")
@@ -2712,6 +2724,7 @@ server <- function(input, output, session) {
                    if (!evt || !evt.points || !evt.points.length) return;
                    var sid = getSid(evt.points[0]);
                    if (sid != null && typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                     el.__lastSid = String(sid);
                      Shiny.setInputValue('pca_plotly_click_sample', {sample: sid, color: getPickerColor(), nonce: Date.now()}, {priority:'event'});
                    }
                  } catch(e) {}
@@ -2735,19 +2748,30 @@ server <- function(input, output, session) {
                    if (!evt || !evt.points || !evt.points.length) return;
                    var sid = getSid(evt.points[0]);
                    if (sid != null && typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                     el.__lastSid = String(sid);
                      Shiny.setInputValue('pca_last_hover_sample_js', {sample: String(sid), nonce: Date.now()}, {priority:'event'});
                    }
                  } catch(e) {}
                });
-               el.addEventListener('contextmenu', function(ev) {
-                 ev.preventDefault();
+               function emitRightClickSample() {
                  var sid = null;
                  try {
                    var hd = el._hoverdata;
-                   if (hd && hd.length && hd[0] && hd[0].customdata != null) sid = String(hd[0].customdata);
+                   if (hd && hd.length && hd[0]) sid = getSid(hd[0]);
                  } catch(e) {}
+                 if (sid == null && el.__lastSid != null) sid = String(el.__lastSid);
                  if (typeof Shiny !== 'undefined' && Shiny.setInputValue) {
                    Shiny.setInputValue('pca_right_click_sample', {sample: sid, color: getPickerColor(), nonce: Date.now()}, {priority:'event'});
+                 }
+               }
+               el.addEventListener('contextmenu', function(ev) {
+                 ev.preventDefault();
+                 emitRightClickSample();
+               });
+               el.addEventListener('mousedown', function(ev) {
+                 if (ev && ev.button === 2) {
+                   ev.preventDefault();
+                   emitRightClickSample();
                  }
                });
              }"
