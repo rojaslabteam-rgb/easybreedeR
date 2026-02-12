@@ -566,6 +566,24 @@ ui <- page_fillable(
                                  selected = "2d",
                                  inline = TRUE)
                   ),
+                  div(style = "margin-bottom: 15px; padding: 10px; border: 1px solid #CFB991; border-radius: 6px; background: #FAFAF5;",
+                      tags$p(style = "margin: 0 0 8px 0; font-size: 0.9rem;",
+                             "PCA point coloring: click points to select, or use box/lasso (2D) to select multiple points."),
+                      div(style = "display: flex; gap: 8px; align-items: center; flex-wrap: wrap;",
+                          tags$label(style = "margin: 0; font-weight: 600;", `for` = "pca_selected_color", "Selected Color:"),
+                          tags$input(id = "pca_selected_color", type = "color", value = "#D62728",
+                                     style = "width: 52px; height: 34px; padding: 2px; border: 1px solid #ccc;"),
+                          actionButton("pca_apply_selected_color", "Apply to Selected", class = "btn btn-default btn-sm"),
+                          actionButton("pca_clear_selection", "Clear Selection", class = "btn btn-default btn-sm"),
+                          actionButton(
+                            "pca_reset_point_colors", "Reset Colors",
+                            class = "btn btn-default btn-sm",
+                            style = "background-color:#6E6E6E; border-color:#5A5A5A; color:#FFFFFF; font-weight:600;"
+                          )
+                      ),
+                      div(style = "margin-top: 8px; font-size: 0.9rem;",
+                          textOutput("pca_selection_status", inline = TRUE))
+                  ),
                   if (use_plotly) {
                     plotlyOutput("pca_plots", height = "800px")
                   } else {
@@ -2075,6 +2093,10 @@ server <- function(input, output, session) {
   per_marker_plot_obj <- reactiveVal(NULL)
   pca_result <- reactiveVal(NULL)
   pca_plot_obj <- reactiveVal(NULL)
+  pca_point_colors <- reactiveVal(setNames(character(0), character(0)))
+  pca_selected_samples <- reactiveVal(character(0))
+  pca_last_hover_sample <- reactiveVal(NULL)
+  pca_default_point_color <- "#CEB888"
   # Default number of PCs to match PLINK 2 (--pca typically outputs 20)
   pca_default_n_components <- 20L
 
@@ -2275,55 +2297,176 @@ server <- function(input, output, session) {
       cat("PCA unavailable: no usable PCA result from PLINK output or local fallback\n")
     }
   })
+
+  output$pca_selection_status <- renderText({
+    n_sel <- length(pca_selected_samples())
+    if (isTruthy(input$pca_dimension) && identical(input$pca_dimension, "3d")) {
+      paste0("Selected points: ", n_sel, " (multi-point box/lasso selection is available in 2D mode; right-click point to recolor directly)")
+    } else {
+      paste0("Selected points: ", n_sel, " (right-click point to recolor directly)")
+    }
+  })
+
+  # Keep color/selection state aligned with current PCA sample set.
+  observeEvent(pca_result(), {
+    pca <- pca_result()
+    if (is.null(pca) || is.null(pca$samples)) {
+      pca_selected_samples(character(0))
+      pca_point_colors(setNames(character(0), character(0)))
+      return()
+    }
+    current_samples <- as.character(pca$samples)
+    pca_selected_samples(intersect(pca_selected_samples(), current_samples))
+    cmap <- pca_point_colors()
+    if (!is.null(cmap) && length(cmap) > 0 && !is.null(names(cmap))) {
+      keep <- names(cmap) %in% current_samples
+      pca_point_colors(cmap[keep])
+    }
+  }, ignoreInit = TRUE)
+
+  if (use_plotly) {
+    normalize_hex_color <- function(col, default = "#D62728") {
+      if (is.null(col) || length(col) == 0 || is.na(col[1])) return(default)
+      x <- trimws(as.character(col[1]))
+      parsed <- tryCatch({
+        rgb <- grDevices::col2rgb(x, alpha = FALSE)
+        sprintf("#%02X%02X%02X", rgb[1, 1], rgb[2, 1], rgb[3, 1])
+      }, error = function(e) NA_character_)
+      if (is.na(parsed)) return(default)
+      parsed
+    }
+    get_current_pca_color <- function(default = "#D62728") {
+      if (!is.null(input$pca_selected_color_dom) && nzchar(as.character(input$pca_selected_color_dom))) {
+        return(normalize_hex_color(input$pca_selected_color_dom, default = default))
+      }
+      if (!is.null(input$pca_selected_color) && nzchar(as.character(input$pca_selected_color))) {
+        return(normalize_hex_color(input$pca_selected_color, default = default))
+      }
+      default
+    }
+
+    observeEvent(input$pca_plotly_selected_samples, {
+      payload <- input$pca_plotly_selected_samples
+      if (!is.list(payload) || !"samples" %in% names(payload)) return()
+      sel <- unique(as.character(payload$samples))
+      sel <- sel[!is.na(sel) & nzchar(sel)]
+      if (!identical(sel, pca_selected_samples())) {
+        pca_selected_samples(sel)
+      }
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$pca_plotly_click_sample, {
+      payload <- input$pca_plotly_click_sample
+      if (!is.list(payload) || !"sample" %in% names(payload)) return()
+      sid <- as.character(payload$sample)
+      if (is.na(sid) || !nzchar(sid)) return()
+      cur <- pca_selected_samples()
+      next_sel <- if (sid %in% cur) setdiff(cur, sid) else unique(c(cur, sid))
+      if (!identical(next_sel, cur)) {
+        pca_selected_samples(next_sel)
+      }
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$pca_apply_selected_color, {
+      sel <- pca_selected_samples()
+      if (length(sel) == 0) {
+        showNotification("No PCA points selected. Click or box-select points first.", type = "warning")
+        return()
+      }
+      col <- get_current_pca_color(default = "#D62728")
+      cmap <- pca_point_colors()
+      if (is.null(cmap) || is.null(names(cmap))) {
+        cmap <- setNames(character(0), character(0))
+      }
+      cmap[sel] <- toupper(col)
+      pca_point_colors(cmap)
+    }, ignoreInit = TRUE)
+
+    # Right-click recolor shortcut (applies to the point currently under cursor).
+    observeEvent(input$pca_right_click_sample, {
+      payload <- input$pca_right_click_sample
+      sid <- NULL
+      if (is.list(payload) && "sample" %in% names(payload)) sid <- as.character(payload$sample)
+      if (is.null(sid) || length(sid) == 0 || is.na(sid) || !nzchar(sid)) sid <- pca_last_hover_sample()
+      if (is.null(sid) || is.na(sid) || !nzchar(sid)) {
+        showNotification("Right-click a PCA point to set its color.", type = "warning")
+        return()
+      }
+      col <- if (is.list(payload) && "color" %in% names(payload)) {
+        normalize_hex_color(payload$color, default = get_current_pca_color(default = "#D62728"))
+      } else {
+        get_current_pca_color(default = "#D62728")
+      }
+      cmap <- pca_point_colors()
+      if (is.null(cmap) || is.null(names(cmap))) {
+        cmap <- setNames(character(0), character(0))
+      }
+      # Toggle behavior:
+      # - if point already has custom color, right-click resets it to default
+      # - otherwise apply current selected color
+      if (sid %in% names(cmap)) {
+        keep <- setdiff(names(cmap), sid)
+        cmap <- if (length(keep) > 0) cmap[keep] else setNames(character(0), character(0))
+      } else {
+        cmap[sid] <- toupper(col)
+      }
+      pca_point_colors(cmap)
+      # Keep this point selected as visual feedback.
+      cur <- pca_selected_samples()
+      pca_selected_samples(unique(c(cur, sid)))
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$pca_clear_selection, {
+      pca_selected_samples(character(0))
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$pca_reset_point_colors, {
+      pca_point_colors(setNames(character(0), character(0)))
+      pca_selected_samples(character(0))
+      pca_last_hover_sample(NULL)
+    }, ignoreInit = TRUE)
+
+    observeEvent(input$pca_last_hover_sample_js, {
+      payload <- input$pca_last_hover_sample_js
+      if (is.list(payload) && "sample" %in% names(payload)) {
+        sid <- as.character(payload$sample)
+        if (!is.na(sid) && nzchar(sid)) pca_last_hover_sample(sid)
+      }
+    }, ignoreInit = TRUE)
+  }
   
   # PCA Plots (2D and 3D) - requires plotly
   if (use_plotly) {
     output$pca_plots <- renderPlotly({
-      req(geno_data(), input$pca_dimension)
+      req(input$pca_dimension)
       data <- geno_data()
       empty_pca_plot <- function(msg) {
-        plot_ly(type = "scatter", mode = "markers", x = numeric(0), y = numeric(0)) %>%
+        p0 <- plot_ly(
+          type = "scatter", mode = "markers", x = numeric(0), y = numeric(0),
+          source = "pca_scatter"
+        ) %>%
           layout(xaxis = list(visible = FALSE), yaxis = list(visible = FALSE)) %>%
           add_annotations(text = msg, x = 0.5, y = 0.5, showarrow = FALSE)
+        p0 <- plotly::event_register(p0, "plotly_selected")
+        p0 <- plotly::event_register(p0, "plotly_click")
+        p0
       }
-      
-      if (!is.list(data) || !all(c("genotypes", "samples") %in% names(data))) {
-        return(empty_pca_plot("Please load genotype data (PLINK or BLUPF90) first"))
-      }
-      
-      # Prefer PLINK PCA from summary_stats if available.
-      stats <- if (summary_generated() && !is.null(summary_stats())) {
-        summary_stats()
-      } else if (!is.null(qc_results())) {
-        qc_results()
-      } else {
-        NULL
-      }
-      
-      pca_data <- data
-      if (!is.null(stats) && is.list(stats) && "filtered_data" %in% names(stats) &&
-          is.list(stats$filtered_data) &&
-          all(c("genotypes", "samples") %in% names(stats$filtered_data))) {
-        pca_data <- stats$filtered_data
+
+      if (is.null(data) || !is.list(data) || !all(c("genotypes", "samples") %in% names(data))) {
+        return(empty_pca_plot("Please load genotype data (PLINK or BLUPF90) first."))
       }
 
       pca <- pca_result()
       if (is.null(pca) || is.null(pca$scores) || nrow(pca$scores) == 0) {
-        pca <- compute_pca(pca_data, summary_stats = stats)
-        if (!is.null(pca) && !is.null(pca$scores) && nrow(pca$scores) > 0) {
-          pca_result(pca)
-        } else {
-          return(empty_pca_plot("PCA computation failed. Please check your data."))
-        }
-      }
-      
-      # Re-validate after computation
-      pca <- pca_result()
-      if (is.null(pca) || is.null(pca$scores) || nrow(pca$scores) == 0) {
-        return(empty_pca_plot("PCA computation returned empty result. Please check your data."))
+        return(empty_pca_plot("PCA not yet available. Run Summary or load data with PLINK PCA first."))
       }
       pca_plot <- pca
       pca_plot$scores <- align_pca_scores_for_plot(pca_plot$scores)
+      color_overrides <- pca_point_colors()
+      if (is.null(color_overrides) || is.null(names(color_overrides))) {
+        color_overrides <- setNames(character(0), character(0))
+      }
+      selected_samples <- pca_selected_samples()
       
       # Validate PCA data
       if (ncol(pca_plot$scores) < 2) {
@@ -2352,12 +2495,25 @@ server <- function(input, output, session) {
         if (nrow(pca_df) == 0) {
           return(empty_pca_plot("No valid PCA data to display."))
         }
+        pca_df$Color <- pca_default_point_color
+        if (length(color_overrides) > 0) {
+          idx_col <- match(pca_df$Sample, names(color_overrides))
+          has_col <- !is.na(idx_col)
+          pca_df$Color[has_col] <- unname(color_overrides[idx_col[has_col]])
+        }
+        pca_df$Selected <- pca_df$Sample %in% selected_samples
         
         p <- plot_ly(pca_df, x = ~PC1, y = ~PC2, 
+                    key = ~Sample, source = "pca_scatter",
+                    customdata = ~Sample,
                     text = ~Sample, hoverinfo = "text",
                     type = "scatter", mode = "markers",
-                    marker = list(size = 8, color = "#CEB888", 
-                                line = list(color = "#333333", width = 1))) %>%
+                    marker = list(
+                      size = ifelse(pca_df$Selected, 10, 8),
+                      color = pca_df$Color,
+                      line = list(color = ifelse(pca_df$Selected, "#111111", "#333333"),
+                                  width = ifelse(pca_df$Selected, 2, 1))
+                    )) %>%
           layout(
             title = list(text = paste0("PCA Plot (2D)<br>",
                           "PC1: ", round(pca$variance[1], 2), "% variance, ",
@@ -2371,9 +2527,94 @@ server <- function(input, output, session) {
               title = list(text = paste0("PC2 (", round(pca$variance[2], 2), "%)"), font = list(size = 14)),
               zeroline = TRUE
             ),
+            clickmode = "event+select",
+            dragmode = "select",
             hovermode = "closest",
             margin = list(t = 80, b = 60, l = 80, r = 40)
-          )
+          ) %>%
+          config(displayModeBar = TRUE, modeBarButtonsToAdd = c("select2d", "lasso2d"))
+        p <- htmlwidgets::onRender(
+          p,
+          "function(el, x) {
+             if (el.__pcaContextHooked) return;
+             el.__pcaContextHooked = true;
+             function getPickerColor() {
+               try {
+                 var cEl = document.getElementById('pca_selected_color');
+                 if (cEl && cEl.value) return String(cEl.value);
+               } catch(e) {}
+               return null;
+             }
+             if (!window.__pcaColorHooked) {
+               window.__pcaColorHooked = true;
+               try {
+                 var cEl0 = document.getElementById('pca_selected_color');
+                 if (cEl0 && typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                   var pushColor = function() {
+                     Shiny.setInputValue('pca_selected_color_dom', String(cEl0.value || ''), {priority:'event'});
+                   };
+                   cEl0.addEventListener('input', pushColor);
+                   cEl0.addEventListener('change', pushColor);
+                   pushColor();
+                 }
+               } catch(e) {}
+             }
+             function getSid(pt) {
+               if (!pt) return null;
+               if (pt.customdata != null) return String(pt.customdata);
+               if (pt.data && pt.data.key && pt.pointNumber != null && pt.data.key[pt.pointNumber] != null) {
+                 return String(pt.data.key[pt.pointNumber]);
+               }
+               return null;
+             }
+             el.on('plotly_click', function(evt) {
+               try {
+                 if (!evt || !evt.points || !evt.points.length) return;
+                 var sid = getSid(evt.points[0]);
+                 if (sid != null && typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                   Shiny.setInputValue('pca_plotly_click_sample', {sample: sid, color: getPickerColor(), nonce: Date.now()}, {priority:'event'});
+                 }
+               } catch(e) {}
+             });
+             el.on('plotly_selected', function(evt) {
+               try {
+                 var sids = [];
+                 if (evt && evt.points && evt.points.length) {
+                   for (var i = 0; i < evt.points.length; i++) {
+                     var sid = getSid(evt.points[i]);
+                     if (sid != null) sids.push(sid);
+                   }
+                 }
+                 if (typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                   Shiny.setInputValue('pca_plotly_selected_samples', {samples: sids, color: getPickerColor(), nonce: Date.now()}, {priority:'event'});
+                 }
+               } catch(e) {}
+             });
+             el.on('plotly_hover', function(evt) {
+               try {
+                 if (!evt || !evt.points || !evt.points.length) return;
+                 var sid = getSid(evt.points[0]);
+                 if (sid != null && typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                   Shiny.setInputValue('pca_last_hover_sample_js', {sample: String(sid), nonce: Date.now()}, {priority:'event'});
+                 }
+               } catch(e) {}
+             });
+             el.addEventListener('contextmenu', function(ev) {
+               ev.preventDefault();
+               var sid = null;
+               try {
+                 var hd = el._hoverdata;
+                 if (hd && hd.length && hd[0] && hd[0].customdata != null) sid = String(hd[0].customdata);
+                 } catch(e) {}
+                 if (typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                 Shiny.setInputValue('pca_right_click_sample', {sample: sid, color: getPickerColor(), nonce: Date.now()}, {priority:'event'});
+                 }
+               });
+             }"
+        )
+        p <- plotly::event_register(p, "plotly_selected")
+        p <- plotly::event_register(p, "plotly_click")
+        p <- plotly::event_register(p, "plotly_hover")
         
         pca_plot_obj(p)
         p
@@ -2398,12 +2639,24 @@ server <- function(input, output, session) {
           if (nrow(pca_df) == 0) {
             return(empty_pca_plot("No valid PCA data to display."))
           }
+          pca_df$Color <- pca_default_point_color
+          if (length(color_overrides) > 0) {
+            idx_col <- match(pca_df$Sample, names(color_overrides))
+            has_col <- !is.na(idx_col)
+            pca_df$Color[has_col] <- unname(color_overrides[idx_col[has_col]])
+          }
+          pca_df$Selected <- pca_df$Sample %in% selected_samples
           
           p <- plot_ly(pca_df, x = ~PC1, y = ~PC2, z = ~PC3,
+                      key = ~Sample, source = "pca_scatter",
+                      customdata = ~Sample,
                       text = ~Sample, hoverinfo = "text",
                       type = "scatter3d", mode = "markers",
-                      marker = list(size = 5, color = "#CEB888",
-                                  line = list(color = "#333333", width = 1))) %>%
+                      marker = list(
+                        size = ifelse(pca_df$Selected, 6.5, 5),
+                        color = pca_df$Color,
+                        line = list(color = ifelse(pca_df$Selected, "#111111", "#333333"), width = 1)
+                      )) %>%
             layout(
               title = list(text = paste0("PCA Plot (3D)<br>",
                             "PC1: ", round(pca$variance[1], 2), "%, ",
@@ -2420,15 +2673,98 @@ server <- function(input, output, session) {
               ),
               margin = list(t = 80, b = 40, l = 40, r = 40)
             )
+          p <- htmlwidgets::onRender(
+            p,
+            "function(el, x) {
+               if (el.__pcaContextHooked) return;
+               el.__pcaContextHooked = true;
+               function getPickerColor() {
+                 try {
+                   var cEl = document.getElementById('pca_selected_color');
+                   if (cEl && cEl.value) return String(cEl.value);
+                 } catch(e) {}
+                 return null;
+               }
+               if (!window.__pcaColorHooked) {
+                 window.__pcaColorHooked = true;
+                 try {
+                   var cEl0 = document.getElementById('pca_selected_color');
+                   if (cEl0 && typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                     var pushColor = function() {
+                       Shiny.setInputValue('pca_selected_color_dom', String(cEl0.value || ''), {priority:'event'});
+                     };
+                     cEl0.addEventListener('input', pushColor);
+                     cEl0.addEventListener('change', pushColor);
+                     pushColor();
+                   }
+                 } catch(e) {}
+               }
+               function getSid(pt) {
+                 if (!pt) return null;
+                 if (pt.customdata != null) return String(pt.customdata);
+                 if (pt.data && pt.data.key && pt.pointNumber != null && pt.data.key[pt.pointNumber] != null) {
+                   return String(pt.data.key[pt.pointNumber]);
+                 }
+                 return null;
+               }
+               el.on('plotly_click', function(evt) {
+                 try {
+                   if (!evt || !evt.points || !evt.points.length) return;
+                   var sid = getSid(evt.points[0]);
+                   if (sid != null && typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                     Shiny.setInputValue('pca_plotly_click_sample', {sample: sid, color: getPickerColor(), nonce: Date.now()}, {priority:'event'});
+                   }
+                 } catch(e) {}
+               });
+               el.on('plotly_selected', function(evt) {
+                 try {
+                   var sids = [];
+                   if (evt && evt.points && evt.points.length) {
+                     for (var i = 0; i < evt.points.length; i++) {
+                       var sid = getSid(evt.points[i]);
+                       if (sid != null) sids.push(sid);
+                     }
+                   }
+                   if (typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                     Shiny.setInputValue('pca_plotly_selected_samples', {samples: sids, color: getPickerColor(), nonce: Date.now()}, {priority:'event'});
+                   }
+                 } catch(e) {}
+               });
+               el.on('plotly_hover', function(evt) {
+                 try {
+                   if (!evt || !evt.points || !evt.points.length) return;
+                   var sid = getSid(evt.points[0]);
+                   if (sid != null && typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                     Shiny.setInputValue('pca_last_hover_sample_js', {sample: String(sid), nonce: Date.now()}, {priority:'event'});
+                   }
+                 } catch(e) {}
+               });
+               el.addEventListener('contextmenu', function(ev) {
+                 ev.preventDefault();
+                 var sid = null;
+                 try {
+                   var hd = el._hoverdata;
+                   if (hd && hd.length && hd[0] && hd[0].customdata != null) sid = String(hd[0].customdata);
+                 } catch(e) {}
+                 if (typeof Shiny !== 'undefined' && Shiny.setInputValue) {
+                   Shiny.setInputValue('pca_right_click_sample', {sample: sid, color: getPickerColor(), nonce: Date.now()}, {priority:'event'});
+                 }
+               });
+             }"
+          )
+          p <- plotly::event_register(p, "plotly_click")
+          p <- plotly::event_register(p, "plotly_selected")
+          p <- plotly::event_register(p, "plotly_hover")
           
           pca_plot_obj(p)
           p
         } else {
           empty_pca_plot("Insufficient dimensions for 3D plot. Need at least 3 principal components.")
         }
-      }
-    })
-  } else {
+	      }
+	    })
+      outputOptions(output, "pca_plots", suspendWhenHidden = FALSE)
+	  } else {
     # Fallback if plotly not available
     output$pca_plots <- renderUI({
       div(class = "alert alert-warning", style = "padding: 20px; margin: 20px;",
@@ -2444,8 +2780,14 @@ server <- function(input, output, session) {
   
   # Reset PCA when data changes
   observeEvent(geno_data(), {
-    pca_result(NULL)
+    data <- geno_data()
+    if (is.null(data) || !is.list(data) || !all(c("genotypes", "samples") %in% names(data))) {
+      pca_result(NULL)
+    }
     pca_plot_obj(NULL)
+    pca_selected_samples(character(0))
+    pca_point_colors(setNames(character(0), character(0)))
+    pca_last_hover_sample(NULL)
   })
   
   # Update plot objects when plots are rendered
