@@ -1350,11 +1350,20 @@ output$top10_dam_title <- renderText({
         }
         
         # Extract missing parents
-        if (length(qc_result$missing_sires) > 0 || length(qc_result$missing_dams) > 0) {
+        # Treat 0/blank/NA-like tokens as missing-value markers, not missing parent IDs.
+        missing_sires_filtered <- setdiff(
+          unique(as.character(qc_result$missing_sires)),
+          c("", "0", "NA", "NULL")
+        )
+        missing_dams_filtered <- setdiff(
+          unique(as.character(qc_result$missing_dams)),
+          c("", "0", "NA", "NULL")
+        )
+        if (length(missing_sires_filtered) > 0 || length(missing_dams_filtered) > 0) {
           issues$missing_parents <- list(
-            sires = qc_result$missing_sires,
-            dams = qc_result$missing_dams,
-            total = length(qc_result$missing_sires) + length(qc_result$missing_dams)
+            sires = missing_sires_filtered,
+            dams = missing_dams_filtered,
+            total = length(missing_sires_filtered) + length(missing_dams_filtered)
           )
           issues$has_errors <- TRUE
         }
@@ -1484,8 +1493,8 @@ output$top10_dam_title <- renderText({
     
     # 3. Check for missing parents (referenced but not in ID column)
     all_ids <- unique(df$ID)
-    sires_mentioned <- unique(df$Sire[!is.na(df$Sire) & df$Sire != ""])
-    dams_mentioned <- unique(df$Dam[!is.na(df$Dam) & df$Dam != ""])
+    sires_mentioned <- unique(df$Sire[!is.na(df$Sire) & df$Sire != "" & df$Sire != "0"])
+    dams_mentioned <- unique(df$Dam[!is.na(df$Dam) & df$Dam != "" & df$Dam != "0"])
     
     missing_sires <- setdiff(sires_mentioned, all_ids)
     missing_dams <- setdiff(dams_mentioned, all_ids)
@@ -1775,19 +1784,35 @@ output$top10_dam_title <- renderText({
       fixed_summary$self_parenting <- paste0("Fixed ", issues$self_parenting$count, " self-parenting case(s)")
     }
     
-    # Fix 3: Set missing parent references to NA
+    # Fix 3: Add missing parent IDs as founder rows (ID, Sire=0, Dam=0)
     if (length(issues$missing_parents) > 0 && issues$missing_parents$total > 0) {
       all_ids <- unique(df$ID)
-      
-      # Set invalid sire references to NA
-      invalid_sires <- !is.na(df$Sire) & df$Sire != "" & !(df$Sire %in% all_ids)
-      df$Sire[invalid_sires] <- NA
-      
-      # Set invalid dam references to NA
-      invalid_dams <- !is.na(df$Dam) & df$Dam != "" & !(df$Dam %in% all_ids)
-      df$Dam[invalid_dams] <- NA
-      
-      fixed_summary$missing_parents <- paste0("Set ", issues$missing_parents$total, " missing parent reference(s) to NA")
+      missing_sires <- setdiff(unique(df$Sire[!is.na(df$Sire) & df$Sire != "" & df$Sire != "0"]), all_ids)
+      missing_dams <- setdiff(unique(df$Dam[!is.na(df$Dam) & df$Dam != "" & df$Dam != "0"]), all_ids)
+      missing_parents <- unique(c(missing_sires, missing_dams))
+
+      if (length(missing_parents) > 0) {
+        # Build typed NA rows from existing schema, then fill pedigree core columns.
+        founder_rows <- df[rep(NA_integer_, length(missing_parents)), , drop = FALSE]
+        founder_rows$ID <- as.character(missing_parents)
+        founder_rows$Sire <- "0"
+        founder_rows$Dam <- "0"
+
+        # Optional: infer sex from parental role when Sex column exists.
+        if ("Sex" %in% names(df)) {
+          if (!is.character(df$Sex)) df$Sex <- as.character(df$Sex)
+          founder_rows$Sex <- NA_character_
+          founder_rows$Sex[founder_rows$ID %in% setdiff(missing_sires, missing_dams)] <- "M"
+          founder_rows$Sex[founder_rows$ID %in% setdiff(missing_dams, missing_sires)] <- "F"
+        }
+
+        df <- rbind(df, founder_rows)
+        rownames(df) <- NULL
+        fixed_summary$missing_parents <- paste0(
+          "Added ", length(missing_parents),
+          " missing parent founder row(s) with Sire=0 and Dam=0"
+        )
+      }
     }
     
     # Fix 4: Break circular references (loops) by removing oldest parent link in cycle
@@ -2274,24 +2299,17 @@ output$top10_dam_title <- renderText({
     
     df <- raw_data()
     missing_ids <- get_missing_ids()
-    valid_ids <- unique(df[[input$id_col]])
-    
-    total_fixed <- 0
-    
-    # Fix Sire column
-    if (length(missing_ids$sire) > 0) {
-      sire_mask <- df[[input$sire_col]] %in% missing_ids$sire
-      fixed_count <- sum(sire_mask, na.rm = TRUE)
-      df[[input$sire_col]][sire_mask] <- NA
-      total_fixed <- total_fixed + fixed_count
-    }
-    
-    # Fix Dam column
-    if (length(missing_ids$dam) > 0) {
-      dam_mask <- df[[input$dam_col]] %in% missing_ids$dam
-      fixed_count <- sum(dam_mask, na.rm = TRUE)
-      df[[input$dam_col]][dam_mask] <- NA
-      total_fixed <- total_fixed + fixed_count
+    missing_parent_ids <- unique(c(missing_ids$sire, missing_ids$dam))
+    added_count <- 0
+
+    if (length(missing_parent_ids) > 0) {
+      founder_rows <- df[rep(NA_integer_, length(missing_parent_ids)), , drop = FALSE]
+      founder_rows[[input$id_col]] <- as.character(missing_parent_ids)
+      founder_rows[[input$sire_col]] <- "0"
+      founder_rows[[input$dam_col]] <- "0"
+      df <- rbind(df, founder_rows)
+      rownames(df) <- NULL
+      added_count <- length(missing_parent_ids)
     }
     
     # Store fixed data
@@ -2300,7 +2318,7 @@ output$top10_dam_title <- renderText({
     last_fix_summary(list(
       fixed_sire = length(missing_ids$sire),
       fixed_dam = length(missing_ids$dam),
-      total_fixed_cells = total_fixed,
+      total_fixed_cells = added_count,
       when = Sys.time()
     ))
     
@@ -2316,12 +2334,12 @@ output$top10_dam_title <- renderText({
       
       # If auto_process is enabled, data will be automatically reprocessed
       # and inbreeding will be recalculated
-      showNotification(paste("✅ Pedigree fixed! Removed", total_fixed, "invalid references. Data validation passed. ", 
+      showNotification(paste("✅ Pedigree fixed! Added", added_count, "missing parent founder row(s). Data validation passed. ", 
                             if(isTRUE(input$auto_process)) "Inbreeding coefficients will be recalculated automatically." else ""), 
                       type = "message", duration = 6)
     } else {
       data_validation_status(list(valid = FALSE, errors = validation_errors, warnings = c()))
-      showNotification(paste("✅ Fixed", total_fixed, "invalid references. ⚠️ Some validation errors remain."), 
+      showNotification(paste("✅ Added", added_count, "missing parent founder row(s). ⚠️ Some validation errors remain."), 
                       type = "warning", duration = 5)
     }
   })
@@ -3147,7 +3165,7 @@ output$top10_dam_title <- renderText({
             },
             tags$p(
               style = "margin-bottom: 0; font-size: 0.9em;",
-              tags$strong("Auto-Fix: "), "Will automatically remove invalid parent references by setting them to NA. ",
+              tags$strong("Auto-Fix: "), "Will automatically add missing parent IDs as founder rows (Sire=0, Dam=0). ",
               tags$strong("Download Report: "), "Exports all missing Sire/Dam IDs for your reference."
             )
           )
@@ -4084,7 +4102,7 @@ output$top10_dam_title <- renderText({
   QC_AUTO_FIX_METHOD <- list(
     duplicates = "The software removes duplicate rows and keeps the row with the most complete information per ID (most non-empty fields); ties keep the first. Other rows with the same ID are deleted.",
     self_parenting = "The software sets Sire or Dam to empty (NA) where an individual is listed as their own sire or dam. The affected parent field is cleared so the individual is treated as having that parent unknown.",
-    missing_parents = "The software sets to NA any Sire/Dam reference that does not appear as an ID in the pedigree. Those offspring are then treated as having that parent unknown (e.g. founder).",
+    missing_parents = "The software adds each missing Sire/Dam reference as a new founder row (ID=<missing_parent>, Sire=0, Dam=0). Existing offspring links are preserved.",
     birth_date_order = "The software sets the offspring’s birth date to 0 (invalid/unknown) for cases where the offspring’s date is not after the parent’s. This only applies when a birthdate column is mapped; the Sire/Dam links are left unchanged.",
     loops = "The software breaks each cycle by clearing one parent link in the loop: the link from the second-to-last individual in the cycle to the last is set to NA (Sire or Dam, whichever points to that parent)."
   )
