@@ -25,3 +25,7 @@
 
 # Note: Development files are now only in inst/
 
+
+# Exclude deployment metadata from package tarball
+^inst/.*/rsconnect$
+^inst/.*/rsconnect/.*$

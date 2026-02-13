@@ -38,85 +38,78 @@ use_linkbreedeR <- FALSE
 tryCatch({
   if (requireNamespace("linkbreedeR", quietly = TRUE)) {
     use_linkbreedeR <- TRUE
-    cat("✓ linkbreedeR available - will use fast inbupgf90 for inbreeding calculation\n")
+    cat("✓ linkbreedeR available - will use fast inbupgf90 for inbreeding calculation
+")
   }
 }, error = function(e) {
   if (pedigreeTools_available) {
-    cat("Note: linkbreedeR not available, will use pedigreeTools for inbreeding calculation\n")
+    cat("Note: linkbreedeR not available, will use pedigreeTools for inbreeding calculation
+")
   } else {
-    cat("Note: linkbreedeR and pedigreeTools not available; inbreeding fallback is limited\n")
+    cat("Note: linkbreedeR and pedigreeTools not available; inbreeding fallback is limited
+")
   }
   use_linkbreedeR <- FALSE
 })
 
-# Try to load Rcpp QC function
+# Try to bind compiled QC functions from package namespace
 use_rcpp <- FALSE
 use_fast_inbreeding_cpp <- FALSE
-get_pediviewer_dir <- function() {
-  app_dir <- system.file("pedivieweR", package = "easybreedeR")
-  if (nzchar(app_dir) && dir.exists(app_dir)) {
-    return(app_dir)
-  }
-  dev_dir <- file.path(getwd(), "inst", "pedivieweR")
-  if (dir.exists(dev_dir)) {
-    return(dev_dir)
-  }
-  return(getwd())
-}
 tryCatch({
-  library(Rcpp)
-  app_dir <- get_pediviewer_dir()
-  cpp_path <- file.path(app_dir, "pedigree_qc.cpp")
-  if (file.exists(cpp_path)) {
-    src_env <- environment()
-    sourceCpp(cpp_path, env = src_env)
-    use_rcpp <- TRUE
-    cat("✓ Rcpp QC functions loaded successfully\n")
-    # Check if Rcpp functions are available
-    if (!exists("fast_find_deepest_ancestor")) {
-      cat("Note: fast_find_deepest_ancestor not found, will use R version\n")
+  ns <- asNamespace("easybreedeR")
+  core_fns <- c("fast_pedigree_qc", "fast_detect_loops")
+  optional_fns <- c(
+    "fast_pedigree_qc_sex", "fast_find_deepest_ancestor", "fast_lap_distribution",
+    "fast_lap_depths", "fast_descendant_summary", "fast_inbreeding_cpp",
+    "fast_top_contrib_cpp", "check_birth_date_order"
+  )
+  loaded <- character(0)
+  for (fn in c(core_fns, optional_fns)) {
+    if (exists(fn, mode = "function", envir = ns, inherits = FALSE)) {
+      assign(fn, get(fn, envir = ns, inherits = FALSE), envir = environment())
+      loaded <- c(loaded, fn)
     }
-    if (!exists("fast_lap_distribution")) {
-      cat("Note: fast_lap_distribution not found, will use R version\n")
-    }
-    if (!exists("fast_lap_depths")) {
-      cat("Note: fast_lap_depths not found, will use R version\n")
-    }
-    has_fast_inbreeding <- exists(
-      "fast_inbreeding_cpp",
-      mode = "function",
-      envir = src_env,
-      inherits = FALSE
-    )
-    if (!has_fast_inbreeding &&
-        exists("fast_inbreeding_cpp", mode = "function", envir = .GlobalEnv)) {
-      assign(
-        "fast_inbreeding_cpp",
-        get("fast_inbreeding_cpp", envir = .GlobalEnv),
-        envir = src_env
-      )
-      has_fast_inbreeding <- TRUE
-    }
-    if (has_fast_inbreeding) {
-      use_fast_inbreeding_cpp <- TRUE
-      cat("✓ fast inbreeding C++ available - will use Rcpp method\n")
-    } else {
-      if (pedigreeTools_available) {
-        cat("Note: fast_inbreeding_cpp not found, will use inbupgf90/pedigreeTools\n")
-      } else {
-        cat("Note: fast_inbreeding_cpp not found, will use inbupgf90 if available\n")
-      }
-    }
-    if (exists("fast_top_contrib_cpp", mode = "function", envir = src_env, inherits = FALSE)) {
-      cat("✓ fast_top_contrib_cpp available - will show Top 5 contributors\n")
-    } else {
-      cat("Note: fast_top_contrib_cpp not found - Top 5 contributors disabled\n")
-    }
+  }
+
+  use_rcpp <- all(core_fns %in% loaded)
+  if (use_rcpp) {
+    message("Rcpp QC functions loaded from package namespace")
   } else {
-    cat("Note: pedigree_qc.cpp not found at:", cpp_path, "\n")
+    message("Required compiled QC functions are unavailable; falling back to R methods")
+  }
+
+  if ("fast_find_deepest_ancestor" %in% loaded) {
+    message("fast_find_deepest_ancestor available")
+  } else {
+    message("fast_find_deepest_ancestor not found, will use R version")
+  }
+  if ("fast_lap_distribution" %in% loaded) {
+    message("fast_lap_distribution available")
+  } else {
+    message("fast_lap_distribution not found, will use R version")
+  }
+  if ("fast_lap_depths" %in% loaded) {
+    message("fast_lap_depths available")
+  } else {
+    message("fast_lap_depths not found, will use R version")
+  }
+
+  use_fast_inbreeding_cpp <- "fast_inbreeding_cpp" %in% loaded
+  if (use_fast_inbreeding_cpp) {
+    message("fast inbreeding C++ available - will use Rcpp method")
+  } else if (pedigreeTools_available) {
+    message("fast_inbreeding_cpp not found, will use inbupgf90/pedigreeTools")
+  } else {
+    message("fast_inbreeding_cpp not found, will use inbupgf90 if available")
+  }
+
+  if ("fast_top_contrib_cpp" %in% loaded) {
+    message("fast_top_contrib_cpp available - will show Top 5 contributors")
+  } else {
+    message("fast_top_contrib_cpp not found - Top 5 contributors disabled")
   }
 }, error = function(e) {
-  cat("Note: Rcpp not available or compilation failed:", e$message, "\n")
+  message("Compiled backend unavailable: ", e$message)
   use_rcpp <- FALSE
   use_fast_inbreeding_cpp <- FALSE
 })
@@ -1454,13 +1447,15 @@ output$top10_dam_title <- renderText({
               }
             }
           }, error = function(e) {
-            cat("Birth date order check failed:", e$message, "\n")
+            cat("Birth date order check failed:", e$message, "
+")
           })
         }
         
         return(issues)
       }, error = function(e) {
-        cat("Rcpp QC failed, falling back to R version:", e$message, "\n")
+        cat("Rcpp QC failed, falling back to R version:", e$message, "
+")
         # Fall through to R version below
       })
     }
@@ -1592,7 +1587,8 @@ output$top10_dam_title <- renderText({
           issues$has_errors <- TRUE
         }
       }, error = function(e) {
-        cat("Loop detection skipped due to error:", e$message, "\n")
+        cat("Loop detection skipped due to error:", e$message, "
+")
       })
     }
     
@@ -1700,7 +1696,8 @@ output$top10_dam_title <- renderText({
             }
           }
         }, error = function(e) {
-          cat("Birth date order check failed:", e$message, "\n")
+          cat("Birth date order check failed:", e$message, "
+")
         })
       }
     
@@ -3323,20 +3320,25 @@ output$top10_dam_title <- renderText({
     
     # Check if ped_data returned NULL (due to column mapping errors)
     if (is.null(ped)) {
-      cat("Error: Data processing failed. Please check column mapping.\n")
+      cat("Error: Data processing failed. Please check column mapping.
+")
       return()
     }
     
     # Check if required columns exist
     if (!"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
-      cat("Error: Required columns (ID, Sire, Dam) not found in processed data\n")
+      cat("Error: Required columns (ID, Sire, Dam) not found in processed data
+")
       return()
     }
     
     stats <- get_basic_stats(ped)
-    cat("Total individuals:", nrow(ped), "\n")
-    cat("Founders:", stats$founders, "\n")
-    cat("Non-founders:", stats$non_founders, "\n")
+    cat("Total individuals:", nrow(ped), "
+")
+    cat("Founders:", stats$founders, "
+")
+    cat("Non-founders:", stats$non_founders, "
+")
   })
   
   # Auto-switch to visualization tab when data is processed (with delay for large datasets)
@@ -3900,70 +3902,105 @@ output$top10_dam_title <- renderText({
 
   run_qc_report <- function(ped) {
     if (is.null(ped) || !"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
-      cat("Error: Required columns (ID, Sire, Dam) not found in processed data\n")
+      cat("Error: Required columns (ID, Sire, Dam) not found in processed data
+")
       return()
     }
     n <- nrow(ped)
-    cat("=== PEDIGREE QC REPORT ===\n")
+    cat("=== PEDIGREE QC REPORT ===
+")
     if (exists("use_rcpp") && use_rcpp) {
-      cat("(Using Rcpp-accelerated QC)\n")
+      cat("(Using Rcpp-accelerated QC)
+")
     } else {
-      cat("(Using optimized R functions)\n")
+      cat("(Using optimized R functions)
+")
     }
-    cat("Generated:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n\n")
+    cat("Generated:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "
+
+")
     qc_results <- get_qc_issues_cached(ped)
     stats <- get_basic_stats(ped)
     founders <- stats$founders
     both_parents <- stats$both_parents
-    cat("Total individuals:", format(n, big.mark = ","), "\n")
-    cat("Founders:", format(founders, big.mark = ","), "\n")
-    cat("With both parents:", format(both_parents, big.mark = ","), "\n\n")
+    cat("Total individuals:", format(n, big.mark = ","), "
+")
+    cat("Founders:", format(founders, big.mark = ","), "
+")
+    cat("With both parents:", format(both_parents, big.mark = ","), "
+
+")
     if (length(qc_results$duplicates) > 0 && qc_results$duplicates$count > 0) {
-      cat("❌ Duplicate IDs:", qc_results$duplicates$count, "unique ID(s) duplicated\n")
-      cat("   Examples:", paste(head(qc_results$duplicates$ids, 5), collapse = ", "), "\n")
+      cat("❌ Duplicate IDs:", qc_results$duplicates$count, "unique ID(s) duplicated
+")
+      cat("   Examples:", paste(head(qc_results$duplicates$ids, 5), collapse = ", "), "
+")
       if (qc_results$duplicates$count > 5) {
-        cat("   ... and", qc_results$duplicates$count - 5, "more\n")
+        cat("   ... and", qc_results$duplicates$count - 5, "more
+")
       }
-      cat("\n")
+      cat("
+")
     } else {
-      cat("✔ No duplicate IDs\n\n")
+      cat("✔ No duplicate IDs
+
+")
     }
     if (length(qc_results$self_parenting) > 0 && qc_results$self_parenting$count > 0) {
-      cat("⚠️ Self-Parenting:", qc_results$self_parenting$count, "case(s)\n")
-      cat("   Affected IDs:", paste(head(qc_results$self_parenting$ids, 5), collapse = ", "), "\n")
+      cat("⚠️ Self-Parenting:", qc_results$self_parenting$count, "case(s)
+")
+      cat("   Affected IDs:", paste(head(qc_results$self_parenting$ids, 5), collapse = ", "), "
+")
       if (qc_results$self_parenting$count > 5) {
-        cat("   ... and", qc_results$self_parenting$count - 5, "more\n")
+        cat("   ... and", qc_results$self_parenting$count - 5, "more
+")
       }
-      cat("\n")
+      cat("
+")
     } else {
-      cat("✔ No self-parenting issues\n\n")
+      cat("✔ No self-parenting issues
+
+")
     }
     if (length(qc_results$missing_parents) > 0 && qc_results$missing_parents$total > 0) {
-      cat("ℹ️ Missing Parents:", qc_results$missing_parents$total, "reference(s)\n")
+      cat("ℹ️ Missing Parents:", qc_results$missing_parents$total, "reference(s)
+")
       if (length(qc_results$missing_parents$sires) > 0) {
         cat("   Missing sires (", length(qc_results$missing_parents$sires), "):",
-            paste(head(qc_results$missing_parents$sires, 5), collapse = ", "), "\n")
+            paste(head(qc_results$missing_parents$sires, 5), collapse = ", "), "
+")
         if (length(qc_results$missing_parents$sires) > 5) {
-          cat("   ... and", length(qc_results$missing_parents$sires) - 5, "more\n")
+          cat("   ... and", length(qc_results$missing_parents$sires) - 5, "more
+")
         }
       }
       if (length(qc_results$missing_parents$dams) > 0) {
         cat("   Missing dams (", length(qc_results$missing_parents$dams), "):",
-            paste(head(qc_results$missing_parents$dams, 5), collapse = ", "), "\n")
+            paste(head(qc_results$missing_parents$dams, 5), collapse = ", "), "
+")
         if (length(qc_results$missing_parents$dams) > 5) {
-          cat("   ... and", length(qc_results$missing_parents$dams) - 5, "more\n")
+          cat("   ... and", length(qc_results$missing_parents$dams) - 5, "more
+")
         }
       }
-      cat("\n")
+      cat("
+")
     } else {
-      cat("✔ All sires found\n")
-      cat("✔ All dams found\n\n")
+      cat("✔ All sires found
+")
+      cat("✔ All dams found
+
+")
     }
     if (length(qc_results$birth_date_order) > 0 && qc_results$birth_date_order$count > 0) {
-      cat("📅 Birth Date Order Issues:", qc_results$birth_date_order$count, "case(s)\n")
-      cat("   Invalid sire cases:", qc_results$birth_date_order$invalid_sire_count, "\n")
-      cat("   Invalid dam cases:", qc_results$birth_date_order$invalid_dam_count, "\n")
-      cat("   Affected offspring:\n")
+      cat("📅 Birth Date Order Issues:", qc_results$birth_date_order$count, "case(s)
+")
+      cat("   Invalid sire cases:", qc_results$birth_date_order$invalid_sire_count, "
+")
+      cat("   Invalid dam cases:", qc_results$birth_date_order$invalid_dam_count, "
+")
+      cat("   Affected offspring:
+")
       for (i in seq_along(qc_results$birth_date_order$invalid_offspring_ids)) {
         offspring_id <- qc_results$birth_date_order$invalid_offspring_ids[i]
         sire_id <- qc_results$birth_date_order$invalid_sire_ids[i]
@@ -3975,39 +4012,54 @@ output$top10_dam_title <- renderText({
         if (dam_id != "" && dam_id != "NA") {
           cat(" - Dam:", dam_id, "(born after or same date)")
         }
-        cat("\n")
+        cat("
+")
       }
       if (qc_results$birth_date_order$count > 10) {
-        cat("   ... and", qc_results$birth_date_order$count - 10, "more case(s)\n")
+        cat("   ... and", qc_results$birth_date_order$count - 10, "more case(s)
+")
       }
-      cat("\n")
+      cat("
+")
     }
     if (length(qc_results$loops) > 0 && qc_results$loops$count > 0) {
-      cat("🔄 Circular References (Loops):", qc_results$loops$count, "loop(s) detected\n")
-      cat("   Ancestry chains that form cycles:\n")
+      cat("🔄 Circular References (Loops):", qc_results$loops$count, "loop(s) detected
+")
+      cat("   Ancestry chains that form cycles:
+")
       for (i in seq_along(head(qc_results$loops$cycles, 3))) {
         cycle <- qc_results$loops$cycles[[i]]
-        cat("   Loop", i, ":", paste(cycle, collapse = " → "), "\n")
+        cat("   Loop", i, ":", paste(cycle, collapse = " → "), "
+")
       }
       if (qc_results$loops$count > 3) {
-        cat("   ... and", qc_results$loops$count - 3, "more loop(s)\n")
+        cat("   ... and", qc_results$loops$count - 3, "more loop(s)
+")
       }
-      cat("\n")
+      cat("
+")
     } else {
-      cat("✔ No circular references detected\n\n")
+      cat("✔ No circular references detected
+
+")
     }
     fix_info <- qc_fix_summary()
     if (!is.null(fix_info) && length(fix_info) > 0) {
-      cat("--- Auto-Fix Summary ---\n")
+      cat("--- Auto-Fix Summary ---
+")
       for (fix_type in names(fix_info)) {
-        cat("  •", fix_info[[fix_type]], "\n")
+        cat("  •", fix_info[[fix_type]], "
+")
       }
-      cat("\n")
+      cat("
+")
     }
     if (qc_results$has_errors) {
-      cat("⚠️ STATUS: Issues detected. Use 'Download QC Report' for full details.\n")
+      cat("⚠️ STATUS: Issues detected. Use 'Download QC Report' for full details.
+")
     } else {
-      cat("✅ STATUS: All QC checks passed!\n")
+      cat("✅ STATUS: All QC checks passed!
+")
     }
   }
 
@@ -4015,9 +4067,11 @@ output$top10_dam_title <- renderText({
     req(ped_data())
     ped <- ped_data()
     if (is.null(ped)) {
-      return("Error: Data processing failed. Please check column mapping.\n")
+      return("Error: Data processing failed. Please check column mapping.
+")
     }
-    paste(capture.output(run_qc_report(ped)), collapse = "\n")
+    paste(capture.output(run_qc_report(ped)), collapse = "
+")
   })
 
   output$qc_report <- renderPrint({
@@ -4206,35 +4260,50 @@ output$top10_dam_title <- renderText({
   # Pedigree Structure Report - pre-compute when ped_data() is ready so tab switch is instant
   run_structure_report <- function(ped) {
     if (is.null(ped) || !"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
-      cat("Error: Required columns (ID, Sire, Dam) not found in processed data\n")
+      cat("Error: Required columns (ID, Sire, Dam) not found in processed data
+")
       return()
     }
     n <- nrow(ped)
-    cat("========================================\n")
-    cat("PEDIGREE STRUCTURE REPORT\n")
-    cat("Generated:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n")
-    cat("========================================\n\n")
-    cat("--- BASIC STATISTICS ---\n")
-    cat("Individuals in total:", format(n, big.mark = ","), "\n")
+    cat("========================================
+")
+    cat("PEDIGREE STRUCTURE REPORT
+")
+    cat("Generated:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "
+")
+    cat("========================================
+
+")
+    cat("--- BASIC STATISTICS ---
+")
+    cat("Individuals in total:", format(n, big.mark = ","), "
+")
     
     # Founders and non-founders
     stats <- get_basic_stats(ped)
     founders <- stats$founders
     non_founders <- stats$non_founders
-    cat("Founders:", format(founders, big.mark = ","), "\n")
-    cat("Non-founders:", format(non_founders, big.mark = ","), "\n")
+    cat("Founders:", format(founders, big.mark = ","), "
+")
+    cat("Non-founders:", format(non_founders, big.mark = ","), "
+")
     
     # Individuals with both parents
     both_parents <- stats$both_parents
     only_sire <- stats$only_sire
     only_dam <- stats$only_dam
-    cat("With both parents:", format(both_parents, big.mark = ","), "\n")
-    cat("Only with known sire:", format(only_sire, big.mark = ","), "\n")
-    cat("Only with known dam:", format(only_dam, big.mark = ","), "\n\n")
+    cat("With both parents:", format(both_parents, big.mark = ","), "
+")
+    cat("Only with known sire:", format(only_sire, big.mark = ","), "
+")
+    cat("Only with known dam:", format(only_dam, big.mark = ","), "
+
+")
     
   # Parent statistics
   stats_ext <- get_extended_stats(ped)
-    cat("--- PARENT STATISTICS ---\n")
+    cat("--- PARENT STATISTICS ---
+")
     # Get unique sires and dams
     all_ids <- unique(ped$ID)
     unique_sires <- unique(ped$Sire[!is.na(ped$Sire) & ped$Sire != "" & ped$Sire != "0"])
@@ -4252,20 +4321,28 @@ output$top10_dam_title <- renderText({
       count(Dam, name = "progeny_count")
     total_dam_progeny <- sum(dam_progeny$progeny_count)
     
-  cat("Sires in total:", format(stats_ext$unique_sires, big.mark = ","), "\n")
-  cat("   -Progeny:", format(stats_ext$total_sire_progeny, big.mark = ","), "\n")
-  cat("Dams in total:", format(stats_ext$unique_dams, big.mark = ","), "\n")
-  cat("   -Progeny:", format(stats_ext$total_dam_progeny, big.mark = ","), "\n")
+  cat("Sires in total:", format(stats_ext$unique_sires, big.mark = ","), "
+")
+  cat("   -Progeny:", format(stats_ext$total_sire_progeny, big.mark = ","), "
+")
+  cat("Dams in total:", format(stats_ext$unique_dams, big.mark = ","), "
+")
+  cat("   -Progeny:", format(stats_ext$total_dam_progeny, big.mark = ","), "
+")
     
     # Individuals with progeny
     individuals_with_progeny <- unique(c(unique_sires, unique_dams))
     individuals_with_progeny <- individuals_with_progeny[individuals_with_progeny %in% all_ids]
     individuals_without_progeny <- n - length(individuals_with_progeny)
-  cat("Individuals with progeny:", format(stats_ext$individuals_with_progeny, big.mark = ","), "\n")
-  cat("Individuals with no progeny:", format(stats_ext$individuals_without_progeny, big.mark = ","), "\n\n")
+  cat("Individuals with progeny:", format(stats_ext$individuals_with_progeny, big.mark = ","), "
+")
+  cat("Individuals with no progeny:", format(stats_ext$individuals_without_progeny, big.mark = ","), "
+
+")
     
     # Founder statistics
-    cat("--- FOUNDER STATISTICS ---\n")
+    cat("--- FOUNDER STATISTICS ---
+")
     sire_missing <- is_missing_parent(ped$Sire)
     dam_missing <- is_missing_parent(ped$Dam)
     founder_ids <- ped$ID[sire_missing & dam_missing]
@@ -4292,16 +4369,25 @@ output$top10_dam_title <- renderText({
     
     founder_no_progeny <- founders - length(unique(c(founder_sires, founder_dams)))
     
-  cat("Founders:", format(founders, big.mark = ","), "\n")
-  cat("   -Progeny:", format(stats_ext$founder_total_progeny, big.mark = ","), "\n")
-  cat("   -Sires:", format(stats_ext$founder_sires, big.mark = ","), "\n")
-  cat("       -Progeny:", format(stats_ext$founder_sire_progeny, big.mark = ","), "\n")
-  cat("   -Dams:", format(stats_ext$founder_dams, big.mark = ","), "\n")
-  cat("       -Progeny:", format(stats_ext$founder_dam_progeny, big.mark = ","), "\n")
-  cat("   -With no progeny:", format(stats_ext$founder_no_progeny, big.mark = ","), "\n\n")
+  cat("Founders:", format(founders, big.mark = ","), "
+")
+  cat("   -Progeny:", format(stats_ext$founder_total_progeny, big.mark = ","), "
+")
+  cat("   -Sires:", format(stats_ext$founder_sires, big.mark = ","), "
+")
+  cat("       -Progeny:", format(stats_ext$founder_sire_progeny, big.mark = ","), "
+")
+  cat("   -Dams:", format(stats_ext$founder_dams, big.mark = ","), "
+")
+  cat("       -Progeny:", format(stats_ext$founder_dam_progeny, big.mark = ","), "
+")
+  cat("   -With no progeny:", format(stats_ext$founder_no_progeny, big.mark = ","), "
+
+")
     
     # Non-founder statistics
-    cat("--- NON-FOUNDER STATISTICS ---\n")
+    cat("--- NON-FOUNDER STATISTICS ---
+")
     non_founder_ped <- ped %>% filter(!ID %in% founder_ids)
     non_founder_sires <- non_founder_ped %>% 
       filter(ID %in% unique_sires) %>%
@@ -4319,17 +4405,27 @@ output$top10_dam_title <- renderText({
       filter(Dam %in% non_founder_ped$ID) %>%
       nrow()
     
-  cat("Non-founders:", format(non_founders, big.mark = ","), "\n")
-  cat("   -Sires:", format(stats_ext$non_founder_sires, big.mark = ","), "\n")
-  cat("       -Progeny:", format(stats_ext$non_founder_sire_progeny, big.mark = ","), "\n")
-  cat("   -Dams:", format(stats_ext$non_founder_dams, big.mark = ","), "\n")
-  cat("       -Progeny:", format(stats_ext$non_founder_dam_progeny, big.mark = ","), "\n")
-    cat("   -Only with known sire:", format(only_sire, big.mark = ","), "\n")
-    cat("   -Only with known dam:", format(only_dam, big.mark = ","), "\n")
-    cat("   -With known sire and dam:", format(both_parents, big.mark = ","), "\n\n")
+  cat("Non-founders:", format(non_founders, big.mark = ","), "
+")
+  cat("   -Sires:", format(stats_ext$non_founder_sires, big.mark = ","), "
+")
+  cat("       -Progeny:", format(stats_ext$non_founder_sire_progeny, big.mark = ","), "
+")
+  cat("   -Dams:", format(stats_ext$non_founder_dams, big.mark = ","), "
+")
+  cat("       -Progeny:", format(stats_ext$non_founder_dam_progeny, big.mark = ","), "
+")
+    cat("   -Only with known sire:", format(only_sire, big.mark = ","), "
+")
+    cat("   -Only with known dam:", format(only_dam, big.mark = ","), "
+")
+    cat("   -With known sire and dam:", format(both_parents, big.mark = ","), "
+
+")
     
     # Full-sib groups
-    cat("--- FULL-SIB GROUPS ---\n")
+    cat("--- FULL-SIB GROUPS ---
+")
     full_sibs <- ped %>%
       filter(!is.na(Sire), !is.na(Dam), Sire != "", Dam != "", Sire != "0", Dam != "0") %>%
       group_by(Sire, Dam) %>%
@@ -4337,28 +4433,42 @@ output$top10_dam_title <- renderText({
       filter(family_size >= 2)
     
     if (nrow(full_sibs) > 0) {
-      cat("Full-sib groups:", format(nrow(full_sibs), big.mark = ","), "\n")
-      cat("   -Average family size:", format(mean(full_sibs$family_size), digits = 4), "\n")
-      cat("       -Maximum:", max(full_sibs$family_size), "\n")
-      cat("       -Minimum:", min(full_sibs$family_size), "\n\n")
+      cat("Full-sib groups:", format(nrow(full_sibs), big.mark = ","), "
+")
+      cat("   -Average family size:", format(mean(full_sibs$family_size), digits = 4), "
+")
+      cat("       -Maximum:", max(full_sibs$family_size), "
+")
+      cat("       -Minimum:", min(full_sibs$family_size), "
+
+")
     } else {
-      cat("Full-sib groups: 0\n\n")
+      cat("Full-sib groups: 0
+
+")
     }
     
     # Inbreeding statistics (if available)
     f_vals <- f_values()
     if (!is.null(f_vals) && nrow(f_vals) > 0 && "F" %in% names(f_vals)) {
-      cat("--- INBREEDING STATISTICS ---\n")
+      cat("--- INBREEDING STATISTICS ---
+")
       f_numeric <- f_vals$F[!is.na(f_vals$F)]
       inbreds <- sum(f_numeric > 0)
       
-      cat("Evaluated individuals:", format(length(f_numeric), big.mark = ","), "\n")
-      cat("Inbreds in total:", format(inbreds, big.mark = ","), "\n")
-      cat("Inbreds in evaluated:", format(inbreds, big.mark = ","), "\n\n")
+      cat("Evaluated individuals:", format(length(f_numeric), big.mark = ","), "
+")
+      cat("Inbreds in total:", format(inbreds, big.mark = ","), "
+")
+      cat("Inbreds in evaluated:", format(inbreds, big.mark = ","), "
+
+")
       
       # Inbreeding coefficient distribution
-      cat("Distribution of inbreeding coefficients\n")
-      cat("-----------------------------------------------------------\n")
+      cat("Distribution of inbreeding coefficients
+")
+      cat("-----------------------------------------------------------
+")
       breaks <- c(0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 
                   0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00)
       labels <- c("0.00 < F <= 0.05", "0.05 < F <= 0.10", "0.10 < F <= 0.15", 
@@ -4374,38 +4484,60 @@ output$top10_dam_title <- renderText({
       f_cut <- cut(f_numeric_pos, breaks = breaks, labels = labels, include.lowest = FALSE)
       f_table <- table(f_cut)
       
-      cat(sprintf("%30s %20s\n", "F = 0", format(f_zero, big.mark = ",")))
+      cat(sprintf("%30s %20s
+", "F = 0", format(f_zero, big.mark = ",")))
       for (i in seq_along(labels)) {
         count <- if (labels[i] %in% names(f_table)) f_table[labels[i]] else 0
-        cat(sprintf("%30s %20s\n", labels[i], format(count, big.mark = ",")))
+        cat(sprintf("%30s %20s
+", labels[i], format(count, big.mark = ",")))
       }
-      cat("-----------------------------------------------------------\n\n")
+      cat("-----------------------------------------------------------
+
+")
       
       # Summary statistics
-      cat("--- SUMMARY STATISTICS ---\n")
-      cat("A: Number of individuals:", format(n, big.mark = ","), "\n")
-      cat("B: Number of inbreds:", format(inbreds, big.mark = ","), "\n")
-      cat("C: Number of founders:", format(founders, big.mark = ","), "\n")
-      cat("D: Number of individuals with both known parents:", format(both_parents, big.mark = ","), "\n")
-      cat("E: Number of individuals with no progeny:", format(individuals_without_progeny, big.mark = ","), "\n\n")
+      cat("--- SUMMARY STATISTICS ---
+")
+      cat("A: Number of individuals:", format(n, big.mark = ","), "
+")
+      cat("B: Number of inbreds:", format(inbreds, big.mark = ","), "
+")
+      cat("C: Number of founders:", format(founders, big.mark = ","), "
+")
+      cat("D: Number of individuals with both known parents:", format(both_parents, big.mark = ","), "
+")
+      cat("E: Number of individuals with no progeny:", format(individuals_without_progeny, big.mark = ","), "
+
+")
       
-      cat("G: Average inbreeding coefficients:", format(mean(f_numeric), digits = 7), "\n")
+      cat("G: Average inbreeding coefficients:", format(mean(f_numeric), digits = 7), "
+")
       inbred_f <- f_numeric[f_numeric > 0]
       if (length(inbred_f) > 0) {
-        cat("H: Average inbreeding coefficients in the inbreds:", format(mean(inbred_f), digits = 7), "\n")
+        cat("H: Average inbreeding coefficients in the inbreds:", format(mean(inbred_f), digits = 7), "
+")
       } else {
-        cat("H: Average inbreeding coefficients in the inbreds: N/A\n")
+        cat("H: Average inbreeding coefficients in the inbreds: N/A
+")
       }
-      cat("I: Maximum of inbreeding coefficients:", format(max(f_numeric), digits = 7), "\n")
-      cat("J: Minimum of inbreeding coefficients:", format(min(f_numeric), digits = 7), "\n")
+      cat("I: Maximum of inbreeding coefficients:", format(max(f_numeric), digits = 7), "
+")
+      cat("J: Minimum of inbreeding coefficients:", format(min(f_numeric), digits = 7), "
+")
     } else {
-      cat("--- INBREEDING STATISTICS ---\n")
-      cat("No inbreeding coefficients calculated.\n")
-      cat("Inbreeding coefficients are calculated automatically after data processing.\n\n")
+      cat("--- INBREEDING STATISTICS ---
+")
+      cat("No inbreeding coefficients calculated.
+")
+      cat("Inbreeding coefficients are calculated automatically after data processing.
+
+")
     }
     
     # Longest ancestral path (LAP) - calculate depth distribution
-    cat("\n--- LONGEST ANCESTRAL PATH (LAP) ---\n")
+    cat("
+--- LONGEST ANCESTRAL PATH (LAP) ---
+")
     tryCatch({
       # Use Rcpp function if available, otherwise fall back to R version
       if (exists("use_rcpp") && use_rcpp && exists("fast_lap_distribution", mode = "function")) {
@@ -4483,7 +4615,8 @@ output$top10_dam_title <- renderText({
       for (i in 0:19) {
         count <- lap_distribution[as.character(i)]
         if (count > 0 || i <= 5) {  # Show at least first few generations
-          cat(sprintf("%20s %20s\n", i, format(count, big.mark = ",")))
+          cat(sprintf("%20s %20s
+", i, format(count, big.mark = ",")))
         }
       }
       
@@ -4492,23 +4625,30 @@ output$top10_dam_title <- renderText({
       if (total_count > 0) {
         weighted_sum <- sum(as.numeric(names(lap_distribution)) * lap_distribution, na.rm = TRUE)
         mean_generation_depth <- weighted_sum / total_count
-        cat("\nMean generation depth:", format(mean_generation_depth, digits = 4), "\n")
+        cat("
+Mean generation depth:", format(mean_generation_depth, digits = 4), "
+")
       }
     }, error = function(e) {
-      cat("LAP calculation error:", e$message, "\n")
+      cat("LAP calculation error:", e$message, "
+")
       founders_count <- sum(is_missing_parent(ped$Sire) & is_missing_parent(ped$Dam))
-      cat("Founders (LAP = 0):", format(founders_count, big.mark = ","), "\n")
+      cat("Founders (LAP = 0):", format(founders_count, big.mark = ","), "
+")
     })
   }
 
   pedigree_structure_report_text <- reactive({
     req(ped_data())
     ped <- ped_data()
-    if (is.null(ped)) return("Error: Data processing failed. Please check column mapping.\n")
+    if (is.null(ped)) return("Error: Data processing failed. Please check column mapping.
+")
     if (!"ID" %in% names(ped) || !"Sire" %in% names(ped) || !"Dam" %in% names(ped)) {
-      return("Error: Required columns (ID, Sire, Dam) not found in processed data\n")
+      return("Error: Required columns (ID, Sire, Dam) not found in processed data
+")
     }
-    paste(capture.output(run_structure_report(ped)), collapse = "\n")
+    paste(capture.output(run_structure_report(ped)), collapse = "
+")
   })
 
   output$pedigree_structure_report <- renderPrint({
@@ -4777,18 +4917,31 @@ output$top10_dam_title <- renderText({
         only_dam <- stats$only_dam
         stats_ext <- get_extended_stats(ped)
         
-        cat("========================================\n")
-        cat("PEDIGREE STRUCTURE REPORT\n")
-        cat("Generated:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "\n")
-        cat("========================================\n\n")
+        cat("========================================
+")
+        cat("PEDIGREE STRUCTURE REPORT
+")
+        cat("Generated:", format(Sys.time(), "%Y-%m-%d %H:%M:%S"), "
+")
+        cat("========================================
+
+")
         
-        cat("--- BASIC STATISTICS ---\n")
-        cat("Individuals in total:", format(n, big.mark = ","), "\n")
-        cat("Founders:", format(founders, big.mark = ","), "\n")
-        cat("Non-founders:", format(non_founders, big.mark = ","), "\n")
-        cat("With both parents:", format(both_parents, big.mark = ","), "\n")
-        cat("Only with known sire:", format(only_sire, big.mark = ","), "\n")
-        cat("Only with known dam:", format(only_dam, big.mark = ","), "\n\n")
+        cat("--- BASIC STATISTICS ---
+")
+        cat("Individuals in total:", format(n, big.mark = ","), "
+")
+        cat("Founders:", format(founders, big.mark = ","), "
+")
+        cat("Non-founders:", format(non_founders, big.mark = ","), "
+")
+        cat("With both parents:", format(both_parents, big.mark = ","), "
+")
+        cat("Only with known sire:", format(only_sire, big.mark = ","), "
+")
+        cat("Only with known dam:", format(only_dam, big.mark = ","), "
+
+")
         
         # Parent statistics
         sire_missing <- is_missing_parent(ped$Sire)
@@ -4811,13 +4964,21 @@ output$top10_dam_title <- renderText({
         individuals_with_progeny <- individuals_with_progeny[individuals_with_progeny %in% all_ids]
         individuals_without_progeny <- n - length(individuals_with_progeny)
         
-        cat("--- PARENT STATISTICS ---\n")
-        cat("Sires in total:", format(stats_ext$unique_sires, big.mark = ","), "\n")
-        cat("   -Progeny:", format(stats_ext$total_sire_progeny, big.mark = ","), "\n")
-        cat("Dams in total:", format(stats_ext$unique_dams, big.mark = ","), "\n")
-        cat("   -Progeny:", format(stats_ext$total_dam_progeny, big.mark = ","), "\n")
-        cat("Individuals with progeny:", format(stats_ext$individuals_with_progeny, big.mark = ","), "\n")
-        cat("Individuals with no progeny:", format(stats_ext$individuals_without_progeny, big.mark = ","), "\n\n")
+        cat("--- PARENT STATISTICS ---
+")
+        cat("Sires in total:", format(stats_ext$unique_sires, big.mark = ","), "
+")
+        cat("   -Progeny:", format(stats_ext$total_sire_progeny, big.mark = ","), "
+")
+        cat("Dams in total:", format(stats_ext$unique_dams, big.mark = ","), "
+")
+        cat("   -Progeny:", format(stats_ext$total_dam_progeny, big.mark = ","), "
+")
+        cat("Individuals with progeny:", format(stats_ext$individuals_with_progeny, big.mark = ","), "
+")
+        cat("Individuals with no progeny:", format(stats_ext$individuals_without_progeny, big.mark = ","), "
+
+")
         
         # Founder statistics
     founder_ids <- ped$ID[sire_missing & dam_missing]
@@ -4830,14 +4991,23 @@ output$top10_dam_title <- renderText({
         founder_total_progeny <- ped %>% filter(Sire %in% founder_ids | Dam %in% founder_ids) %>% nrow()
         founder_no_progeny <- founders - length(unique(c(founder_sires, founder_dams)))
         
-        cat("--- FOUNDER STATISTICS ---\n")
-        cat("Founders:", format(founders, big.mark = ","), "\n")
-        cat("   -Progeny:", format(stats_ext$founder_total_progeny, big.mark = ","), "\n")
-        cat("   -Sires:", format(stats_ext$founder_sires, big.mark = ","), "\n")
-        cat("       -Progeny:", format(stats_ext$founder_sire_progeny, big.mark = ","), "\n")
-        cat("   -Dams:", format(stats_ext$founder_dams, big.mark = ","), "\n")
-        cat("       -Progeny:", format(stats_ext$founder_dam_progeny, big.mark = ","), "\n")
-        cat("   -With no progeny:", format(stats_ext$founder_no_progeny, big.mark = ","), "\n\n")
+        cat("--- FOUNDER STATISTICS ---
+")
+        cat("Founders:", format(founders, big.mark = ","), "
+")
+        cat("   -Progeny:", format(stats_ext$founder_total_progeny, big.mark = ","), "
+")
+        cat("   -Sires:", format(stats_ext$founder_sires, big.mark = ","), "
+")
+        cat("       -Progeny:", format(stats_ext$founder_sire_progeny, big.mark = ","), "
+")
+        cat("   -Dams:", format(stats_ext$founder_dams, big.mark = ","), "
+")
+        cat("       -Progeny:", format(stats_ext$founder_dam_progeny, big.mark = ","), "
+")
+        cat("   -With no progeny:", format(stats_ext$founder_no_progeny, big.mark = ","), "
+
+")
         
         # Non-founder statistics
         non_founder_ped <- ped %>% filter(!ID %in% founder_ids)
@@ -4846,15 +5016,25 @@ output$top10_dam_title <- renderText({
         non_founder_sire_progeny <- ped %>% filter(Sire %in% non_founder_ped$ID) %>% nrow()
         non_founder_dam_progeny <- ped %>% filter(Dam %in% non_founder_ped$ID) %>% nrow()
         
-        cat("--- NON-FOUNDER STATISTICS ---\n")
-        cat("Non-founders:", format(non_founders, big.mark = ","), "\n")
-        cat("   -Sires:", format(stats_ext$non_founder_sires, big.mark = ","), "\n")
-        cat("       -Progeny:", format(stats_ext$non_founder_sire_progeny, big.mark = ","), "\n")
-        cat("   -Dams:", format(stats_ext$non_founder_dams, big.mark = ","), "\n")
-        cat("       -Progeny:", format(stats_ext$non_founder_dam_progeny, big.mark = ","), "\n")
-        cat("   -Only with known sire:", format(only_sire, big.mark = ","), "\n")
-        cat("   -Only with known dam:", format(only_dam, big.mark = ","), "\n")
-        cat("   -With known sire and dam:", format(both_parents, big.mark = ","), "\n\n")
+        cat("--- NON-FOUNDER STATISTICS ---
+")
+        cat("Non-founders:", format(non_founders, big.mark = ","), "
+")
+        cat("   -Sires:", format(stats_ext$non_founder_sires, big.mark = ","), "
+")
+        cat("       -Progeny:", format(stats_ext$non_founder_sire_progeny, big.mark = ","), "
+")
+        cat("   -Dams:", format(stats_ext$non_founder_dams, big.mark = ","), "
+")
+        cat("       -Progeny:", format(stats_ext$non_founder_dam_progeny, big.mark = ","), "
+")
+        cat("   -Only with known sire:", format(only_sire, big.mark = ","), "
+")
+        cat("   -Only with known dam:", format(only_dam, big.mark = ","), "
+")
+        cat("   -With known sire and dam:", format(both_parents, big.mark = ","), "
+
+")
         
         # Full-sib groups
         full_sibs <- ped %>%
@@ -4863,14 +5043,22 @@ output$top10_dam_title <- renderText({
           summarise(family_size = n(), .groups = "drop") %>%
           filter(family_size >= 2)
         
-        cat("--- FULL-SIB GROUPS ---\n")
+        cat("--- FULL-SIB GROUPS ---
+")
         if (nrow(full_sibs) > 0) {
-          cat("Full-sib groups:", format(nrow(full_sibs), big.mark = ","), "\n")
-          cat("   -Average family size:", format(mean(full_sibs$family_size), digits = 4), "\n")
-          cat("       -Maximum:", max(full_sibs$family_size), "\n")
-          cat("       -Minimum:", min(full_sibs$family_size), "\n\n")
+          cat("Full-sib groups:", format(nrow(full_sibs), big.mark = ","), "
+")
+          cat("   -Average family size:", format(mean(full_sibs$family_size), digits = 4), "
+")
+          cat("       -Maximum:", max(full_sibs$family_size), "
+")
+          cat("       -Minimum:", min(full_sibs$family_size), "
+
+")
         } else {
-          cat("Full-sib groups: 0\n\n")
+          cat("Full-sib groups: 0
+
+")
         }
         
         # Inbreeding statistics
@@ -4879,13 +5067,20 @@ output$top10_dam_title <- renderText({
           f_numeric <- f_vals$F[!is.na(f_vals$F)]
           inbreds <- sum(f_numeric > 0)
           
-          cat("--- INBREEDING STATISTICS ---\n")
-          cat("Evaluated individuals:", format(length(f_numeric), big.mark = ","), "\n")
-          cat("Inbreds in total:", format(inbreds, big.mark = ","), "\n")
-          cat("Inbreds in evaluated:", format(inbreds, big.mark = ","), "\n\n")
+          cat("--- INBREEDING STATISTICS ---
+")
+          cat("Evaluated individuals:", format(length(f_numeric), big.mark = ","), "
+")
+          cat("Inbreds in total:", format(inbreds, big.mark = ","), "
+")
+          cat("Inbreds in evaluated:", format(inbreds, big.mark = ","), "
+
+")
           
-          cat("Distribution of inbreeding coefficients\n")
-          cat("-----------------------------------------------------------\n")
+          cat("Distribution of inbreeding coefficients
+")
+          cat("-----------------------------------------------------------
+")
           breaks <- c(0, 0.05, 0.10, 0.15, 0.20, 0.25, 0.30, 0.35, 0.40, 0.45, 0.50, 
                       0.55, 0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95, 1.00)
           labels <- c("0.00 < F <= 0.05", "0.05 < F <= 0.10", "0.10 < F <= 0.15", 
@@ -4901,31 +5096,48 @@ output$top10_dam_title <- renderText({
           f_cut <- cut(f_numeric_pos, breaks = breaks, labels = labels, include.lowest = FALSE)
           f_table <- table(f_cut)
           
-          cat(sprintf("%30s %20s\n", "F = 0", format(f_zero, big.mark = ",")))
+          cat(sprintf("%30s %20s
+", "F = 0", format(f_zero, big.mark = ",")))
           for (i in seq_along(labels)) {
             count <- if (labels[i] %in% names(f_table)) f_table[labels[i]] else 0
-            cat(sprintf("%30s %20s\n", labels[i], format(count, big.mark = ",")))
+            cat(sprintf("%30s %20s
+", labels[i], format(count, big.mark = ",")))
           }
-          cat("-----------------------------------------------------------\n\n")
+          cat("-----------------------------------------------------------
+
+")
           
-          cat("--- SUMMARY STATISTICS ---\n")
-          cat("A: Number of individuals:", format(n, big.mark = ","), "\n")
-          cat("B: Number of inbreds:", format(inbreds, big.mark = ","), "\n")
-          cat("C: Number of founders:", format(founders, big.mark = ","), "\n")
-          cat("D: Number of individuals with both known parents:", format(both_parents, big.mark = ","), "\n")
-          cat("E: Number of individuals with no progeny:", format(individuals_without_progeny, big.mark = ","), "\n\n")
+          cat("--- SUMMARY STATISTICS ---
+")
+          cat("A: Number of individuals:", format(n, big.mark = ","), "
+")
+          cat("B: Number of inbreds:", format(inbreds, big.mark = ","), "
+")
+          cat("C: Number of founders:", format(founders, big.mark = ","), "
+")
+          cat("D: Number of individuals with both known parents:", format(both_parents, big.mark = ","), "
+")
+          cat("E: Number of individuals with no progeny:", format(individuals_without_progeny, big.mark = ","), "
+
+")
           
-          cat("G: Average inbreeding coefficients:", format(mean(f_numeric), digits = 7), "\n")
+          cat("G: Average inbreeding coefficients:", format(mean(f_numeric), digits = 7), "
+")
           inbred_f <- f_numeric[f_numeric > 0]
           if (length(inbred_f) > 0) {
-            cat("H: Average inbreeding coefficients in the inbreds:", format(mean(inbred_f), digits = 7), "\n")
+            cat("H: Average inbreeding coefficients in the inbreds:", format(mean(inbred_f), digits = 7), "
+")
           }
-          cat("I: Maximum of inbreeding coefficients:", format(max(f_numeric), digits = 7), "\n")
-          cat("J: Minimum of inbreeding coefficients:", format(min(f_numeric), digits = 7), "\n")
+          cat("I: Maximum of inbreeding coefficients:", format(max(f_numeric), digits = 7), "
+")
+          cat("J: Minimum of inbreeding coefficients:", format(min(f_numeric), digits = 7), "
+")
         }
         
         # Longest ancestral path (LAP)
-        cat("\n--- LONGEST ANCESTRAL PATH (LAP) ---\n")
+        cat("
+--- LONGEST ANCESTRAL PATH (LAP) ---
+")
         tryCatch({
           # Use Rcpp function if available, otherwise fall back to R version
           if (exists("use_rcpp") && use_rcpp && exists("fast_lap_distribution", mode = "function")) {
@@ -4999,7 +5211,8 @@ output$top10_dam_title <- renderText({
           for (i in 0:19) {
             count <- lap_distribution[as.character(i)]
             if (count > 0 || i <= 5) {
-              cat(sprintf("%20s %20s\n", i, format(count, big.mark = ",")))
+              cat(sprintf("%20s %20s
+", i, format(count, big.mark = ",")))
             }
           }
           
@@ -5008,10 +5221,13 @@ output$top10_dam_title <- renderText({
           if (total_count > 0) {
             weighted_sum <- sum(as.numeric(names(lap_distribution)) * lap_distribution, na.rm = TRUE)
             mean_generation_depth <- weighted_sum / total_count
-            cat("\nMean generation depth:", format(mean_generation_depth, digits = 4), "\n")
+            cat("
+Mean generation depth:", format(mean_generation_depth, digits = 4), "
+")
           }
         }, error = function(e) {
-          cat("LAP calculation error:", e$message, "\n")
+          cat("LAP calculation error:", e$message, "
+")
         })
       })
       
@@ -5058,7 +5274,8 @@ output$top10_dam_title <- renderText({
       return(result)
     }, error = function(e) {
       error_msg <- paste("Error in C++ inbreeding calculation:", e$message)
-      cat(error_msg, "\n")
+      cat(error_msg, "
+")
       return(NULL)
     })
   }
@@ -5080,7 +5297,8 @@ output$top10_dam_title <- renderText({
           file.remove(temp_files)
         }
       }, error = function(e) {
-        cat("Warning: Could not clean up all temporary files:", e$message, "\n")
+        cat("Warning: Could not clean up all temporary files:", e$message, "
+")
       })
     }, add = TRUE)
     
@@ -5145,7 +5363,8 @@ output$top10_dam_title <- renderText({
           # Non-empty error file - fall back to pedigreeTools
           warning_msg <- paste("inbupgf90 reported errors, falling back to pedigreeTools. Errors:", 
                               paste(error_content, collapse = "; "))
-          cat(warning_msg, "\n")
+          cat(warning_msg, "
+")
           return(NULL)  # Signal to use fallback
         }
       }
@@ -5153,7 +5372,8 @@ output$top10_dam_title <- renderText({
       # Check exit code
       if (!is.null(exit_code) && exit_code != 0) {
         warning_msg <- paste("inbupgf90 exited with code", exit_code, ", falling back to pedigreeTools")
-        cat(warning_msg, "\n")
+        cat(warning_msg, "
+")
         return(NULL)  # Signal to use fallback
       }
       
@@ -5173,7 +5393,8 @@ output$top10_dam_title <- renderText({
       solinb_file <- file.path(temp_dir, "pedigree.txt.solinb")
       if (!file.exists(solinb_file)) {
         warning_msg <- "inbupgf90 output file (.solinb) not found, falling back to pedigreeTools"
-        cat(warning_msg, "\n")
+        cat(warning_msg, "
+")
         return(NULL)  # Signal to use fallback
       }
       
@@ -5212,7 +5433,8 @@ output$top10_dam_title <- renderText({
         solinb_data
       }, error = function(e) {
         warning_msg <- paste("Error parsing .solinb file:", e$message, ", falling back to pedigreeTools")
-        cat(warning_msg, "\n")
+        cat(warning_msg, "
+")
         return(NULL)
       })
       
@@ -5245,7 +5467,8 @@ output$top10_dam_title <- renderText({
       
     }, error = function(e) {
       error_msg <- paste("Error in inbupgf90 calculation:", e$message, ", falling back to pedigreeTools")
-      cat(error_msg, "\n")
+      cat(error_msg, "
+")
       return(NULL)  # Signal to use fallback
     })
   }
@@ -5358,7 +5581,8 @@ output$top10_dam_title <- renderText({
         if (use_fast_inbreeding_cpp) {
           # C++ method treats missing parents as founders
           if (length(missing_sires) > 0 || length(missing_dams) > 0) {
-            cat("Note: Some parent references not found in ID column. C++ method will treat them as founders.\n")
+            cat("Note: Some parent references not found in ID column. C++ method will treat them as founders.
+")
           }
           incProgress(0.4, detail = "Computing inbreeding coefficients (using fast C++ method)...")
           
@@ -5399,7 +5623,8 @@ output$top10_dam_title <- renderText({
               stop("pedigreeTools is not installed; cannot fall back from fast method. Please install pedigreeTools or enable inbupgf90.")
             }
             # Fall back to pedigreeTools - need to do editPed and create ped_obj
-            cat("Falling back to pedigreeTools method...\n")
+            cat("Falling back to pedigreeTools method...
+")
             
             # Use editPed() to complete and sort pedigree (ensures ancestors precede progeny)
             incProgress(0.25, detail = "Completing and sorting pedigree...")
@@ -5482,7 +5707,8 @@ output$top10_dam_title <- renderText({
           if (length(missing_sires) > 0 || length(missing_dams) > 0) {
             # For inbupgf90, missing parents are allowed (they will be treated as founders)
             # So we just log a warning but continue
-            cat("Note: Some parent references not found in ID column. inbupgf90 will treat them as founders.\n")
+            cat("Note: Some parent references not found in ID column. inbupgf90 will treat them as founders.
+")
           }
           incProgress(0.4, detail = "Computing inbreeding coefficients (using fast inbupgf90 method)...")
           
@@ -5523,7 +5749,8 @@ output$top10_dam_title <- renderText({
               stop("pedigreeTools is not installed; cannot fall back from inbupgf90. Please install pedigreeTools.")
             }
             # Fall back to pedigreeTools - need to do editPed and create ped_obj
-            cat("Falling back to pedigreeTools method...\n")
+            cat("Falling back to pedigreeTools method...
+")
             
             # Use editPed() to complete and sort pedigree (ensures ancestors precede progeny)
             incProgress(0.25, detail = "Completing and sorting pedigree...")
@@ -5719,7 +5946,8 @@ output$top10_dam_title <- renderText({
         
         error_msg <- paste("⚠️ Error calculating F:", e$message)
         showNotification(error_msg, type = "error", duration = 8)
-        cat("Inbreeding calculation error:", e$message, "\n")
+        cat("Inbreeding calculation error:", e$message, "
+")
         tibble(ID = character(), F = numeric())
       })
     })
@@ -5951,18 +6179,25 @@ output$top10_dam_title <- renderText({
     
     # Check if there are any valid F values
     if (length(f_vals) == 0 || all(is.na(f_vals))) {
-      cat("No F values calculated.\n\n")
-      cat("Possible reasons:\n")
-      cat("1. All individuals are founders (no parents)\n")
+      cat("No F values calculated.
+
+")
+      cat("Possible reasons:
+")
+      cat("1. All individuals are founders (no parents)
+")
       if (!is.null(ped)) {
         sire_missing <- is_missing_parent(ped$Sire)
         dam_missing <- is_missing_parent(ped$Dam)
         n_founders <- sum(sire_missing & dam_missing)
         n_with_parents <- sum(!sire_missing | !dam_missing)
-        cat("   - Founders in your data:", n_founders, "\n")
-        cat("   - Individuals with parents:", n_with_parents, "\n")
+        cat("   - Founders in your data:", n_founders, "
+")
+        cat("   - Individuals with parents:", n_with_parents, "
+")
       }
-      cat("2. Invalid parent references (Sire/Dam not in ID column)\n")
+      cat("2. Invalid parent references (Sire/Dam not in ID column)
+")
       if (!is.null(ped)) {
         all_ids <- unique(ped$ID)
         valid_sires <- ped$Sire[!is.na(ped$Sire) & ped$Sire != ""]
@@ -5970,24 +6205,34 @@ output$top10_dam_title <- renderText({
         missing_sires <- setdiff(valid_sires, all_ids)
         missing_dams <- setdiff(valid_dams, all_ids)
         if (length(missing_sires) > 0) {
-          cat("   - Missing Sire IDs:", length(missing_sires), "\n")
+          cat("   - Missing Sire IDs:", length(missing_sires), "
+")
         }
         if (length(missing_dams) > 0) {
-          cat("   - Missing Dam IDs:", length(missing_dams), "\n")
+          cat("   - Missing Dam IDs:", length(missing_dams), "
+")
         }
         if (length(missing_sires) > 0 || length(missing_dams) > 0) {
-          cat("   → Use 'Fix Pedigree' button to correct invalid references\n")
+          cat("   → Use 'Fix Pedigree' button to correct invalid references
+")
         }
       }
-      cat("3. Data validation failed\n")
+      cat("3. Data validation failed
+")
       validation_status <- data_validation_status()
       if (!is.null(validation_status) && !validation_status$valid) {
-        cat("   - Validation errors exist. Please fix them first.\n")
+        cat("   - Validation errors exist. Please fix them first.
+")
       }
-      cat("\nPlease check your pedigree structure and ensure:\n")
-      cat("- At least some individuals have parent information\n")
-      cat("- All Sire/Dam IDs exist in the ID column\n")
-      cat("- No duplicate IDs\n")
+      cat("
+Please check your pedigree structure and ensure:
+")
+      cat("- At least some individuals have parent information
+")
+      cat("- All Sire/Dam IDs exist in the ID column
+")
+      cat("- No duplicate IDs
+")
       return()
     }
     
@@ -5995,25 +6240,43 @@ output$top10_dam_title <- renderText({
     # Treat very small values as zero to avoid precision artifacts
     f_pos <- f_all[f_all > .Machine$double.eps]
     
-    cat("All individuals (F including 0)\n")
-    cat("n =", length(f_all), "\n")
-    cat("Mean:", round(mean(f_all, na.rm = TRUE), 4), "\n")
-    cat("SD:", round(stats::sd(f_all, na.rm = TRUE), 4), "\n")
-    cat("Min:", round(min(f_all, na.rm = TRUE), 4), "\n")
-    cat("Max:", round(max(f_all, na.rm = TRUE), 4), "\n\n")
+    cat("All individuals (F including 0)
+")
+    cat("n =", length(f_all), "
+")
+    cat("Mean:", round(mean(f_all, na.rm = TRUE), 4), "
+")
+    cat("SD:", round(stats::sd(f_all, na.rm = TRUE), 4), "
+")
+    cat("Min:", round(min(f_all, na.rm = TRUE), 4), "
+")
+    cat("Max:", round(max(f_all, na.rm = TRUE), 4), "
+
+")
     
-    cat("Inbred individuals (F > 0)\n")
-    cat("n =", length(f_pos), "\n")
+    cat("Inbred individuals (F > 0)
+")
+    cat("n =", length(f_pos), "
+")
     if (length(f_pos) > 0) {
-      cat("Mean:", round(mean(f_pos, na.rm = TRUE), 4), "\n")
-      cat("SD:", round(stats::sd(f_pos, na.rm = TRUE), 4), "\n")
-      cat("Min:", signif(min(f_pos, na.rm = TRUE), 1), "\n")
-      cat("Max:", round(max(f_pos, na.rm = TRUE), 4), "\n\n")
+      cat("Mean:", round(mean(f_pos, na.rm = TRUE), 4), "
+")
+      cat("SD:", round(stats::sd(f_pos, na.rm = TRUE), 4), "
+")
+      cat("Min:", signif(min(f_pos, na.rm = TRUE), 1), "
+")
+      cat("Max:", round(max(f_pos, na.rm = TRUE), 4), "
+
+")
     } else {
-      cat("Mean: N/A\n")
-      cat("SD: N/A\n")
-      cat("Min: N/A\n")
-      cat("Max: N/A\n")
+      cat("Mean: N/A
+")
+      cat("SD: N/A
+")
+      cat("Min: N/A
+")
+      cat("Max: N/A
+")
     }
   })
   
@@ -6718,7 +6981,8 @@ output$top10_dam_title <- renderText({
     top_contrib_text <- ""
     if (exists("fast_top_contrib_cpp", mode = "function")) {
       f_vals <- f_values_cache()
-      cat("[TopContrib] target=", target_id, " f_cache_rows=", ifelse(is.null(f_vals), 0, nrow(f_vals)), "\n", sep = "")
+      cat("[TopContrib] target=", target_id, " f_cache_rows=", ifelse(is.null(f_vals), 0, nrow(f_vals)), "
+", sep = "")
       if (!is.null(f_vals) && nrow(f_vals) > 0) {
       f_joined <- ped %>%
         transmute(
@@ -6740,12 +7004,14 @@ output$top10_dam_title <- renderText({
           top_k = 5
         )
       }, error = function(e) {
-        cat("[TopContrib] error:", e$message, "\n")
+        cat("[TopContrib] error:", e$message, "
+")
         NULL
       })
 
       if (!is.null(top_contrib) && nrow(top_contrib) > 0) {
-        cat("[TopContrib] rows=", nrow(top_contrib), "\n", sep = "")
+        cat("[TopContrib] rows=", nrow(top_contrib), "
+", sep = "")
         lines <- sprintf(
           "%s (C=%.4f, P=%.1f%%)",
           top_contrib$ancestor_id,
@@ -6755,7 +7021,8 @@ output$top10_dam_title <- renderText({
         top_contrib_text <- paste0("<br><br><strong>Top 5 Inbreeding Contributors:</strong><br>",
                                    paste(lines, collapse = "<br>"))
       } else {
-        cat("[TopContrib] empty result\n")
+        cat("[TopContrib] empty result
+")
       }
       }
     }

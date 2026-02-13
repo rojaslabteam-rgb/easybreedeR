@@ -56,30 +56,25 @@ derive_plink_prefix <- function(file_names) {
   tools::file_path_sans_ext(candidate)
 }
 
-# Optional Rcpp fallback for PLINK(.ped/.map) -> BLUPF90 conversion.
+# Optional compiled backend for PLINK(.ped/.map) -> BLUPF90 conversion.
 # This mirrors PLINK-style additive coding (0/1/2 minor-allele copies; 5 for missing).
 use_rcpp_blup_convert <- FALSE
+eb_ped_to_blup_codes_cpp_fn <- NULL
 tryCatch({
-  if (requireNamespace("Rcpp", quietly = TRUE)) {
-    cpp_candidates <- c(
-      "plink_blup_convert.cpp",
-      file.path("inst", "easyblup", "plink_blup_convert.cpp")
-    )
-    cpp_file <- cpp_candidates[file.exists(cpp_candidates)][1]
-    if (!is.na(cpp_file) && nzchar(cpp_file)) {
-      Rcpp::sourceCpp(cpp_file)
-      if (exists("eb_ped_to_blup_codes_cpp", mode = "function")) {
-        use_rcpp_blup_convert <- TRUE
-      }
-    }
+  ns <- asNamespace("easybreedeR")
+  if (exists("eb_ped_to_blup_codes_cpp", mode = "function", envir = ns, inherits = FALSE)) {
+    eb_ped_to_blup_codes_cpp_fn <- get("eb_ped_to_blup_codes_cpp", envir = ns, inherits = FALSE)
+    use_rcpp_blup_convert <- TRUE
+    message("Rcpp backend available - PLINK-compatible fallback conversion enabled")
   }
 }, error = function(e) {
   use_rcpp_blup_convert <- FALSE
+  eb_ped_to_blup_codes_cpp_fn <- NULL
 })
 
 convert_plink_to_blupf90_rcpp <- function(ped_path, map_path, out_prefix) {
-  if (!exists("eb_ped_to_blup_codes_cpp", mode = "function")) {
-    stop("Rcpp converter is not available. Please ensure plink_blup_convert.cpp is loaded.", call. = FALSE)
+  if (!is.function(eb_ped_to_blup_codes_cpp_fn)) {
+    stop("Rcpp converter backend is not available. Reinstall easybreedeR with compiled code enabled.", call. = FALSE)
   }
 
   read_tab <- function(path) {
@@ -117,7 +112,7 @@ convert_plink_to_blupf90_rcpp <- function(ped_path, map_path, out_prefix) {
   allele1 <- as.matrix(ped_df[, allele1_idx, drop = FALSE])
   allele2 <- as.matrix(ped_df[, allele2_idx, drop = FALSE])
 
-  conv <- eb_ped_to_blup_codes_cpp(allele1, allele2)
+  conv <- eb_ped_to_blup_codes_cpp_fn(allele1, allele2)
   dosage <- conv$dosage
   a1 <- as.character(conv$a1)
   a2 <- as.character(conv$a2)
@@ -975,7 +970,7 @@ server <- function(input, output, session) {
     # preferred plinkR/PLINK path, or Rcpp fallback path.
     label_text <- get_label("genotype_format", lang())
     has_plinkr <- requireNamespace("plinkR", quietly = TRUE)
-    has_rcpp <- isTRUE(use_rcpp_blup_convert) && exists("eb_ped_to_blup_codes_cpp", mode = "function")
+    has_rcpp <- isTRUE(use_rcpp_blup_convert) && is.function(eb_ped_to_blup_codes_cpp_fn)
     
     if (!has_plinkr && !has_rcpp) {
       return(label_text)
@@ -1238,7 +1233,8 @@ server <- function(input, output, session) {
       }
       matrix_rows <- c(matrix_rows, paste(row_values, collapse = " "))
     }
-    return(paste(matrix_rows, collapse = "\n"))
+    return(paste(matrix_rows, collapse = "
+"))
   }
   
   # (Removed old combined h2+rg generator to avoid duplicate rg lines in h2 section)
@@ -1246,7 +1242,8 @@ server <- function(input, output, session) {
   # Precise strategy: parse renf90.par to detect indices
   parse_renf90_par <- function(txt) { # nolint object_usage_linter
     if (is.null(txt) || !nzchar(txt)) return(NULL)
-    lines <- unlist(strsplit(txt, "\n"))
+    lines <- unlist(strsplit(txt, "
+"))
     animal_idx <- NULL
     maternal_idx <- NULL
     rand_indices <- integer(0)
@@ -1367,7 +1364,8 @@ server <- function(input, output, session) {
     paste(
       sprintf("OPTION se_covar_function H2t_%d %s/(%s)", t, num_t, denom),
       sprintf("OPTION se_covar_function H2d_%d G_%d_%d_%d_%d/(%s)", t, a_idx, a_idx, t, t, denom),
-      sep = "\n"
+      sep = "
+"
     )
   }
   
@@ -1406,7 +1404,8 @@ server <- function(input, output, session) {
         }
       }
     }
-    paste(lines, collapse = "\n")
+    paste(lines, collapse = "
+")
   }
 
   # Build phenotypic correlation block (rp) across traits
@@ -1455,7 +1454,8 @@ server <- function(input, output, session) {
         lines <- c(lines, sprintf("OPTION se_covar_function rp%d%d (%s)/%s", i, j, num, denom))
       }
     }
-    paste(lines, collapse = "\n")
+    paste(lines, collapse = "
+")
   }
   
   # Helpers to map selected variables to column indices
@@ -1500,12 +1500,26 @@ server <- function(input, output, session) {
     
     # Build parameter file
     param_text <- paste0(
-      "# PARAMETER FILE for renumf90\n#\nDATAFILE\n",
-      basename(input$pheno_file$name), "\n",
-      "SKIP_HEADER\n1\nTRAITS # Specify trait columns\n",
+      "# PARAMETER FILE for renumf90
+#
+DATAFILE
+",
+      basename(input$pheno_file$name), "
+",
+      "SKIP_HEADER
+1
+TRAITS # Specify trait columns
+",
       if (length(values$traits) > 0) get_col_num(values$traits) else "# Add trait column numbers here",
-      "\nFIELDS_PASSED TO OUTPUT\n\nWEIGHT(S)\n\nRESIDUAL_VARIANCE\n",
-      generate_covariance_matrix(length(values$traits)), "\n"
+      "
+FIELDS_PASSED TO OUTPUT
+
+WEIGHT(S)
+
+RESIDUAL_VARIANCE
+",
+      generate_covariance_matrix(length(values$traits)), "
+"
     )
     
     # Fixed effects
@@ -1525,11 +1539,13 @@ server <- function(input, output, session) {
         n_traits <- length(values$traits)
         effect_cols <- format_effect_cols(eff, n_traits)
         if (nzchar(effect_cols)) {
-          param_text <- paste0(param_text, "EFFECT\n", effect_cols, " ", effect_type)
+          param_text <- paste0(param_text, "EFFECT
+", effect_cols, " ", effect_type)
           if (effect_type == "cross") {
             param_text <- paste0(param_text, " alpha")
           }
-          param_text <- paste0(param_text, " # ", eff, " fixed effect\n")
+          param_text <- paste0(param_text, " # ", eff, " fixed effect
+")
         }
       }
     }
@@ -1541,10 +1557,14 @@ server <- function(input, output, session) {
         effect_cols <- format_effect_cols(eff, n_traits)
         if (nzchar(effect_cols)) {
           param_text <- paste0(param_text,
-                               "EFFECT\n",
-                               effect_cols, " cross alpha # ", eff, " random effect\n",
-                               "RANDOM\n",
-                               "diagonal # Random effects section\n")
+                               "EFFECT
+",
+                               effect_cols, " cross alpha # ", eff, " random effect
+",
+                               "RANDOM
+",
+                               "diagonal # Random effects section
+")
         }
       }
     }
@@ -1554,9 +1574,13 @@ server <- function(input, output, session) {
       n_traits <- length(values$traits)
       effect_cols <- format_effect_cols(values$animal, n_traits)
       if (nzchar(effect_cols)) {
-        param_text <- paste0(param_text, "EFFECT\n", effect_cols, " cross alpha # Animal ID effect\n")
+        param_text <- paste0(param_text, "EFFECT
+", effect_cols, " cross alpha # Animal ID effect
+")
       }
-      param_text <- paste0(param_text, "RANDOM\nanimal # Animal random effect\n")
+      param_text <- paste0(param_text, "RANDOM
+animal # Animal random effect
+")
       
       # Add OPTIONAL effects if selected
       optional_effects <- c()
@@ -1565,12 +1589,18 @@ server <- function(input, output, session) {
       if (input$opt_mpe) optional_effects <- c(optional_effects, "mpe")
       
       if (length(optional_effects) > 0) {
-        param_text <- paste0(param_text, "OPTIONAL\n", paste(optional_effects, collapse = " "), "\n")
+        param_text <- paste0(param_text, "OPTIONAL
+", paste(optional_effects, collapse = " "), "
+")
       }
       
       # Add pedigree file information (and immediately follow with PLINK/SNP block when present)
       pedigree_filename <- if (has_ped) basename(input$ped_file$name) else "pedigree.txt"
-      param_text <- paste0(param_text, "FILE\n", pedigree_filename, "\nFILE_POS\n1 2 3 # Progeny Sire Dam\n")
+      param_text <- paste0(param_text, "FILE
+", pedigree_filename, "
+FILE_POS
+1 2 3 # Progeny Sire Dam
+")
       if (has_geno) {
         geno_format <- input$geno_format %||% "plink"
         
@@ -1581,12 +1611,16 @@ server <- function(input, output, session) {
           } else {
             "snp_marker.txt"
           }
-          param_text <- paste0(param_text, "SNP_FILE\n", snp_filename, " ## SNP marker file\n")
+          param_text <- paste0(param_text, "SNP_FILE
+", snp_filename, " ## SNP marker file
+")
         } else {
           # PLINK format: use PLINK_FILE
           plink_prefix <- derive_plink_prefix(input$geno_file$name)
           if (!is.null(plink_prefix) && nzchar(plink_prefix)) {
-            param_text <- paste0(param_text, "PLINK_FILE\n", plink_prefix, " # Genotype file name\n")
+            param_text <- paste0(param_text, "PLINK_FILE
+", plink_prefix, " # Genotype file name
+")
           }
         }
       }
@@ -1595,7 +1629,9 @@ server <- function(input, output, session) {
         # Include PED_DEPTH only when enabled and not using complete search
         if (!isTRUE(input$opt_ped_search_complete)) {
           if (isTRUE(input$opt_use_ped_depth) && !is.null(input$opt_ped_depth) && !is.na(input$opt_ped_depth)) {
-            param_text <- paste0(param_text, "PED_DEPTH\n", input$opt_ped_depth, "\n")
+            param_text <- paste0(param_text, "PED_DEPTH
+", input$opt_ped_depth, "
+")
           }
         }
         # INBREEDING and UPG_TYPE are handled by renumf90 automatically after run
@@ -1625,9 +1661,14 @@ server <- function(input, output, session) {
         }
         cov_lines <- c(cov_lines, paste(row_vals, collapse = " "))
       }
-      param_text <- paste0(param_text, "(CO)VARIANCES\n", paste(cov_lines, collapse = "\n"), "\n")
+      param_text <- paste0(param_text, "(CO)VARIANCES
+", paste(cov_lines, collapse = "
+"), "
+")
     } else {
-      param_text <- paste0(param_text, "(CO)VARIANCES\n1\n")
+      param_text <- paste0(param_text, "(CO)VARIANCES
+1
+")
     }
 
     # PE (Permanent Environmental) covariance matrix - works for single or multiple traits
@@ -1635,7 +1676,9 @@ server <- function(input, output, session) {
       if (n_traits > 0) {
         if (n_traits == 1) {
           # Single trait: output single value (not matrix)
-          param_text <- paste0(param_text, "(CO)VARIANCES_PE\n0.001\n")
+          param_text <- paste0(param_text, "(CO)VARIANCES_PE
+0.001
+")
         } else {
           # Multiple traits: generate matrix
           pe_lines <- c()
@@ -1644,11 +1687,16 @@ server <- function(input, output, session) {
             row_vals[i] <- "1"
             pe_lines <- c(pe_lines, paste(row_vals, collapse = " "))
           }
-          param_text <- paste0(param_text, "(CO)VARIANCES_PE\n", paste(pe_lines, collapse = "\n"), "\n")
+          param_text <- paste0(param_text, "(CO)VARIANCES_PE
+", paste(pe_lines, collapse = "
+"), "
+")
         }
       } else {
         # Fallback when no traits selected
-        param_text <- paste0(param_text, "(CO)VARIANCES_PE\n0.001\n")
+        param_text <- paste0(param_text, "(CO)VARIANCES_PE
+0.001
+")
       }
     }
     # MPE (Maternal Permanent Environmental) covariance matrix - works for single or multiple traits
@@ -1656,7 +1704,9 @@ server <- function(input, output, session) {
       if (n_traits > 0) {
         if (n_traits == 1) {
           # Single trait: output single value (not matrix)
-          param_text <- paste0(param_text, "(CO)VARIANCES_MPE\n0.003\n")
+          param_text <- paste0(param_text, "(CO)VARIANCES_MPE
+0.003
+")
         } else {
           # Multiple traits: generate matrix
           mpe_lines <- c()
@@ -1665,15 +1715,21 @@ server <- function(input, output, session) {
             row_vals[i] <- "1"
             mpe_lines <- c(mpe_lines, paste(row_vals, collapse = " "))
           }
-          param_text <- paste0(param_text, "(CO)VARIANCES_MPE\n", paste(mpe_lines, collapse = "\n"), "\n")
+          param_text <- paste0(param_text, "(CO)VARIANCES_MPE
+", paste(mpe_lines, collapse = "
+"), "
+")
         }
       } else {
         # Fallback when no traits selected
-        param_text <- paste0(param_text, "(CO)VARIANCES_MPE\n0.003\n")
+        param_text <- paste0(param_text, "(CO)VARIANCES_MPE
+0.003
+")
       }
     }
     
-    param_text <- paste0(param_text, "\n")
+    param_text <- paste0(param_text, "
+")
     
     # Add user-selected OPTION parameters
     options <- c()
@@ -1761,7 +1817,8 @@ server <- function(input, output, session) {
       options <- c(options, paste("OPTION inbreeding_method", input$opt_inbreeding_method, "#", method_label))
     }
     
-    param_text <- paste0(param_text, paste(options, collapse = "\n"))
+    param_text <- paste0(param_text, paste(options, collapse = "
+"))
 
     # Append se_covar_function block automatically for VCE
     if (!is.null(input$opt_method) && input$opt_method == "VCE" && isTRUE(input$opt_auto_se_covar)) {
@@ -1802,12 +1859,20 @@ server <- function(input, output, session) {
           }
           # Pairwise rg across traits will be appended by the dedicated generator below
           # Append heritability block
-          param_text <- paste0(param_text, "\n\n# === Heritability Calculation (auto) ===\n", paste(out_lines, collapse = "\n"), "\n")
+          param_text <- paste0(param_text, "
+
+# === Heritability Calculation (auto) ===
+", paste(out_lines, collapse = "
+"), "
+")
           
           # Append genetic correlation block
           rg_block <- generate_rg_block(n_traits, a_idx, m_idx, include_maternal = !is.null(m_idx) && isTRUE(input$opt_mat))
           if (nzchar(rg_block)) {
-            param_text <- paste0(param_text, "\n# === Genetic Correlation Calculation (auto) ===\n", rg_block, "\n")
+            param_text <- paste0(param_text, "
+# === Genetic Correlation Calculation (auto) ===
+", rg_block, "
+")
           }
           
           # Append phenotypic correlation block
@@ -1820,11 +1885,17 @@ server <- function(input, output, session) {
             include_pe = !is.null(idx$p) && isTRUE(input$opt_pe)
           )
           if (nzchar(rp_block)) {
-            param_text <- paste0(param_text, "\n# === Phenotypic Correlation Calculation (auto) ===\n", rp_block, "\n")
+            param_text <- paste0(param_text, "
+# === Phenotypic Correlation Calculation (auto) ===
+", rp_block, "
+")
           }
           
           # Always add sampling/output controls (once at the end)
-          param_text <- paste0(param_text, "\nOPTION samples_se_covar_function 10000\nOPTION out_se_covar_function\n")
+          param_text <- paste0(param_text, "
+OPTION samples_se_covar_function 10000
+OPTION out_se_covar_function
+")
         }
       }
     }
@@ -1886,7 +1957,7 @@ server <- function(input, output, session) {
   # ====== Genotype format help: PLINK -> BLUPF90 conversion ======
   observeEvent(input$geno_format_help, {
     has_plinkr <- requireNamespace("plinkR", quietly = TRUE)
-    has_rcpp <- isTRUE(use_rcpp_blup_convert) && exists("eb_ped_to_blup_codes_cpp", mode = "function")
+    has_rcpp <- isTRUE(use_rcpp_blup_convert) && is.function(eb_ped_to_blup_codes_cpp_fn)
     if (!has_plinkr && !has_rcpp) {
       showNotification(
         if (tolower(lang()) == "zh") {
@@ -2076,7 +2147,7 @@ server <- function(input, output, session) {
   
   observeEvent(input$geno_convert_run, {
     has_plinkr <- requireNamespace("plinkR", quietly = TRUE)
-    has_rcpp <- isTRUE(use_rcpp_blup_convert) && exists("eb_ped_to_blup_codes_cpp", mode = "function")
+    has_rcpp <- isTRUE(use_rcpp_blup_convert) && is.function(eb_ped_to_blup_codes_cpp_fn)
     if (!has_plinkr && !has_rcpp) {
       showNotification(
         if (tolower(lang()) == "zh") {

@@ -36,10 +36,12 @@ use_linkbreedeR <- FALSE
 tryCatch({
   if (requireNamespace("linkbreedeR", quietly = TRUE)) {
     use_linkbreedeR <- TRUE
-    cat("✓ linkbreedeR available - will use for extended genotype analysis\n")
+    cat("✓ linkbreedeR available - will use for extended genotype analysis
+")
   }
 }, error = function(e) {
-  cat("Note: linkbreedeR not available, extended analysis features will be limited\n")
+  cat("Note: linkbreedeR not available, extended analysis features will be limited
+")
   use_linkbreedeR <- FALSE
 })
 
@@ -48,10 +50,12 @@ use_plinkR <- FALSE
 tryCatch({
   if (requireNamespace("plinkR", quietly = TRUE)) {
     use_plinkR <- TRUE
-    cat("✓ plinkR available - will prefer PLINK for statistics/QC\n")
+    cat("✓ plinkR available - will prefer PLINK for statistics/QC
+")
   }
 }, error = function(e) {
-  cat("Note: plinkR not available, using local fallback calculations\n")
+  cat("Note: plinkR not available, using local fallback calculations
+")
   use_plinkR <- FALSE
 })
 
@@ -61,10 +65,12 @@ tryCatch({
   if (requireNamespace("data.table", quietly = TRUE)) {
     library(data.table)
     use_data_table <- TRUE
-    cat("✓ data.table available - will use for faster file reading\n")
+    cat("✓ data.table available - will use for faster file reading
+")
   }
 }, error = function(e) {
-  cat("Note: data.table not available, using base R read.table\n")
+  cat("Note: data.table not available, using base R read.table
+")
   use_data_table <- FALSE
 })
 
@@ -74,33 +80,45 @@ tryCatch({
   if (requireNamespace("plotly", quietly = TRUE)) {
     library(plotly)
     use_plotly <- TRUE
-    cat("✓ plotly available - will use for interactive plots\n")
+    cat("✓ plotly available - will use for interactive plots
+")
   }
 }, error = function(e) {
-  cat("Note: plotly not available, using static ggplot2 plots\n")
+  cat("Note: plotly not available, using static ggplot2 plots
+")
   use_plotly <- FALSE
 })
 
-# Rcpp backend for PLINK-compatible fallback when PLINK is unavailable.
-# C++ implementation is kept in genotype_qc.cpp beside this app.
+# Compiled Rcpp backend for PLINK-compatible fallback when PLINK is unavailable.
 use_rcpp_stats <- FALSE
+gvr_marker_call_rate <- NULL
+gvr_individual_call_rate <- NULL
+gvr_maf <- NULL
+gvr_individual_het <- NULL
+gvr_marker_het <- NULL
+gvr_hwe_exact <- NULL
+gvr_relatedness_pairs <- NULL
 tryCatch({
-  if (requireNamespace("Rcpp", quietly = TRUE)) {
-    cpp_candidates <- c(
-      "genotype_qc.cpp",
-      file.path("inst", "genovieweR", "genotype_qc.cpp")
-    )
-    cpp_file <- cpp_candidates[file.exists(cpp_candidates)][1]
-    if (is.na(cpp_file) || !nzchar(cpp_file)) {
-      stop("genotype_qc.cpp not found")
+  ns <- asNamespace("easybreedeR")
+  needed <- c(
+    "gvr_marker_call_rate", "gvr_individual_call_rate", "gvr_maf",
+    "gvr_individual_het", "gvr_marker_het", "gvr_hwe_exact", "gvr_relatedness_pairs"
+  )
+  has_all <- all(vapply(needed, function(fn) {
+    exists(fn, mode = "function", envir = ns, inherits = FALSE)
+  }, logical(1)))
+  if (has_all) {
+    for (fn in needed) {
+      assign(fn, get(fn, envir = ns, inherits = FALSE), envir = environment())
     }
-    Rcpp::sourceCpp(file = cpp_file)
     use_rcpp_stats <- TRUE
-    cat("✓ Rcpp backend available - PLINK-compatible fallback stats enabled\n")
+    message("Rcpp backend available - PLINK-compatible fallback stats enabled")
+  } else {
+    message("Compiled Rcpp backend missing required genotype functions")
   }
 }, error = function(e) {
   use_rcpp_stats <- FALSE
-  cat("Note: Rcpp backend unavailable; local non-PLINK statistics are disabled.\n")
+  message("Rcpp backend unavailable; local non-PLINK statistics are disabled")
 })
 
 # Suppress SASS color contrast warnings from bslib
@@ -832,13 +850,18 @@ server <- function(input, output, session) {
                              "vcf" = "VCF",
                              "blupf90_txt" = "BLUPF90 (.txt/.map)",
                              "PLINK")
-      paste0("Samples: ", nrow(data$samples), "\n",
-             "SNPs: ", nrow(data$map), "\n",
-             "Format: ", format_label, "\n",
+      paste0("Samples: ", nrow(data$samples), "
+",
+             "SNPs: ", nrow(data$map), "
+",
+             "Format: ", format_label, "
+",
              "Analysis Format: ", format_label)
     } else if (is.data.frame(data)) {
-      paste0("Rows: ", nrow(data), "\n",
-             "Columns: ", ncol(data), "\n",
+      paste0("Rows: ", nrow(data), "
+",
+             "Columns: ", ncol(data), "
+",
              "Format: ", input$geno_format)
     } else {
       "Data format not recognized"
@@ -1545,22 +1568,32 @@ server <- function(input, output, session) {
     
     if (!is.null(report) && is.list(report)) {
       summary_text <- paste0(
-        "Quality Control Summary:\n",
-        "========================\n\n",
-        "Status: ", if (!is.null(report$filtered) && report$filtered) "Completed" else "Not completed", "\n",
-        "Message: ", if (!is.null(report$message)) report$message else "N/A", "\n\n"
+        "Quality Control Summary:
+",
+        "========================
+
+",
+        "Status: ", if (!is.null(report$filtered) && report$filtered) "Completed" else "Not completed", "
+",
+        "Message: ", if (!is.null(report$message)) report$message else "N/A", "
+
+"
       )
       
       if (!is.null(report$output_files)) {
-        summary_text <- paste0(summary_text, "Output Files:\n")
+        summary_text <- paste0(summary_text, "Output Files:
+")
         if (!is.null(report$output_files$bed)) {
-          summary_text <- paste0(summary_text, "  - BED: ", report$output_files$bed, "\n")
+          summary_text <- paste0(summary_text, "  - BED: ", report$output_files$bed, "
+")
         }
         if (!is.null(report$output_files$bim)) {
-          summary_text <- paste0(summary_text, "  - BIM: ", report$output_files$bim, "\n")
+          summary_text <- paste0(summary_text, "  - BIM: ", report$output_files$bim, "
+")
         }
         if (!is.null(report$output_files$fam)) {
-          summary_text <- paste0(summary_text, "  - FAM: ", report$output_files$fam, "\n")
+          summary_text <- paste0(summary_text, "  - FAM: ", report$output_files$fam, "
+")
         }
       }
       
@@ -1900,22 +1933,26 @@ server <- function(input, output, session) {
               p_hwe
             } else {
               plotly_empty() %>% 
-                add_annotations(text = "No valid HWE p-values to plot\n(all values are invalid)",
+                add_annotations(text = "No valid HWE p-values to plot
+(all values are invalid)",
                               x = 0.5, y = 0.5, showarrow = FALSE)
             }
           } else {
             plotly_empty() %>% 
-              add_annotations(text = "No valid HWE p-values\n(all NA, <= 0, or > 1)",
+              add_annotations(text = "No valid HWE p-values
+(all NA, <= 0, or > 1)",
                             x = 0.5, y = 0.5, showarrow = FALSE)
           }
         } else {
           plotly_empty() %>% 
-            add_annotations(text = "No HWE data available\n(all values are NA)",
+            add_annotations(text = "No HWE data available
+(all values are NA)",
                           x = 0.5, y = 0.5, showarrow = FALSE)
         }
       } else {
         plotly_empty() %>% 
-          add_annotations(text = "HWE p-values not calculated\nPlease run Summary or QC first",
+          add_annotations(text = "HWE p-values not calculated
+Please run Summary or QC first",
                         x = 0.5, y = 0.5, showarrow = FALSE)
       }
     })
@@ -2059,25 +2096,29 @@ server <- function(input, output, session) {
             } else {
               ggplot() + 
                 annotate("text", x = 0.5, y = 0.5, 
-                        label = "No valid HWE p-values to plot\n(all values are invalid)", size = 4) +
+                        label = "No valid HWE p-values to plot
+(all values are invalid)", size = 4) +
                 theme_void()
             }
           } else {
             ggplot() + 
               annotate("text", x = 0.5, y = 0.5, 
-                      label = "No valid HWE p-values\n(all NA, <= 0, or > 1)", size = 4) +
+                      label = "No valid HWE p-values
+(all NA, <= 0, or > 1)", size = 4) +
               theme_void()
           }
         } else {
           ggplot() + 
             annotate("text", x = 0.5, y = 0.5, 
-                    label = "No HWE data available\n(all values are NA)", size = 4) +
+                    label = "No HWE data available
+(all values are NA)", size = 4) +
             theme_void()
         }
       } else {
         ggplot() + 
           annotate("text", x = 0.5, y = 0.5, 
-                  label = "HWE p-values not calculated\nPlease run Summary or QC first", size = 4) +
+                  label = "HWE p-values not calculated
+Please run Summary or QC first", size = 4) +
           theme_void()
       }
     })
@@ -2132,7 +2173,8 @@ server <- function(input, output, session) {
           ))
         }
       }, error = function(e) {
-        cat("Error reading PCA from summary_stats:", e$message, "\n")
+        cat("Error reading PCA from summary_stats:", e$message, "
+")
       })
     }
     
@@ -2227,7 +2269,8 @@ server <- function(input, output, session) {
         n_components = n_keep
       )
     }, error = function(e) {
-      cat("Error computing PCA fallback:", e$message, "\n")
+      cat("Error computing PCA fallback:", e$message, "
+")
       NULL
     })
   }
@@ -2286,10 +2329,12 @@ server <- function(input, output, session) {
     pca <- compute_pca(pca_data, summary_stats = stats)
     if (!is.null(pca) && !is.null(pca$scores) && nrow(pca$scores) > 0) {
       pca_result(pca)
-      cat("PCA computed successfully:", nrow(pca$scores), "samples,", ncol(pca$scores), "components\n")
+      cat("PCA computed successfully:", nrow(pca$scores), "samples,", ncol(pca$scores), "components
+")
     } else {
       pca_result(NULL)
-      cat("PCA unavailable: no usable PCA result from PLINK output or local fallback\n")
+      cat("PCA unavailable: no usable PCA result from PLINK output or local fallback
+")
     }
   })
 
@@ -2978,14 +3023,16 @@ server <- function(input, output, session) {
               # No valid data after filtering
               plots$hwe <- ggplot() + 
                 annotate("text", x = 0.5, y = 0.5, 
-                        label = "No valid HWE p-values to plot\n(all values are invalid)", size = 4) +
+                        label = "No valid HWE p-values to plot
+(all values are invalid)", size = 4) +
                 theme_void()
             }
           } else {
             # No valid p-values
             plots$hwe <- ggplot() + 
               annotate("text", x = 0.5, y = 0.5, 
-                      label = "No valid HWE p-values\n(all NA, <= 0, or > 1)", size = 4) +
+                      label = "No valid HWE p-values
+(all NA, <= 0, or > 1)", size = 4) +
               theme_void()
           }
         }
@@ -3886,7 +3933,8 @@ calculate_all_stats_plink <- function(data) {
           plink_success <- (result == 0)
         }, timeout = 300)  # 5 minute timeout for PLINK commands
       }, TimeoutException = function(e) {
-        cat("PLINK command timed out after 5 minutes\n")
+        cat("PLINK command timed out after 5 minutes
+")
         plink_success <- FALSE
       })
     } else {
@@ -3910,7 +3958,8 @@ calculate_all_stats_plink <- function(data) {
       plink_success <- (result == 0)
       elapsed <- as.numeric(difftime(Sys.time(), plink_start_time, units = "secs"))
       if (elapsed > 300) {
-        cat("PLINK command took longer than 5 minutes\n")
+        cat("PLINK command took longer than 5 minutes
+")
         plink_success <- FALSE
       }
     }
@@ -3922,7 +3971,8 @@ calculate_all_stats_plink <- function(data) {
         !file.exists(paste0(stats_output, ".frq")) ||
         !file.exists(paste0(stats_output, ".hwe")) ||
         !file.exists(paste0(stats_output, ".het"))) {
-      cat("PLINK command failed or output files missing\n")
+      cat("PLINK command failed or output files missing
+")
       unlink(tmp_dir, recursive = TRUE, force = TRUE)
       return(NULL)
     }
@@ -3956,7 +4006,8 @@ calculate_all_stats_plink <- function(data) {
           }
         }
       }, error = function(e) {
-        cat("Error reading PCA files:", e$message, "\n")
+        cat("Error reading PCA files:", e$message, "
+")
         pca_scores <- NULL
         pca_variance <- NULL
         pca_eigenvalues <- NULL
@@ -3986,7 +4037,8 @@ calculate_all_stats_plink <- function(data) {
           )
         }, timeout = 180)
       }, error = function(e) {
-        cat("Warning: PLINK --genome did not complete:", e$message, "\n")
+        cat("Warning: PLINK --genome did not complete:", e$message, "
+")
       })
     } else {
       tryCatch({
@@ -4003,7 +4055,8 @@ calculate_all_stats_plink <- function(data) {
           stderr = FALSE
         )
       }, error = function(e) {
-        cat("Warning: PLINK --genome failed:", e$message, "\n")
+        cat("Warning: PLINK --genome failed:", e$message, "
+")
       })
     }
     
@@ -4121,7 +4174,8 @@ calculate_all_stats_plink <- function(data) {
           tryCatch({
             hwe_data <<- read.table(hwe_file, header = TRUE, stringsAsFactors = FALSE, fill = TRUE, comment.char = "")
           }, error = function(e3) {
-            cat("Error reading HWE file:", e3$message, "\n")
+            cat("Error reading HWE file:", e3$message, "
+")
           })
         })
       })
@@ -4156,19 +4210,24 @@ calculate_all_stats_plink <- function(data) {
             hwe_pvalues[idx_map[valid_match]] <- p_col[valid_p_idx][valid_match]
             results$hwe_pvalues <- hwe_pvalues
           } else {
-            cat("Warning: No valid HWE p-values found in file\n")
+            cat("Warning: No valid HWE p-values found in file
+")
             results$hwe_pvalues <- rep(NA, nrow(data$map))
           }
         } else {
-          cat("Warning: HWE file has insufficient columns or rows\n")
-          cat("  Rows:", nrow(hwe_all), "Columns:", ncol(hwe_all), "\n")
+          cat("Warning: HWE file has insufficient columns or rows
+")
+          cat("  Rows:", nrow(hwe_all), "Columns:", ncol(hwe_all), "
+")
           if (ncol(hwe_all) > 0) {
-            cat("  Column names:", paste(names(hwe_all)[1:min(10, ncol(hwe_all))], collapse = ", "), "\n")
+            cat("  Column names:", paste(names(hwe_all)[1:min(10, ncol(hwe_all))], collapse = ", "), "
+")
           }
           results$hwe_pvalues <- rep(NA, nrow(data$map))
         }
       } else {
-        cat("Warning: Could not read HWE file or file is empty\n")
+        cat("Warning: Could not read HWE file or file is empty
+")
         results$hwe_pvalues <- rep(NA, nrow(data$map))
       }
     }
@@ -4182,7 +4241,8 @@ calculate_all_stats_plink <- function(data) {
           results$individual_relatedness <- genome_data
         }
       }, error = function(e) {
-        cat("Warning: failed to read .genome file:", e$message, "\n")
+        cat("Warning: failed to read .genome file:", e$message, "
+")
       })
     }
     
@@ -4234,7 +4294,8 @@ calculate_all_stats_plink <- function(data) {
     
   }, error = function(e) {
     # On error, log and return NULL (will trigger error message in UI)
-    cat("Error in calculate_all_stats_plink:", e$message, "\n")
+    cat("Error in calculate_all_stats_plink:", e$message, "
+")
     return(calculate_all_stats_r(data))
   })
 }
@@ -4264,7 +4325,8 @@ calculate_all_stats_r <- function(data) {
     
     results
   }, error = function(e) {
-    cat("Error in calculate_all_stats_r:", e$message, "\n")
+    cat("Error in calculate_all_stats_r:", e$message, "
+")
     NULL
   })
 }

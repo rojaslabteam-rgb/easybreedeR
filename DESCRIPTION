@@ -1,6 +1,6 @@
 Package: easybreedeR
 Type: Package
-Title: An Integrated R Shiny Application for Breeding Data Analysis
+Title: An Online Integrated R Shiny Application for Breeding Data Analysis
 Version: 0.6.1
 Author: Huangyi Tang
 Maintainer: Huangyi Tang <tang749@purdue.edu>
@@ -24,6 +24,8 @@ Imports:
     httpuv,
     Rcpp,
     plotly
+LinkingTo:
+    Rcpp
 Suggests:
     jsonlite (>= 1.8.0),
     shinyFiles,

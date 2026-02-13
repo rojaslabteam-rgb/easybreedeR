@@ -11,6 +11,7 @@
 #' @importFrom visNetwork visNetwork visNodes visEdges visGroups visOptions visInteraction visEvents
 #' @importFrom visNetwork visNetworkOutput
 #' @importFrom plotly plotlyOutput
-#' @importFrom Rcpp sourceCpp
+#' @useDynLib easybreedeR, .registration = TRUE
+#' @importFrom Rcpp evalCpp
 #' @importFrom htmltools tags
 utils::globalVariables(character(0))
