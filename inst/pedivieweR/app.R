@@ -1107,7 +1107,7 @@ output$top10_dam_title <- renderText({
         encoding = "UTF-8",
         strip.white = TRUE,
         fill = TRUE,
-        na.strings = c("", "NA"),
+        na.strings = c("", "NA", "Na", "nA", "na", "NULL", "Null", "null", "N/A", "n/a"),
         showProgress = TRUE
       )
       
@@ -1156,10 +1156,30 @@ output$top10_dam_title <- renderText({
     )
   }
   
-  # Helper: treat NA/""/"0" as missing parent
-  is_missing_parent <- function(x) {
-    x_char <- as.character(x)
-    is.na(x) | x_char == "" | x_char == "0"
+  normalize_text <- function(x) {
+    out <- trimws(as.character(x))
+    out[is.na(x)] <- NA_character_
+    out
+  }
+  is_missing_token <- function(x, treat_zero_as_missing = FALSE) {
+    x_norm <- toupper(normalize_text(x))
+    missing_tokens <- c("", "NA", "NULL", "N/A")
+    if (isTRUE(treat_zero_as_missing)) missing_tokens <- c(missing_tokens, "0")
+    is.na(x_norm) | x_norm %in% missing_tokens
+  }
+  is_missing_id <- function(x) is_missing_token(x, treat_zero_as_missing = TRUE)
+  normalize_id <- function(x) {
+    out <- normalize_text(x)
+    out[is_missing_id(out)] <- NA_character_
+    out
+  }
+  # Helper: treat NA-like/""/"0" as missing parent
+  is_missing_parent <- function(x) is_missing_token(x, treat_zero_as_missing = TRUE)
+  is_present_parent <- function(x) !is_missing_parent(x)
+  normalize_parent <- function(x) {
+    out <- normalize_text(x)
+    out[is_missing_parent(out)] <- NA_character_
+    out
   }
 
   # Helper: get basic pedigree stats (prefer Rcpp if available)
@@ -1290,6 +1310,11 @@ output$top10_dam_title <- renderText({
 
   # Comprehensive QC issue detection function with Rcpp acceleration
   detect_qc_issues <- function(df) {
+    # Normalize pedigree core fields once so downstream checks are consistent.
+    df$ID <- normalize_id(df$ID)
+    df$Sire <- normalize_parent(df$Sire)
+    df$Dam <- normalize_parent(df$Dam)
+
     issues <- list(
       duplicates = list(),
       missing_ids = list(),
@@ -1302,8 +1327,8 @@ output$top10_dam_title <- renderText({
       has_errors = FALSE
     )
     
-    # Missing or empty ID rows (cannot be used as pedigree nodes)
-    missing_id_mask <- is.na(df$ID) | df$ID == "" | trimws(df$ID) == ""
+    # Missing ID rows (NA-like and 0 are treated as missing and cannot be pedigree nodes)
+    missing_id_mask <- is_missing_id(df$ID)
     if (any(missing_id_mask)) {
       issues$missing_ids <- list(
         count = sum(missing_id_mask),
@@ -1340,8 +1365,8 @@ output$top10_dam_title <- renderText({
         # Extract self-parenting
         if (qc_result$self_parent_count > 0) {
           # Find which IDs have self-parenting
-          self_sire <- !is.na(df$Sire) & df$Sire != "" & df$ID == df$Sire
-          self_dam <- !is.na(df$Dam) & df$Dam != "" & df$ID == df$Dam
+          self_sire <- is_present_parent(df$Sire) & df$ID == df$Sire
+          self_dam <- is_present_parent(df$Dam) & df$ID == df$Dam
           issues$self_parenting <- list(
             count = qc_result$self_parent_count,
             ids = unique(df$ID[self_sire | self_dam])
@@ -1351,14 +1376,10 @@ output$top10_dam_title <- renderText({
         
         # Extract missing parents
         # Treat 0/blank/NA-like tokens as missing-value markers, not missing parent IDs.
-        missing_sires_filtered <- setdiff(
-          unique(as.character(qc_result$missing_sires)),
-          c("", "0", "NA", "NULL")
-        )
-        missing_dams_filtered <- setdiff(
-          unique(as.character(qc_result$missing_dams)),
-          c("", "0", "NA", "NULL")
-        )
+        missing_sires_filtered <- unique(normalize_text(qc_result$missing_sires))
+        missing_sires_filtered <- missing_sires_filtered[is_present_parent(missing_sires_filtered)]
+        missing_dams_filtered <- unique(normalize_text(qc_result$missing_dams))
+        missing_dams_filtered <- missing_dams_filtered[is_present_parent(missing_dams_filtered)]
         if (length(missing_sires_filtered) > 0 || length(missing_dams_filtered) > 0) {
           issues$missing_parents <- list(
             sires = missing_sires_filtered,
@@ -1421,7 +1442,7 @@ output$top10_dam_title <- renderText({
             } else if (is.character(birthdate_vec)) {
               # Convert character dates one by one to handle invalid dates gracefully
               birthdate_numeric <- sapply(birthdate_vec, function(x) {
-                if (is.na(x) || x == "" || x == "NA" || grepl("1900-01-00", x, fixed = TRUE)) {
+                if (is_missing_token(x) || grepl("1900-01-00", x, fixed = TRUE)) {
                   return(NA_real_)
                 }
                 tryCatch({
@@ -1481,8 +1502,8 @@ output$top10_dam_title <- renderText({
     }
     
     # 2. Check for self-parenting
-    self_sire <- !is.na(df$Sire) & df$Sire != "" & df$ID == df$Sire
-    self_dam <- !is.na(df$Dam) & df$Dam != "" & df$ID == df$Dam
+    self_sire <- is_present_parent(df$Sire) & df$ID == df$Sire
+    self_dam <- is_present_parent(df$Dam) & df$ID == df$Dam
     if (any(self_sire) || any(self_dam)) {
       issues$self_parenting <- list(
         count = sum(self_sire | self_dam),
@@ -1492,9 +1513,10 @@ output$top10_dam_title <- renderText({
     }
     
     # 3. Check for missing parents (referenced but not in ID column)
-    all_ids <- unique(df$ID)
-    sires_mentioned <- unique(df$Sire[!is.na(df$Sire) & df$Sire != "" & df$Sire != "0"])
-    dams_mentioned <- unique(df$Dam[!is.na(df$Dam) & df$Dam != "" & df$Dam != "0"])
+    all_ids <- unique(normalize_id(df$ID))
+    all_ids <- all_ids[!is.na(all_ids)]
+    sires_mentioned <- unique(normalize_text(df$Sire[is_present_parent(df$Sire)]))
+    dams_mentioned <- unique(normalize_text(df$Dam[is_present_parent(df$Dam)]))
     
     missing_sires <- setdiff(sires_mentioned, all_ids)
     missing_dams <- setdiff(dams_mentioned, all_ids)
@@ -1528,8 +1550,8 @@ output$top10_dam_title <- renderText({
       sex_map <- setNames(normalize_sex(df$Sex), df$ID)
       sire_sex <- sex_map[as.character(df$Sire)]
       dam_sex <- sex_map[as.character(df$Dam)]
-      mismatch_sire <- !is.na(df$Sire) & df$Sire != "" & !is.na(sire_sex) & sire_sex != "M"
-      mismatch_dam <- !is.na(df$Dam) & df$Dam != "" & !is.na(dam_sex) & dam_sex != "F"
+      mismatch_sire <- is_present_parent(df$Sire) & !is.na(sire_sex) & sire_sex != "M"
+      mismatch_dam <- is_present_parent(df$Dam) & !is.na(dam_sex) & dam_sex != "F"
       if (any(mismatch_sire) || any(mismatch_dam)) {
         issues$sex_mismatch <- list(
           sire_count = sum(mismatch_sire),
@@ -1561,13 +1583,13 @@ output$top10_dam_title <- renderText({
           new_visited <- c(visited, id)
           
           # Check sire
-          if (!is.na(sire_vec[idx[1]]) && sire_vec[idx[1]] != "") {
+          if (is_present_parent(sire_vec[idx[1]])) {
             result <- check_ancestry(sire_vec[idx[1]], depth + 1, new_visited)
             if (!is.null(result)) return(result)
           }
           
           # Check dam
-          if (!is.na(dam_vec[idx[1]]) && dam_vec[idx[1]] != "") {
+          if (is_present_parent(dam_vec[idx[1]])) {
             result <- check_ancestry(dam_vec[idx[1]], depth + 1, new_visited)
             if (!is.null(result)) return(result)
           }
@@ -1620,7 +1642,7 @@ output$top10_dam_title <- renderText({
           } else if (is.character(birthdate_vec)) {
             # Convert character dates one by one to handle invalid dates gracefully
             birthdate_numeric <- sapply(birthdate_vec, function(x) {
-              if (is.na(x) || x == "" || x == "NA" || grepl("1900-01-00", x, fixed = TRUE)) {
+              if (is_missing_token(x) || grepl("1900-01-00", x, fixed = TRUE)) {
                 return(NA_real_)
               }
               tryCatch({
@@ -1666,7 +1688,7 @@ output$top10_dam_title <- renderText({
               problem_dam <- ""
               
               # Check sire
-              if (!is.na(sire) && sire != "" && sire %in% names(id_to_birthdate)) {
+              if (is_present_parent(sire) && sire %in% names(id_to_birthdate)) {
                 sire_date <- id_to_birthdate[sire]
                 if (offspring_date <= sire_date) {
                   problem_sire <- sire
@@ -1676,7 +1698,7 @@ output$top10_dam_title <- renderText({
               }
               
               # Check dam
-              if (!is.na(dam) && dam != "" && dam %in% names(id_to_birthdate)) {
+              if (is_present_parent(dam) && dam %in% names(id_to_birthdate)) {
                 dam_date <- id_to_birthdate[dam]
                 if (offspring_date <= dam_date) {
                   problem_dam <- dam
@@ -1716,9 +1738,12 @@ output$top10_dam_title <- renderText({
   # Auto-fix QC issues function
   fix_qc_issues <- function(df, issues) {
     fixed_summary <- list()
+    df$ID <- normalize_id(df$ID)
+    df$Sire <- normalize_parent(df$Sire)
+    df$Dam <- normalize_parent(df$Dam)
     
-    # Fix 0: Remove rows with missing/empty IDs
-    missing_id_mask <- is.na(df$ID) | df$ID == "" | trimws(df$ID) == ""
+    # Fix 0: Remove rows with missing IDs (NA-like and 0 are treated as missing)
+    missing_id_mask <- is_missing_id(df$ID)
     if (any(missing_id_mask)) {
       removed_count <- sum(missing_id_mask)
       df <- df[!missing_id_mask, , drop = FALSE]
@@ -1726,8 +1751,8 @@ output$top10_dam_title <- renderText({
     }
 
     # Fix 0b: Remove parent IDs that appear as both sire and dam
-    sires_mentioned <- unique(df$Sire[!is.na(df$Sire) & df$Sire != ""])
-    dams_mentioned <- unique(df$Dam[!is.na(df$Dam) & df$Dam != ""])
+    sires_mentioned <- unique(df$Sire[is_present_parent(df$Sire)])
+    dams_mentioned <- unique(df$Dam[is_present_parent(df$Dam)])
     dual_role_ids <- intersect(sires_mentioned, dams_mentioned)
     if (length(dual_role_ids) > 0) {
       df$Sire[df$Sire %in% dual_role_ids] <- NA
@@ -1745,8 +1770,8 @@ output$top10_dam_title <- renderText({
       sex_map <- setNames(normalize_sex(df$Sex), df$ID)
       sire_sex <- sex_map[as.character(df$Sire)]
       dam_sex <- sex_map[as.character(df$Dam)]
-      mismatch_sire <- !is.na(df$Sire) & df$Sire != "" & !is.na(sire_sex) & sire_sex != "M"
-      mismatch_dam <- !is.na(df$Dam) & df$Dam != "" & !is.na(dam_sex) & dam_sex != "F"
+      mismatch_sire <- is_present_parent(df$Sire) & !is.na(sire_sex) & sire_sex != "M"
+      mismatch_dam <- is_present_parent(df$Dam) & !is.na(dam_sex) & dam_sex != "F"
       if (any(mismatch_sire) || any(mismatch_dam)) {
         df$Sire[mismatch_sire] <- NA
         df$Dam[mismatch_dam] <- NA
@@ -1775,8 +1800,8 @@ output$top10_dam_title <- renderText({
     
     # Fix 2: Remove self-parenting (set to NA)
     if (length(issues$self_parenting) > 0 && issues$self_parenting$count > 0) {
-      self_sire <- !is.na(df$Sire) & df$Sire != "" & df$ID == df$Sire
-      self_dam <- !is.na(df$Dam) & df$Dam != "" & df$ID == df$Dam
+      self_sire <- is_present_parent(df$Sire) & df$ID == df$Sire
+      self_dam <- is_present_parent(df$Dam) & df$ID == df$Dam
       
       df$Sire[self_sire] <- NA
       df$Dam[self_dam] <- NA
@@ -1786,9 +1811,10 @@ output$top10_dam_title <- renderText({
     
     # Fix 3: Add missing parent IDs as founder rows (ID, Sire=0, Dam=0)
     if (length(issues$missing_parents) > 0 && issues$missing_parents$total > 0) {
-      all_ids <- unique(df$ID)
-      missing_sires <- setdiff(unique(df$Sire[!is.na(df$Sire) & df$Sire != "" & df$Sire != "0"]), all_ids)
-      missing_dams <- setdiff(unique(df$Dam[!is.na(df$Dam) & df$Dam != "" & df$Dam != "0"]), all_ids)
+      all_ids <- unique(normalize_id(df$ID))
+      all_ids <- all_ids[!is.na(all_ids)]
+      missing_sires <- setdiff(unique(normalize_text(df$Sire[is_present_parent(df$Sire)])), all_ids)
+      missing_dams <- setdiff(unique(normalize_text(df$Dam[is_present_parent(df$Dam)])), all_ids)
       missing_parents <- unique(c(missing_sires, missing_dams))
 
       if (length(missing_parents) > 0) {
@@ -1892,9 +1918,11 @@ output$top10_dam_title <- renderText({
     # If columns exist, check for basic data quality
     if (length(errors) == 0) {
       # Check if ID column has missing values (critical error)
-      if (any(is.na(df[[id_col]]) | df[[id_col]] == "")) {
+      if (any(is_missing_id(df[[id_col]]))) {
         errors <- c(errors, "ID column contains missing or empty values")
       }
+      valid_ids <- unique(normalize_id(df[[id_col]]))
+      valid_ids <- valid_ids[!is.na(valid_ids)]
       
       # Check for duplicate IDs but don't stop processing - just warn
       # (duplicates will be handled by keeping first occurrence)
@@ -1902,9 +1930,9 @@ output$top10_dam_title <- renderText({
       
       # Check if sire/dam columns reference valid IDs
       if (sire_col %in% names(df)) {
-        valid_sires <- df[[sire_col]][!is.na(df[[sire_col]]) & df[[sire_col]] != "" & df[[sire_col]] != "0"]
+        valid_sires <- normalize_text(df[[sire_col]][is_present_parent(df[[sire_col]])])
         if (length(valid_sires) > 0) {
-          missing_sires <- setdiff(unique(valid_sires), unique(df[[id_col]]))
+          missing_sires <- setdiff(unique(valid_sires), valid_ids)
           if (length(missing_sires) > 0) {
             errors <- c(errors, paste("Sire column references", length(missing_sires), "individuals not found in ID column"))
           }
@@ -1912,9 +1940,9 @@ output$top10_dam_title <- renderText({
       }
       
       if (dam_col %in% names(df)) {
-        valid_dams <- df[[dam_col]][!is.na(df[[dam_col]]) & df[[dam_col]] != "" & df[[dam_col]] != "0"]
+        valid_dams <- normalize_text(df[[dam_col]][is_present_parent(df[[dam_col]])])
         if (length(valid_dams) > 0) {
-          missing_dams <- setdiff(unique(valid_dams), unique(df[[id_col]]))
+          missing_dams <- setdiff(unique(valid_dams), valid_ids)
           if (length(missing_dams) > 0) {
             errors <- c(errors, paste("Dam column references", length(missing_dams), "individuals not found in ID column"))
           }
@@ -1952,6 +1980,16 @@ output$top10_dam_title <- renderText({
   qc_issue_cache <- reactiveVal(list(hash = NULL, data = NULL))
   qc_modal_open <- reactiveVal(FALSE)
   qc_modal_signature <- reactiveVal(NULL)
+  # Manual mode gating: after canceling QC, require a fresh Process click.
+  manual_process_min_click <- reactiveVal(0L)
+  current_process_click <- function() {
+    val <- input$process
+    if (is.null(val) || is.na(val)) return(0L)
+    as.integer(val)
+  }
+  consume_manual_process_click <- function() {
+    manual_process_min_click(current_process_click())
+  }
   
   pedigree_hash <- function(ped) {
     if (is.null(ped) || !all(c("ID", "Sire", "Dam") %in% names(ped))) return(NULL)
@@ -2111,14 +2149,15 @@ output$top10_dam_title <- renderText({
       return(list(sire = character(0), dam = character(0)))
     }
     
-    valid_ids <- unique(df[[input$id_col]])
+    valid_ids <- unique(normalize_id(df[[input$id_col]]))
+    valid_ids <- valid_ids[!is.na(valid_ids)]
     
     # Check Sire column
-    valid_sires <- df[[input$sire_col]][!is.na(df[[input$sire_col]]) & df[[input$sire_col]] != "" & df[[input$sire_col]] != "0"]
+    valid_sires <- normalize_text(df[[input$sire_col]][is_present_parent(df[[input$sire_col]])])
     missing_sires <- setdiff(unique(valid_sires), valid_ids)
     
     # Check Dam column
-    valid_dams <- df[[input$dam_col]][!is.na(df[[input$dam_col]]) & df[[input$dam_col]] != "" & df[[input$dam_col]] != "0"]
+    valid_dams <- normalize_text(df[[input$dam_col]][is_present_parent(df[[input$dam_col]])])
     missing_dams <- setdiff(unique(valid_dams), valid_ids)
     
     return(list(sire = as.character(missing_sires), dam = as.character(missing_dams)))
@@ -2179,6 +2218,7 @@ output$top10_dam_title <- renderText({
     reset_qc_modal_guard()
     qc_fix_summary(NULL)
     last_fix_summary(NULL)
+    consume_manual_process_click()
   })
   
   # Clear all data, caches, and inputs
@@ -2215,6 +2255,7 @@ output$top10_dam_title <- renderText({
     updateSelectInput(session, "birthdate_col", choices = c("None" = ""), selected = "")
     
     showNotification("Data has been cleared.", type = "message", duration = 4)
+    consume_manual_process_click()
   })
   
   # Handle Start Analysis button click
@@ -2424,6 +2465,9 @@ output$top10_dam_title <- renderText({
     qc_issues(NULL)
     pending_data(NULL)
     raw_data_storage(NULL)
+    analysis_started(FALSE)
+    data_validation_status(list(valid = FALSE, errors = c(), warnings = c()))
+    consume_manual_process_click()
     
     # Close modal
     removeModal()
@@ -2559,10 +2603,10 @@ output$top10_dam_title <- renderText({
           sire_id <- issues$birth_date_order$invalid_sire_ids[i]
           dam_id <- issues$birth_date_order$invalid_dam_ids[i]
           problem_line <- paste("  Offspring:", offspring_id)
-          if (sire_id != "" && sire_id != "NA") {
+          if (is_present_parent(sire_id)) {
             problem_line <- paste0(problem_line, " - Sire: ", sire_id, " (born after or same date)")
           }
-          if (dam_id != "" && dam_id != "NA") {
+          if (is_present_parent(dam_id)) {
             problem_line <- paste0(problem_line, " - Dam: ", dam_id, " (born after or same date)")
           }
           report_lines <- c(report_lines, problem_line)
@@ -2714,10 +2758,10 @@ output$top10_dam_title <- renderText({
           sire_id <- qc_results$birth_date_order$invalid_sire_ids[i]
           dam_id <- qc_results$birth_date_order$invalid_dam_ids[i]
           problem_line <- paste("  Offspring:", offspring_id)
-          if (sire_id != "" && sire_id != "NA") {
+          if (is_present_parent(sire_id)) {
             problem_line <- paste0(problem_line, " - Sire: ", sire_id, " (born after or same date)")
           }
-          if (dam_id != "" && dam_id != "NA") {
+          if (is_present_parent(dam_id)) {
             problem_line <- paste0(problem_line, " - Dam: ", dam_id, " (born after or same date)")
           }
           report_lines <- c(report_lines, problem_line)
@@ -2898,7 +2942,7 @@ output$top10_dam_title <- renderText({
     # Always require user action: either process button click or start_analysis button click
     # auto_process only controls inbreeding calculation, not data processing
     if (!isTRUE(analysis_started())) {
-      req(input$process)
+      req(current_process_click() > manual_process_min_click())
     }
     
     # Both modes: require data and column mapping
@@ -2974,11 +3018,9 @@ output$top10_dam_title <- renderText({
       # Standardize data format
       df <- df %>%
         mutate(
-          ID = as.character(ID),
-          Sire = as.character(Sire),
-          Dam = as.character(Dam),
-          Sire = ifelse(Sire %in% c("0", "NA", "", " ", "NULL"), NA, Sire),
-          Dam = ifelse(Dam %in% c("0", "NA", "", " ", "NULL"), NA, Dam)
+          ID = normalize_id(ID),
+          Sire = normalize_parent(Sire),
+          Dam = normalize_parent(Dam)
         )
       
       # Run comprehensive QC detection with progress indicator
@@ -2994,6 +3036,18 @@ output$top10_dam_title <- renderText({
         }
       )
     } else {
+      # Re-normalize processed data so NA-like tokens are handled case-insensitively
+      # and "0" is always treated as missing parent/ID.
+      df <- df %>%
+        mutate(
+          ID = normalize_id(ID),
+          Sire = normalize_parent(Sire),
+          Dam = normalize_parent(Dam)
+        )
+      missing_id_mask <- is_missing_id(df$ID)
+      if (any(missing_id_mask)) {
+        df <- df[!missing_id_mask, , drop = FALSE]
+      }
       # Data already processed - skip QC detection (already fixed)
       detected_issues <- list(has_errors = FALSE)
     }
@@ -3190,10 +3244,10 @@ output$top10_dam_title <- renderText({
                 sire_id <- detected_issues$birth_date_order$invalid_sire_ids[i]
                 dam_id <- detected_issues$birth_date_order$invalid_dam_ids[i]
                 problem_text <- paste0(offspring_id, " (offspring)")
-                if (sire_id != "" && sire_id != "NA") {
+                if (is_present_parent(sire_id)) {
                   problem_text <- paste0(problem_text, " - Sire: ", sire_id)
                 }
-                if (dam_id != "" && dam_id != "NA") {
+                if (is_present_parent(dam_id)) {
                   problem_text <- paste0(problem_text, " - Dam: ", dam_id)
                 }
                 tags$p(
@@ -3315,9 +3369,10 @@ output$top10_dam_title <- renderText({
     # Infer Sex when missing/unknown from parental roles (Sire/Dam)
     # Normalize Sex values to characters and keep existing non-missing entries
     df$Sex <- as.character(df$Sex)
-    df$Sex[df$Sex %in% c("", " ", "NA", "NULL")] <- NA
-    sire_ids <- unique(na.omit(df$Sire))
-    dam_ids  <- unique(na.omit(df$Dam))
+    sex_norm <- toupper(trimws(as.character(df$Sex)))
+    df$Sex[is.na(df$Sex) | sex_norm %in% c("", "NA", "NULL", "N/A")] <- NA
+    sire_ids <- unique(df$Sire[is_present_parent(df$Sire)])
+    dam_ids  <- unique(df$Dam[is_present_parent(df$Dam)])
     # IDs that appear only as sire => Male; only as dam => Female; both => keep as is
     only_sire <- setdiff(sire_ids, dam_ids)
     only_dam  <- setdiff(dam_ids, sire_ids)
@@ -3711,8 +3766,8 @@ output$top10_dam_title <- renderText({
         final_data <- export_data %>%
           dplyr::select(ID, Sire, Dam, Sex, F, Generation, Relationship) %>%
           mutate(
-            Sire = ifelse(is.na(Sire) | Sire == "", "Unknown", as.character(Sire)),
-            Dam = ifelse(is.na(Dam) | Dam == "", "Unknown", as.character(Dam)),
+            Sire = ifelse(is_missing_parent(Sire), "Unknown", as.character(Sire)),
+            Dam = ifelse(is_missing_parent(Dam), "Unknown", as.character(Dam)),
             Sex = ifelse(is.na(Sex), "Unknown", as.character(Sex)),
             F = ifelse(is.na(F), "", round(F, 4)),
             Generation = ifelse(is.na(Generation), "", Generation)
@@ -4024,10 +4079,10 @@ output$top10_dam_title <- renderText({
         sire_id <- qc_results$birth_date_order$invalid_sire_ids[i]
         dam_id <- qc_results$birth_date_order$invalid_dam_ids[i]
         cat("     ", offspring_id)
-        if (sire_id != "" && sire_id != "NA") {
+        if (is_present_parent(sire_id)) {
           cat(" - Sire:", sire_id, "(born after or same date)")
         }
-        if (dam_id != "" && dam_id != "NA") {
+        if (is_present_parent(dam_id)) {
           cat(" - Dam:", dam_id, "(born after or same date)")
         }
         cat("
@@ -4162,8 +4217,8 @@ output$top10_dam_title <- renderText({
       rows <- character()
       for (i in seq_along(bo$invalid_offspring_ids)) {
         line <- paste("Offspring:", bo$invalid_offspring_ids[i])
-        if (bo$invalid_sire_ids[i] != "" && bo$invalid_sire_ids[i] != "NA") line <- paste0(line, " — Sire ", bo$invalid_sire_ids[i], " (born after or same date)")
-        if (bo$invalid_dam_ids[i] != "" && bo$invalid_dam_ids[i] != "NA") line <- paste0(line, " — Dam ", bo$invalid_dam_ids[i], " (born after or same date)")
+        if (is_present_parent(bo$invalid_sire_ids[i])) line <- paste0(line, " — Sire ", bo$invalid_sire_ids[i], " (born after or same date)")
+        if (is_present_parent(bo$invalid_dam_ids[i])) line <- paste0(line, " — Dam ", bo$invalid_dam_ids[i], " (born after or same date)")
         rows <- c(rows, line)
       }
       total_bd <- length(rows)
@@ -6097,8 +6152,8 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
         as.Date(bd_raw)
       } else {
         # Treat "0" and empty as NA
-        bd_chr <- as.character(bd_raw)
-        bd_chr[bd_chr %in% c("0", "", "NA", "NULL")] <- NA_character_
+        bd_chr <- trimws(as.character(bd_raw))
+        bd_chr[toupper(bd_chr) %in% c("0", "", "NA", "NULL", "N/A")] <- NA_character_
         as.Date(bd_chr)
       }
     })
@@ -6218,8 +6273,8 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
 ")
       if (!is.null(ped)) {
         all_ids <- unique(ped$ID)
-        valid_sires <- ped$Sire[!is.na(ped$Sire) & ped$Sire != ""]
-        valid_dams <- ped$Dam[!is.na(ped$Dam) & ped$Dam != ""]
+        valid_sires <- ped$Sire[is_present_parent(ped$Sire)]
+        valid_dams <- ped$Dam[is_present_parent(ped$Dam)]
         missing_sires <- setdiff(valid_sires, all_ids)
         missing_dams <- setdiff(valid_dams, all_ids)
         if (length(missing_sires) > 0) {
@@ -6606,10 +6661,10 @@ Please check your pedigree structure and ensure:
       if (is.na(row_idx)) return(character(0))
       
       parents <- character(0)
-      if (!is.na(ped$Sire[row_idx]) && ped$Sire[row_idx] != "") {
+      if (is_present_parent(ped$Sire[row_idx])) {
         parents <- c(parents, ped$Sire[row_idx])
       }
-      if (!is.na(ped$Dam[row_idx]) && ped$Dam[row_idx] != "") {
+      if (is_present_parent(ped$Dam[row_idx])) {
         parents <- c(parents, ped$Dam[row_idx])
       }
       return(parents)
@@ -6658,12 +6713,12 @@ Please check your pedigree structure and ensure:
     
     ancestors <- character(0)
     
-    if (!is.na(individual$Sire) && individual$Sire != "") {
+    if (is_present_parent(individual$Sire)) {
       ancestors <- c(ancestors, individual$Sire)
       ancestors <- c(ancestors, get_ancestors(ped, individual$Sire, max_depth, current_depth + 1))
     }
     
-    if (!is.na(individual$Dam) && individual$Dam != "") {
+    if (is_present_parent(individual$Dam)) {
       ancestors <- c(ancestors, individual$Dam)
       ancestors <- c(ancestors, get_ancestors(ped, individual$Dam, max_depth, current_depth + 1))
     }
@@ -6683,8 +6738,7 @@ Please check your pedigree structure and ensure:
     if (nrow(individual) == 0) return(0)
     
     # If both parents are NA, this is a founder (depth 0)
-    if ((is.na(individual$Sire) || individual$Sire == "") && 
-        (is.na(individual$Dam) || individual$Dam == "")) return(0)
+    if (is_missing_parent(individual$Sire) && is_missing_parent(individual$Dam)) return(0)
     
     # Add current individual to visited set
     new_visited <- c(visited, individual_id)
@@ -6692,13 +6746,13 @@ Please check your pedigree structure and ensure:
     max_parent_depth <- 0
     
     # Get depth from sire
-    if (!is.na(individual$Sire) && individual$Sire != "") {
+    if (is_present_parent(individual$Sire)) {
       sire_depth <- get_ancestor_depth(ped, individual$Sire, new_visited, max_iterations)
       max_parent_depth <- max(max_parent_depth, sire_depth)
     }
     
     # Get depth from dam
-    if (!is.na(individual$Dam) && individual$Dam != "") {
+    if (is_present_parent(individual$Dam)) {
       dam_depth <- get_ancestor_depth(ped, individual$Dam, new_visited, max_iterations)
       max_parent_depth <- max(max_parent_depth, dam_depth)
     }
@@ -6740,7 +6794,7 @@ Please check your pedigree structure and ensure:
       # For large datasets, sample to avoid performance issues
       if (nrow(ped) > 1000) {
         # Sample 200 non-founders for depth calculation (reduced for performance)
-        non_founders <- ped %>% filter(!is.na(Sire) | !is.na(Dam))
+        non_founders <- ped %>% filter(!is_missing_parent(Sire) | !is_missing_parent(Dam))
         if (nrow(non_founders) == 0) return(NULL)
         
         if (nrow(non_founders) > 200) {
@@ -6750,7 +6804,7 @@ Please check your pedigree structure and ensure:
         }
       } else {
         # For small datasets, check all non-founders
-        non_founders <- ped %>% filter(!is.na(Sire) | !is.na(Dam))
+        non_founders <- ped %>% filter(!is_missing_parent(Sire) | !is_missing_parent(Dam))
         if (nrow(non_founders) == 0) return(NULL)
         sample_ids <- non_founders$ID
       }
@@ -6842,8 +6896,8 @@ Please check your pedigree structure and ensure:
     tryCatch({
       # Create edges from pedigree data
       edges <- bind_rows(
-        ped %>% filter(!is.na(Sire)) %>% transmute(from = as.character(Sire), to = as.character(ID)),
-        ped %>% filter(!is.na(Dam)) %>% transmute(from = as.character(Dam), to = as.character(ID))
+        ped %>% filter(!is_missing_parent(Sire)) %>% transmute(from = as.character(Sire), to = as.character(ID)),
+        ped %>% filter(!is_missing_parent(Dam)) %>% transmute(from = as.character(Dam), to = as.character(ID))
       )
       
       if (nrow(edges) == 0) return(character(0))
@@ -6889,7 +6943,7 @@ Please check your pedigree structure and ensure:
       row <- ped[ped$ID == current$id, c("Sire","Dam"), drop = FALSE]
       if (nrow(row) == 0) next
       # father
-      if (!is.null(row$Sire) && !is.na(row$Sire) && row$Sire != "") {
+      if (!is.null(row$Sire) && is_present_parent(row$Sire)) {
         nid <- as.character(row$Sire)
         code <- paste0(current$code, "1")
         if (is.null(seen[[nid]]) || nchar(code) < nchar(seen[[nid]])) {
@@ -6899,7 +6953,7 @@ Please check your pedigree structure and ensure:
         }
       }
       # mother
-      if (!is.null(row$Dam) && !is.na(row$Dam) && row$Dam != "") {
+      if (!is.null(row$Dam) && is_present_parent(row$Dam)) {
         nid <- as.character(row$Dam)
         code <- paste0(current$code, "2")
         if (is.null(seen[[nid]]) || nchar(code) < nchar(seen[[nid]])) {
@@ -7052,8 +7106,8 @@ Please check your pedigree structure and ensure:
         label = if(input$show_labels) ID else "",
         group = ifelse(!is.na(Sex), as.character(Sex), "Unknown"),
         title = paste0("ID: ", ID, 
-                       ifelse(!is.na(Sire), paste0("<br>Sire: ", Sire), ""),
-                       ifelse(!is.na(Dam), paste0("<br>Dam: ", Dam), ""),
+                       ifelse(!is_missing_parent(Sire), paste0("<br>Sire: ", Sire), ""),
+                       ifelse(!is_missing_parent(Dam), paste0("<br>Dam: ", Dam), ""),
                        ifelse(!is.na(Sex), paste0("<br>Sex: ", Sex), "")),
         value = input$node_size,
         level = "individual",
@@ -7093,8 +7147,8 @@ Please check your pedigree structure and ensure:
     
     # Build edges
     edges <- bind_rows(
-      related_ped %>% filter(!is.na(Sire)) %>% transmute(from = as.character(Sire), to = as.character(ID)),
-      related_ped %>% filter(!is.na(Dam)) %>% transmute(from = as.character(Dam), to = as.character(ID))
+      related_ped %>% filter(!is_missing_parent(Sire)) %>% transmute(from = as.character(Sire), to = as.character(ID)),
+      related_ped %>% filter(!is_missing_parent(Dam)) %>% transmute(from = as.character(Dam), to = as.character(ID))
     ) %>%
       # Only keep edges where both nodes exist in the related_ped
       filter(from %in% related_ped$ID & to %in% related_ped$ID)
