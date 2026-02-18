@@ -16,6 +16,9 @@
 ^example_data/
 ^\.cursor$
 ^\.vscode$
+^scripts$
+^scripts/.*$
+^src/.*\.tmp$
 
 # Non-standard top-level files (documentation files)
 ^BUILD\.md$

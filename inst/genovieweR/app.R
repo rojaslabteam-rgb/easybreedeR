@@ -104,46 +104,97 @@ gvr_hwe_from_ped_strings_cpp <- NULL
 gvr_individual_het_from_ped_strings_cpp <- NULL
 gvr_dosage_from_ped_strings_cpp <- NULL
 gvr_pca_from_dosage_cpp <- NULL
-tryCatch({
-  ns <- asNamespace("easybreedeR")
-  needed <- c(
-    "gvr_marker_call_rate", "gvr_individual_call_rate", "gvr_maf",
-    "gvr_individual_het", "gvr_marker_het", "gvr_hwe_exact", "gvr_relatedness_pairs"
-  )
-  has_all <- all(vapply(needed, function(fn) {
-    exists(fn, mode = "function", envir = ns, inherits = FALSE)
-  }, logical(1)))
-  if (has_all) {
-    for (fn in needed) {
-      assign(fn, get(fn, envir = ns, inherits = FALSE), envir = environment())
+rcpp_target_env <- environment()
+
+required_rcpp_functions <- c(
+  "gvr_marker_call_rate", "gvr_individual_call_rate", "gvr_maf",
+  "gvr_individual_het", "gvr_marker_het", "gvr_hwe_exact", "gvr_relatedness_pairs"
+)
+optional_rcpp_functions <- c(
+  "gvr_call_rate_from_ped_strings_cpp", "gvr_maf_from_ped_strings_cpp",
+  "gvr_hwe_from_ped_strings_cpp", "gvr_individual_het_from_ped_strings_cpp",
+  "gvr_dosage_from_ped_strings_cpp", "gvr_pca_from_dosage_cpp"
+)
+
+bind_rcpp_functions <- function(src_env) {
+  fn_all <- c(required_rcpp_functions, optional_rcpp_functions)
+  for (fn in fn_all) {
+    if (exists(fn, mode = "function", envir = src_env, inherits = FALSE)) {
+      assign(fn, get(fn, envir = src_env, inherits = FALSE), envir = rcpp_target_env)
     }
-    if (exists("gvr_call_rate_from_ped_strings_cpp", mode = "function", envir = ns, inherits = FALSE)) {
-      gvr_call_rate_from_ped_strings_cpp <- get("gvr_call_rate_from_ped_strings_cpp", envir = ns, inherits = FALSE)
-    }
-    if (exists("gvr_maf_from_ped_strings_cpp", mode = "function", envir = ns, inherits = FALSE)) {
-      gvr_maf_from_ped_strings_cpp <- get("gvr_maf_from_ped_strings_cpp", envir = ns, inherits = FALSE)
-    }
-    if (exists("gvr_hwe_from_ped_strings_cpp", mode = "function", envir = ns, inherits = FALSE)) {
-      gvr_hwe_from_ped_strings_cpp <- get("gvr_hwe_from_ped_strings_cpp", envir = ns, inherits = FALSE)
-    }
-    if (exists("gvr_individual_het_from_ped_strings_cpp", mode = "function", envir = ns, inherits = FALSE)) {
-      gvr_individual_het_from_ped_strings_cpp <- get("gvr_individual_het_from_ped_strings_cpp", envir = ns, inherits = FALSE)
-    }
-    if (exists("gvr_dosage_from_ped_strings_cpp", mode = "function", envir = ns, inherits = FALSE)) {
-      gvr_dosage_from_ped_strings_cpp <- get("gvr_dosage_from_ped_strings_cpp", envir = ns, inherits = FALSE)
-    }
-    if (exists("gvr_pca_from_dosage_cpp", mode = "function", envir = ns, inherits = FALSE)) {
-      gvr_pca_from_dosage_cpp <- get("gvr_pca_from_dosage_cpp", envir = ns, inherits = FALSE)
-    }
-    use_rcpp_stats <- TRUE
-    message("Rcpp backend available - PLINK-compatible fallback stats enabled")
-  } else {
-    message("Compiled Rcpp backend missing required genotype functions")
   }
-}, error = function(e) {
-  use_rcpp_stats <- FALSE
+  all(vapply(required_rcpp_functions, function(fn) {
+    exists(fn, mode = "function", envir = rcpp_target_env, inherits = FALSE)
+  }, logical(1)))
+}
+
+resolve_src_root <- function() {
+  wd <- getwd()
+  roots <- unique(vapply(
+    c(
+      wd,
+      file.path(wd, ".."),
+      file.path(wd, "..", "..")
+    ),
+    function(p) normalizePath(p, winslash = "/", mustWork = FALSE),
+    character(1)
+  ))
+  for (root in roots) {
+    if (file.exists(file.path(root, "src", "genotype_qc.cpp")) &&
+        file.exists(file.path(root, "src", "plink_blup_convert.cpp"))) {
+      return(root)
+    }
+  }
+  NULL
+}
+
+load_rcpp_backend <- function() {
+  # First try package namespace (installed package context).
+  ns_ok <- FALSE
+  tryCatch({
+    if (requireNamespace("easybreedeR", quietly = TRUE)) {
+      ns_ok <- bind_rcpp_functions(asNamespace("easybreedeR"))
+    }
+  }, error = function(e) {
+    ns_ok <- FALSE
+  })
+  if (isTRUE(ns_ok)) return(TRUE)
+
+  # Fallback for source deployments (e.g., shinyapps.io):
+  # compile and load exported C++ functions directly from src/.
+  if (!requireNamespace("Rcpp", quietly = TRUE)) return(FALSE)
+  src_root <- resolve_src_root()
+  if (is.null(src_root)) return(FALSE)
+
+  cpp_files <- c(
+    file.path(src_root, "src", "genotype_qc.cpp"),
+    file.path(src_root, "src", "plink_blup_convert.cpp")
+  )
+  ok <- TRUE
+  for (cpp_file in cpp_files) {
+    if (!file.exists(cpp_file)) {
+      ok <- FALSE
+      break
+    }
+    ok <- isTRUE(tryCatch({
+      Rcpp::sourceCpp(cpp_file, env = rcpp_target_env, rebuild = FALSE, showOutput = FALSE, verbose = FALSE)
+      TRUE
+    }, error = function(e) FALSE))
+    if (!ok) break
+  }
+  if (!ok) return(FALSE)
+
+  all(vapply(required_rcpp_functions, function(fn) {
+    exists(fn, mode = "function", envir = rcpp_target_env, inherits = FALSE)
+  }, logical(1)))
+}
+
+use_rcpp_stats <- isTRUE(load_rcpp_backend())
+if (use_rcpp_stats) {
+  message("Rcpp backend available - PLINK-compatible fallback stats enabled")
+} else {
   message("Rcpp backend unavailable; local non-PLINK statistics are disabled")
-})
+}
 
 # Suppress SASS color contrast warnings from bslib
 options(bslib.color_contrast_warnings = FALSE)
@@ -3951,13 +4002,6 @@ write_plink_text_files <- function(prefix, data) {
   TRUE
 }
 
-# Helper functions for QC calculations
-assert_rcpp_backend <- function() {
-  if (!isTRUE(use_rcpp_stats)) {
-    stop("Rcpp backend is required for local statistics when PLINK is unavailable.", call. = FALSE)
-  }
-}
-
 get_numeric_genotype_matrix <- function(data) {
   if (!is.list(data) || !"genotypes" %in% names(data)) return(NULL)
   if (is.matrix(data$genotypes_numeric) && is.numeric(data$genotypes_numeric)) {
@@ -4255,17 +4299,16 @@ get_plink_aligned_individual_het <- function(data) {
 }
 
 calculate_maf <- function(data, geno_matrix = NULL, maf_values = NULL) {
-  assert_rcpp_backend()
   if (!is.null(maf_values)) return(maf_values)
   maf_values <- get_plink_aligned_maf(data)
   if (!is.null(maf_values)) return(maf_values)
+  if (!is.function(gvr_maf)) return(NULL)
   if (is.null(geno_matrix)) geno_matrix <- get_numeric_genotype_matrix(data)
   if (is.null(geno_matrix)) return(NULL)
   gvr_maf(geno_matrix)
 }
 
 calculate_call_rate <- function(data, geno_matrix = NULL, call_rate_pair = NULL) {
-  assert_rcpp_backend()
   if (is.list(call_rate_pair) && "marker_call_rate" %in% names(call_rate_pair)) {
     return(call_rate_pair$marker_call_rate)
   }
@@ -4277,13 +4320,14 @@ calculate_call_rate <- function(data, geno_matrix = NULL, call_rate_pair = NULL)
     }
     return(NULL)
   }
+  if (!is.function(gvr_marker_call_rate)) return(NULL)
   gvr_marker_call_rate(geno_matrix)
 }
 
 calculate_heterozygosity <- function(data, geno_matrix = NULL) {
-  assert_rcpp_backend()
   if (is.null(geno_matrix)) geno_matrix <- get_numeric_genotype_matrix(data)
   if (is.null(geno_matrix)) return(NULL)
+  if (!is.function(gvr_marker_het)) return(NULL)
   gvr_marker_het(geno_matrix)
 }
 
@@ -4329,10 +4373,10 @@ calculate_individual_heterozygosity <- function(data, geno_matrix = NULL, het_va
     return(data$individual_heterozygosity)
   }
   
-  assert_rcpp_backend()
   if (!is.null(het_values)) return(het_values)
   het_values <- get_plink_aligned_individual_het(data)
   if (!is.null(het_values)) return(het_values)
+  if (!is.function(gvr_individual_het)) return(NULL)
   if (is.null(geno_matrix)) geno_matrix <- get_numeric_genotype_matrix(data)
   if (is.null(geno_matrix)) return(NULL)
   gvr_individual_het(geno_matrix)
@@ -4345,7 +4389,6 @@ calculate_individual_call_rate <- function(data, geno_matrix = NULL, call_rate_p
     return(data$individual_call_rate)
   }
   
-  assert_rcpp_backend()
   if (is.list(call_rate_pair) && "individual_call_rate" %in% names(call_rate_pair)) {
     return(call_rate_pair$individual_call_rate)
   }
@@ -4357,6 +4400,7 @@ calculate_individual_call_rate <- function(data, geno_matrix = NULL, call_rate_p
     }
     return(NULL)
   }
+  if (!is.function(gvr_individual_call_rate)) return(NULL)
   gvr_individual_call_rate(geno_matrix)
 }
 
@@ -4907,7 +4951,6 @@ calculate_sample_relatedness <- function(data, geno_num = NULL) {
     if (!is.null(out)) return(out)
   }
 
-  assert_rcpp_backend()
   if (is.null(geno_num)) {
     geno_num <- get_plink_aligned_numeric_genotypes(data)
   }
@@ -4915,6 +4958,9 @@ calculate_sample_relatedness <- function(data, geno_num = NULL) {
     geno_num <- get_numeric_genotype_matrix(data)
   }
   if (is.null(geno_num) || nrow(geno_num) < 2 || ncol(geno_num) < 2) {
+    return(data.frame(IID1 = character(0), IID2 = character(0), PI_HAT = numeric(0), stringsAsFactors = FALSE))
+  }
+  if (!is.function(gvr_relatedness_pairs)) {
     return(data.frame(IID1 = character(0), IID2 = character(0), PI_HAT = numeric(0), stringsAsFactors = FALSE))
   }
   # Keep fallback relatedness responsive on larger genotype matrices.
@@ -5068,10 +5114,10 @@ calculate_hwe_plink <- function(data) {
 
 # Local fallback: Calculate Hardy-Weinberg equilibrium p-values using Rcpp exact test.
 calculate_hwe <- function(data, geno_matrix = NULL, hwe_values = NULL) {
-  assert_rcpp_backend()
   if (!is.null(hwe_values)) return(hwe_values)
   hwe_values <- get_plink_aligned_hwe(data)
   if (!is.null(hwe_values)) return(hwe_values)
+  if (!is.function(gvr_hwe_exact)) return(NULL)
   if (is.null(geno_matrix)) geno_matrix <- get_numeric_genotype_matrix(data)
   if (is.null(geno_matrix)) return(NULL)
   gvr_hwe_exact(geno_matrix)

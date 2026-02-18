@@ -78,6 +78,10 @@ suite_spec <- list(
   primary = "inst/easybreedeR_Studio/app.R",
   title = "easybreedeR Studio",
   files = c(
+    "DESCRIPTION",
+    "NAMESPACE",
+    "R",
+    "src",
     "inst/easybreedeR_Studio/app.R",
     "inst/easybreedeR_Studio/R",
     "inst/easybreedeR_Studio/www",
