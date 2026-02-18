@@ -4206,6 +4206,73 @@ get_plink_aligned_maf <- function(data) {
 # for PED-like genotype strings, compute exact-test HWE p-values with PLINK-style
 # missing handling and top-2-allele filtering.
 get_plink_aligned_hwe <- function(data) {
+  hwe_exact_marker_r <- function(obs_hets, obs_hom1, obs_hom2) {
+    obs_homr <- min(obs_hom1, obs_hom2)
+    obs_homc <- max(obs_hom1, obs_hom2)
+    rare_copies <- 2L * obs_homr + obs_hets
+    genotypes <- obs_hets + obs_homc + obs_homr
+    if (genotypes <= 0L) return(NA_real_)
+
+    probs <- numeric(rare_copies + 1L)
+    mid <- floor(rare_copies * (2 * genotypes - rare_copies) / (2 * genotypes))
+    if ((rare_copies %% 2L) != (mid %% 2L)) mid <- mid + 1L
+
+    curr_hets <- mid
+    curr_homr <- (rare_copies - mid) / 2L
+    curr_homc <- genotypes - curr_hets - curr_homr
+    probs[mid + 1L] <- 1.0
+    psum <- probs[mid + 1L]
+
+    while (curr_hets > 1L) {
+      p <- probs[curr_hets + 1L] * curr_hets * (curr_hets - 1) /
+        (4 * (curr_homr + 1) * (curr_homc + 1))
+      probs[curr_hets - 1L] <- p
+      psum <- psum + p
+      curr_hets <- curr_hets - 2L
+      curr_homr <- curr_homr + 1L
+      curr_homc <- curr_homc + 1L
+    }
+
+    curr_hets <- mid
+    curr_homr <- (rare_copies - mid) / 2L
+    curr_homc <- genotypes - curr_hets - curr_homr
+    while (curr_hets <= rare_copies - 2L) {
+      p <- probs[curr_hets + 1L] * 4 * curr_homr * curr_homc /
+        ((curr_hets + 2) * (curr_hets + 1))
+      probs[curr_hets + 3L] <- p
+      psum <- psum + p
+      curr_hets <- curr_hets + 2L
+      curr_homr <- curr_homr - 1L
+      curr_homc <- curr_homc - 1L
+    }
+
+    if (psum <= 0) return(NA_real_)
+    probs <- probs / psum
+    obs_idx <- obs_hets + 1L
+    if (obs_idx < 1L || obs_idx > length(probs)) return(NA_real_)
+    p_obs <- probs[obs_idx]
+    p_hwe <- sum(probs[seq((rare_copies %% 2L) + 1L, rare_copies + 1L, by = 2L)][probs[seq((rare_copies %% 2L) + 1L, rare_copies + 1L, by = 2L)] <= p_obs + 1e-12])
+    min(1.0, p_hwe)
+  }
+
+  hwe_exact_from_dosage_r <- function(geno_num) {
+    if (is.null(geno_num) || !is.matrix(geno_num) || ncol(geno_num) == 0L) {
+      return(rep(NA_real_, if (is.matrix(geno_num)) ncol(geno_num) else 0L))
+    }
+    out <- rep(NA_real_, ncol(geno_num))
+    for (j in seq_len(ncol(geno_num))) {
+      g <- geno_num[, j]
+      keep <- !is.na(g) & is.finite(g) & g %in% c(0, 1, 2)
+      if (!any(keep)) next
+      gj <- as.integer(g[keep])
+      obs_hom1 <- sum(gj == 0L)
+      obs_hets <- sum(gj == 1L)
+      obs_hom2 <- sum(gj == 2L)
+      out[j] <- hwe_exact_marker_r(obs_hets, obs_hom1, obs_hom2)
+    }
+    out
+  }
+
   if (!is.list(data) || is.null(data$genotypes)) return(NULL)
   geno <- data$genotypes
   if (!is.matrix(geno)) return(NULL)
@@ -4223,7 +4290,10 @@ get_plink_aligned_hwe <- function(data) {
   # R fallback with matching rules.
   geno_num <- get_plink_aligned_numeric_genotypes(data)
   if (is.null(geno_num)) return(NULL)
-  gvr_hwe_exact(geno_num)
+  if (is.function(gvr_hwe_exact)) {
+    return(gvr_hwe_exact(geno_num))
+  }
+  hwe_exact_from_dosage_r(geno_num)
 }
 
 # Step 4 alignment with PLINK --het:
