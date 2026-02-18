@@ -52,67 +52,117 @@ tryCatch({
   use_linkbreedeR <- FALSE
 })
 
-# Try to bind compiled QC functions from package namespace
+# Try to bind compiled QC functions from package namespace first, then source fallback.
 use_rcpp <- FALSE
 use_fast_inbreeding_cpp <- FALSE
-tryCatch({
-  ns <- asNamespace("easybreedeR")
-  core_fns <- c("fast_pedigree_qc", "fast_detect_loops")
-  optional_fns <- c(
-    "fast_pedigree_qc_sex", "fast_find_deepest_ancestor", "fast_lap_distribution",
-    "fast_lap_depths", "fast_descendant_summary", "fast_inbreeding_cpp",
-    "fast_top_contrib_cpp", "check_birth_date_order"
-  )
+rcpp_target_env <- environment()
+core_fns <- c("fast_pedigree_qc", "fast_detect_loops")
+optional_fns <- c(
+  "fast_pedigree_qc_sex", "fast_find_deepest_ancestor", "fast_lap_distribution",
+  "fast_lap_depths", "fast_descendant_summary", "fast_inbreeding_cpp",
+  "fast_top_contrib_cpp", "check_birth_date_order"
+)
+
+bind_rcpp_functions <- function(src_env) {
   loaded <- character(0)
   for (fn in c(core_fns, optional_fns)) {
-    if (exists(fn, mode = "function", envir = ns, inherits = FALSE)) {
-      assign(fn, get(fn, envir = ns, inherits = FALSE), envir = environment())
+    if (exists(fn, mode = "function", envir = src_env, inherits = FALSE)) {
+      assign(fn, get(fn, envir = src_env, inherits = FALSE), envir = rcpp_target_env)
       loaded <- c(loaded, fn)
     }
   }
+  unique(loaded)
+}
 
-  use_rcpp <- all(core_fns %in% loaded)
-  if (use_rcpp) {
-    message("Rcpp QC functions loaded from package namespace")
-  } else {
-    message("Required compiled QC functions are unavailable; falling back to R methods")
+resolve_src_root <- function() {
+  wd <- getwd()
+  roots <- unique(vapply(
+    c(wd, file.path(wd, ".."), file.path(wd, "..", "..")),
+    function(p) normalizePath(p, winslash = "/", mustWork = FALSE),
+    character(1)
+  ))
+  for (root in roots) {
+    if (file.exists(file.path(root, "src", "pedigree_qc.cpp"))) {
+      return(root)
+    }
   }
+  NULL
+}
 
-  if ("fast_find_deepest_ancestor" %in% loaded) {
-    message("fast_find_deepest_ancestor available")
-  } else {
-    message("fast_find_deepest_ancestor not found, will use R version")
-  }
-  if ("fast_lap_distribution" %in% loaded) {
-    message("fast_lap_distribution available")
-  } else {
-    message("fast_lap_distribution not found, will use R version")
-  }
-  if ("fast_lap_depths" %in% loaded) {
-    message("fast_lap_depths available")
-  } else {
-    message("fast_lap_depths not found, will use R version")
-  }
-
-  use_fast_inbreeding_cpp <- "fast_inbreeding_cpp" %in% loaded
-  if (use_fast_inbreeding_cpp) {
-    message("fast inbreeding C++ available - will use Rcpp method")
-  } else if (pedigreeTools_available) {
-    message("fast_inbreeding_cpp not found, will use inbupgf90/pedigreeTools")
-  } else {
-    message("fast_inbreeding_cpp not found, will use inbupgf90 if available")
+load_rcpp_backend <- function() {
+  loaded <- tryCatch({
+    if (requireNamespace("easybreedeR", quietly = TRUE)) {
+      bind_rcpp_functions(asNamespace("easybreedeR"))
+    } else {
+      character(0)
+    }
+  }, error = function(e) character(0))
+  if (all(core_fns %in% loaded)) {
+    return(loaded)
   }
 
-  if ("fast_top_contrib_cpp" %in% loaded) {
-    message("fast_top_contrib_cpp available - will show Top 5 contributors")
-  } else {
-    message("fast_top_contrib_cpp not found - Top 5 contributors disabled")
+  # Fallback for source deployments (e.g., shinyapps.io):
+  # compile and load exported C++ functions directly from src/pedigree_qc.cpp.
+  if (!requireNamespace("Rcpp", quietly = TRUE)) {
+    return(loaded)
   }
-}, error = function(e) {
+  src_root <- resolve_src_root()
+  cpp_file <- if (!is.null(src_root)) file.path(src_root, "src", "pedigree_qc.cpp") else ""
+  if (!nzchar(cpp_file) || !file.exists(cpp_file)) {
+    return(loaded)
+  }
+  ok <- isTRUE(tryCatch({
+    Rcpp::sourceCpp(cpp_file, env = rcpp_target_env, rebuild = FALSE, showOutput = FALSE, verbose = FALSE)
+    TRUE
+  }, error = function(e) FALSE))
+  if (!ok) {
+    return(loaded)
+  }
+  bind_rcpp_functions(rcpp_target_env)
+}
+
+loaded <- tryCatch(load_rcpp_backend(), error = function(e) {
   message("Compiled backend unavailable: ", e$message)
-  use_rcpp <- FALSE
-  use_fast_inbreeding_cpp <- FALSE
+  character(0)
 })
+
+use_rcpp <- all(core_fns %in% loaded)
+if (use_rcpp) {
+  message("Rcpp QC functions loaded")
+} else {
+  message("Required compiled QC functions are unavailable; falling back to R methods")
+}
+
+if ("fast_find_deepest_ancestor" %in% loaded) {
+  message("fast_find_deepest_ancestor available")
+} else {
+  message("fast_find_deepest_ancestor not found, will use R version")
+}
+if ("fast_lap_distribution" %in% loaded) {
+  message("fast_lap_distribution available")
+} else {
+  message("fast_lap_distribution not found, will use R version")
+}
+if ("fast_lap_depths" %in% loaded) {
+  message("fast_lap_depths available")
+} else {
+  message("fast_lap_depths not found, will use R version")
+}
+
+use_fast_inbreeding_cpp <- "fast_inbreeding_cpp" %in% loaded
+if (use_fast_inbreeding_cpp) {
+  message("fast inbreeding C++ available - will use Rcpp method")
+} else if (pedigreeTools_available) {
+  message("fast_inbreeding_cpp not found, will use inbupgf90/pedigreeTools")
+} else {
+  message("fast_inbreeding_cpp not found, will use inbupgf90 if available")
+}
+
+if ("fast_top_contrib_cpp" %in% loaded) {
+  message("fast_top_contrib_cpp available - will show Top 5 contributors")
+} else {
+  message("fast_top_contrib_cpp not found - Top 5 contributors disabled")
+}
 
 # Suppress SASS color contrast warnings from bslib
 # Set option to disable color contrast warnings (bslib >= 0.2.4)
