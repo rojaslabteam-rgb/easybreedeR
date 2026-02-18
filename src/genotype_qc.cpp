@@ -1,4 +1,14 @@
 #include <Rcpp.h>
+#include <algorithm>
+#include <cmath>
+#include <limits>
+#include <vector>
+
+extern "C" {
+#include <R_ext/BLAS.h>
+#include <R_ext/Lapack.h>
+}
+
 using namespace Rcpp;
 
 inline bool is_missing(double x) {
@@ -231,7 +241,8 @@ NumericVector gvr_hwe_exact(NumericMatrix geno) {
 
 // [[Rcpp::export]]
 DataFrame gvr_relatedness_pairs(NumericMatrix geno, CharacterVector sample_ids,
-                                int max_pairs = 2147483647, int max_markers = 2147483647, int min_valid = 20) {
+                                int max_pairs = 2147483647, int max_markers = 2147483647, 
+                                int min_valid = 20, bool show_progress = true) {
   // PLINK-inspired IBD estimation:
   // 1) compute IBS counts and method-of-moments initializer
   // 2) refine Z0/Z1/Z2 with EM on per-locus pair likelihoods under Z states.
@@ -288,7 +299,20 @@ DataFrame gvr_relatedness_pairs(NumericMatrix geno, CharacterVector sample_ids,
   NumericVector pi_hat(np, NA_REAL), dst(np, NA_REAL), ppc(np, NA_REAL), ratio(np, NA_REAL);
   IntegerVector phe(np, -1);
 
+  // Progress tracking
+  int progress_step = std::max(1, (int)(np / 100));  // Update every 1%
+  int last_progress = 0;
+
   for (size_t k = 0; k < np; ++k) {
+    // Show progress and allow user interruption
+    if (show_progress && (int)k % progress_step == 0) {
+      int current_progress = (int)((k * 100) / np);
+      if (current_progress > last_progress) {
+        Rcpp::checkUserInterrupt();  // Allow user to interrupt
+        last_progress = current_progress;
+      }
+    }
+    
     int i = pairs[k].first;
     int j = pairs[k].second;
     int ibs0 = 0, ibs1 = 0, ibs2 = 0, hethet = 0, loci = 0;
@@ -397,5 +421,192 @@ DataFrame gvr_relatedness_pairs(NumericMatrix geno, CharacterVector sample_ids,
     _["Z0"] = z0, _["Z1"] = z1, _["Z2"] = z2,
     _["PI_HAT"] = pi_hat, _["PHE"] = phe,
     _["DST"] = dst, _["PPC"] = ppc, _["RATIO"] = ratio
+  );
+}
+
+// [[Rcpp::export]]
+SEXP gvr_pca_from_dosage_cpp(NumericMatrix geno, int n_components = 20, int max_markers = 0) {
+  const int n = geno.nrow();
+  const int m = geno.ncol();
+  if (n < 2 || m < 2) return R_NilValue;
+  if (n_components < 1) n_components = 1;
+  // max_markers <= 0 means "use all valid markers" (PLINK-like default).
+  const bool limit_markers = (max_markers > 0);
+  if (limit_markers && max_markers < 2) max_markers = 2;
+
+  // Find valid markers (non-missing data)
+  std::vector<int> valid_markers;
+  valid_markers.reserve(m);
+  for (int j = 0; j < m; ++j) {
+    bool has_non_missing = false;
+    for (int i = 0; i < n; ++i) {
+      int d = 0;
+      if (as_dosage(geno(i, j), d)) {
+        has_non_missing = true;
+        break;
+      }
+    }
+    if (has_non_missing) valid_markers.push_back(j);
+  }
+  if ((int)valid_markers.size() < 2) return R_NilValue;
+
+  // Subsample markers if needed (evenly spaced)
+  std::vector<int> marker_idx;
+  marker_idx.reserve(limit_markers ? std::min((int)valid_markers.size(), max_markers)
+                                   : (int)valid_markers.size());
+  if (!limit_markers || (int)valid_markers.size() <= max_markers) {
+    marker_idx = valid_markers;
+  } else {
+    for (int k = 0; k < max_markers; ++k) {
+      double pos = ((double)k * ((double)valid_markers.size() - 1.0)) / ((double)max_markers - 1.0);
+      int idx = valid_markers[(int)std::floor(pos + 1e-12)];
+      if (marker_idx.empty() || marker_idx.back() != idx) marker_idx.push_back(idx);
+    }
+  }
+  if ((int)marker_idx.size() < 2) return R_NilValue;
+
+  // Calculate allele frequencies and filter monomorphic markers
+  const double eps = 1e-10;
+  std::vector<int> keep_markers;
+  std::vector<double> p_vec;
+  std::vector<double> sd_vec;
+  keep_markers.reserve(marker_idx.size());
+  p_vec.reserve(marker_idx.size());
+  sd_vec.reserve(marker_idx.size());
+
+  for (int marker : marker_idx) {
+    double sum_d = 0.0;
+    int cnt = 0;
+    for (int i = 0; i < n; ++i) {
+      int d = 0;
+      if (as_dosage(geno(i, marker), d)) {
+        sum_d += (double)d;
+        cnt++;
+      }
+    }
+    if (cnt == 0) continue;
+    double p = (sum_d / (double)cnt) / 2.0;
+    if (!R_finite(p) || p <= eps || p >= (1.0 - eps)) continue;
+    double sd = std::sqrt(2.0 * p * (1.0 - p));
+    if (!R_finite(sd) || sd <= eps) continue;
+    keep_markers.push_back(marker);
+    p_vec.push_back(p);
+    sd_vec.push_back(sd);
+  }
+  const int m_keep = (int)keep_markers.size();
+  if (m_keep < 2) return R_NilValue;
+
+  // Standardize genotype matrix (center and scale)
+  NumericMatrix x_std(n, m_keep);
+  for (int c = 0; c < m_keep; ++c) {
+    const int marker = keep_markers[c];
+    const double center = 2.0 * p_vec[c];
+    const double scale = sd_vec[c];
+    for (int i = 0; i < n; ++i) {
+      int d = 0;
+      if (as_dosage(geno(i, marker), d)) {
+        x_std(i, c) = ((double)d - center) / scale;
+      } else {
+        x_std(i, c) = 0.0;  // Missing values set to mean (0 after centering)
+      }
+    }
+  }
+
+  // Compute Gram matrix K = X * X' / m (PLINK-style covariance matrix)
+  std::vector<double> k_mat((size_t)n * (size_t)n, 0.0);
+  const double inv_m = 1.0 / (double)m_keep;
+  for (int j = 0; j < n; ++j) {
+    for (int i = 0; i <= j; ++i) {
+      double acc = 0.0;
+      for (int c = 0; c < m_keep; ++c) {
+        acc += x_std(i, c) * x_std(j, c);
+      }
+      const double val = acc * inv_m;
+      k_mat[(size_t)i + (size_t)j * (size_t)n] = val;
+      k_mat[(size_t)j + (size_t)i * (size_t)n] = val;
+    }
+  }
+
+  // Eigenvalue decomposition using LAPACK (dsyev)
+  std::vector<double> evals(n, 0.0);
+  int nn = n;
+  int lda = n;
+  int info = 0;
+  int lwork = -1;
+  double wkopt = 0.0;
+  char jobz = 'V';  // Compute eigenvalues and eigenvectors
+  char uplo = 'U';  // Upper triangle
+
+  // Query optimal workspace size
+  F77_CALL(dsyev)(&jobz, &uplo, &nn, k_mat.data(), &lda, evals.data(), &wkopt, &lwork, &info FCONE FCONE);
+  if (info != 0 || !R_finite(wkopt)) return R_NilValue;
+  lwork = std::max(1, (int)std::ceil(wkopt));
+  std::vector<double> work((size_t)lwork, 0.0);
+  
+  // Perform eigenvalue decomposition
+  F77_CALL(dsyev)(&jobz, &uplo, &nn, k_mat.data(), &lda, evals.data(), work.data(), &lwork, &info FCONE FCONE);
+  if (info != 0) return R_NilValue;
+
+  // LAPACK returns eigenvalues in ascending order, we want descending
+  // Keep eigenvalues that are finite and >= small tolerance (allows for numerical precision)
+  // This ensures we can return up to n components (including near-zero eigenvalues)
+  const double eval_tol = 1e-14;  // Tolerance for near-zero eigenvalues
+  std::vector<int> keep_eval_idx;
+  keep_eval_idx.reserve(n);
+  for (int idx = n - 1; idx >= 0; --idx) {
+    if (R_finite(evals[idx]) && evals[idx] >= -eval_tol) {  // Allow slightly negative values due to numerical error
+      keep_eval_idx.push_back(idx);
+    }
+  }
+  if ((int)keep_eval_idx.size() < 1) return R_NilValue;  // At least 1 eigenvalue
+
+  const int n_keep = std::min(n_components, (int)keep_eval_idx.size());
+  if (n_keep < 1) return R_NilValue;
+
+  // Extract eigenvalues and calculate variance explained
+  NumericVector eigenvalues(n_keep);
+  NumericVector variance(n_keep);
+  NumericMatrix scores(n, n_keep);
+  double eval_sum = 0.0;
+  for (int k = 0; k < n_keep; ++k) {
+    double ev = evals[keep_eval_idx[k]];
+    if (!R_finite(ev)) ev = 0.0;  // Handle near-zero or slightly negative eigenvalues
+    if (ev < 0.0 && ev > -1e-12) ev = 0.0;  // Clamp small negative values (numerical error) to zero
+    eigenvalues[k] = ev;
+    eval_sum += ev;
+  }
+  // Use total variance for normalization; if eval_sum is near-zero, variance will be 0
+  if (!R_finite(eval_sum) || eval_sum < 0.0) eval_sum = 1.0;  // Fallback to avoid division by zero
+
+  // Extract eigenvectors (PC scores) and ensure consistent sign
+  for (int k = 0; k < n_keep; ++k) {
+    const int col_idx = keep_eval_idx[k];
+    
+    // Find pivot element with maximum absolute value for sign consistency
+    double max_abs = -1.0;
+    int pivot = 0;
+    for (int i = 0; i < n; ++i) {
+      double v = k_mat[(size_t)i + (size_t)col_idx * (size_t)n];
+      if (std::fabs(v) > max_abs) {
+        max_abs = std::fabs(v);
+        pivot = i;
+      }
+    }
+    
+    // Ensure pivot is positive for consistent sign across runs
+    double sign = 1.0;
+    double pivot_val = k_mat[(size_t)pivot + (size_t)col_idx * (size_t)n];
+    if (R_finite(pivot_val) && pivot_val < 0.0) sign = -1.0;
+
+    for (int i = 0; i < n; ++i) {
+      scores(i, k) = sign * k_mat[(size_t)i + (size_t)col_idx * (size_t)n];
+    }
+    variance[k] = (eigenvalues[k] / eval_sum) * 100.0;
+  }
+
+  return List::create(
+    _["scores"] = scores,
+    _["variance"] = variance,
+    _["eigenvalues"] = eigenvalues
   );
 }

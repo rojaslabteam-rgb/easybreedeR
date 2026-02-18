@@ -1,6 +1,8 @@
 #include <Rcpp.h>
 #include <algorithm>
 #include <cctype>
+#include <cmath>
+#include <sstream>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -34,6 +36,73 @@ std::string normalize_allele(SEXP x) {
 
 bool is_missing_allele(const std::string& a) {
   return a.empty() || a == "0" || a == "NA" || a == "N" || a == "." || a == "-9";
+}
+
+bool parse_ped_pair(const std::string& s_in, std::string& a, std::string& b) {
+  std::string s = upper_copy(trim_copy(s_in));
+  if (s.empty()) return false;
+  std::istringstream iss(s);
+  std::string t1, t2, extra;
+  if (!(iss >> t1)) return false;
+  if (!(iss >> t2)) return false;
+  if (iss >> extra) return false;
+  a = t1;
+  b = t2;
+  return true;
+}
+
+double hwe_exact_pvalue_local(int obs_hets, int obs_hom1, int obs_hom2) {
+  int obs_homr = std::min(obs_hom1, obs_hom2);
+  int obs_homc = std::max(obs_hom1, obs_hom2);
+  int rare_copies = 2 * obs_homr + obs_hets;
+  int genotypes = obs_hets + obs_homc + obs_homr;
+  if (genotypes <= 0) return NA_REAL;
+
+  std::vector<double> probs(rare_copies + 1, 0.0);
+  int mid = (int) std::floor((double)rare_copies * (2.0 * genotypes - rare_copies) / (2.0 * genotypes));
+  if ((rare_copies & 1) != (mid & 1)) mid++;
+
+  int curr_hets = mid;
+  int curr_homr = (rare_copies - mid) / 2;
+  int curr_homc = genotypes - curr_hets - curr_homr;
+
+  probs[mid] = 1.0;
+  double sum = probs[mid];
+
+  while (curr_hets > 1) {
+    double p = probs[curr_hets] * curr_hets * (curr_hets - 1.0) /
+      (4.0 * (curr_homr + 1.0) * (curr_homc + 1.0));
+    probs[curr_hets - 2] = p;
+    sum += p;
+    curr_hets -= 2;
+    curr_homr += 1;
+    curr_homc += 1;
+  }
+
+  curr_hets = mid;
+  curr_homr = (rare_copies - mid) / 2;
+  curr_homc = genotypes - curr_hets - curr_homr;
+  while (curr_hets <= rare_copies - 2) {
+    double p = probs[curr_hets] * 4.0 * curr_homr * curr_homc /
+      ((curr_hets + 2.0) * (curr_hets + 1.0));
+    probs[curr_hets + 2] = p;
+    sum += p;
+    curr_hets += 2;
+    curr_homr -= 1;
+    curr_homc -= 1;
+  }
+
+  if (!(obs_hets >= 0 && obs_hets <= rare_copies)) return NA_REAL;
+  if (sum <= 0.0) return NA_REAL;
+  for (int i = 0; i <= rare_copies; ++i) probs[i] /= sum;
+
+  double p_obs = probs[obs_hets];
+  double p_hwe = 0.0;
+  for (int i = (rare_copies & 1); i <= rare_copies; i += 2) {
+    if (probs[i] <= p_obs + 1e-12) p_hwe += probs[i];
+  }
+  if (p_hwe > 1.0) p_hwe = 1.0;
+  return p_hwe;
 }
 
 } // namespace
@@ -162,4 +231,357 @@ List eb_ped_to_blup_codes_cpp(CharacterMatrix allele1, CharacterMatrix allele2) 
     _["a1"] = a1_out,
     _["a2"] = a2_out
   );
+}
+
+// PLINK-aligned call-rate calculation directly from PED-style genotype strings.
+// Input matrix cells are expected like "A T", "0 0", "na na", etc.
+// Missing if either allele is missing code after trim+toupper.
+// [[Rcpp::export]]
+List gvr_call_rate_from_ped_strings_cpp(CharacterMatrix geno_pairs) {
+  const int n = geno_pairs.nrow();
+  const int m = geno_pairs.ncol();
+  NumericVector marker_call_rate(m, NA_REAL);
+  NumericVector individual_call_rate(n, NA_REAL);
+
+  if (n == 0 || m == 0) {
+    return List::create(
+      _["marker_call_rate"] = marker_call_rate,
+      _["individual_call_rate"] = individual_call_rate
+    );
+  }
+
+  std::vector<int> marker_non_missing(m, 0);
+  for (int i = 0; i < n; ++i) {
+    int individual_non_missing = 0;
+    for (int j = 0; j < m; ++j) {
+      if (geno_pairs(i, j) == NA_STRING) continue;
+      std::string a, b;
+      if (!parse_ped_pair(as<std::string>(geno_pairs(i, j)), a, b)) continue;
+      if (is_missing_allele(a) || is_missing_allele(b)) continue;
+      individual_non_missing++;
+      marker_non_missing[j]++;
+    }
+    individual_call_rate[i] = static_cast<double>(individual_non_missing) / static_cast<double>(m);
+  }
+
+  for (int j = 0; j < m; ++j) {
+    marker_call_rate[j] = static_cast<double>(marker_non_missing[j]) / static_cast<double>(n);
+  }
+
+  return List::create(
+    _["marker_call_rate"] = marker_call_rate,
+    _["individual_call_rate"] = individual_call_rate
+  );
+}
+
+// PLINK-aligned MAF calculation from PED-style genotype strings.
+// Missing rules match gvr_call_rate_from_ped_strings_cpp.
+// For loci with >2 observed alleles, keep top-2 alleles by count and treat others as missing.
+// [[Rcpp::export]]
+NumericVector gvr_maf_from_ped_strings_cpp(CharacterMatrix geno_pairs) {
+  const int n = geno_pairs.nrow();
+  const int m = geno_pairs.ncol();
+  NumericVector maf(m, NA_REAL);
+  if (n == 0 || m == 0) return maf;
+
+  for (int j = 0; j < m; ++j) {
+    std::unordered_map<std::string, int> allele_count;
+    std::unordered_map<std::string, int> first_seen;
+    int seen_rank = 0;
+
+    for (int i = 0; i < n; ++i) {
+      if (geno_pairs(i, j) == NA_STRING) continue;
+      std::string a, b;
+      if (!parse_ped_pair(as<std::string>(geno_pairs(i, j)), a, b)) continue;
+      if (!is_missing_allele(a)) {
+        if (first_seen.find(a) == first_seen.end()) first_seen[a] = seen_rank++;
+        allele_count[a]++;
+      }
+      if (!is_missing_allele(b)) {
+        if (first_seen.find(b) == first_seen.end()) first_seen[b] = seen_rank++;
+        allele_count[b]++;
+      }
+    }
+
+    if (allele_count.empty()) {
+      maf[j] = NA_REAL;
+      continue;
+    }
+    if (allele_count.size() == 1) {
+      maf[j] = 0.0;
+      continue;
+    }
+
+    std::vector<std::pair<std::string, int>> alleles;
+    alleles.reserve(allele_count.size());
+    for (const auto& kv : allele_count) alleles.push_back(kv);
+    std::sort(alleles.begin(), alleles.end(),
+              [&](const std::pair<std::string, int>& lhs, const std::pair<std::string, int>& rhs) {
+                if (lhs.second != rhs.second) return lhs.second > rhs.second;
+                return first_seen[lhs.first] < first_seen[rhs.first];
+              });
+
+    const std::string major = alleles[0].first;
+    const std::string minor = alleles[1].first;
+
+    int minor_copies = 0;
+    int called_alleles = 0;
+    for (int i = 0; i < n; ++i) {
+      if (geno_pairs(i, j) == NA_STRING) continue;
+      std::string a, b;
+      if (!parse_ped_pair(as<std::string>(geno_pairs(i, j)), a, b)) continue;
+      if (is_missing_allele(a) || is_missing_allele(b)) continue;
+      const bool a_known = (a == major || a == minor);
+      const bool b_known = (b == major || b == minor);
+      if (!a_known || !b_known) continue;
+      minor_copies += static_cast<int>(a == minor) + static_cast<int>(b == minor);
+      called_alleles += 2;
+    }
+
+    if (called_alleles > 0) {
+      maf[j] = static_cast<double>(minor_copies) / static_cast<double>(called_alleles);
+    } else {
+      maf[j] = NA_REAL;
+    }
+  }
+
+  return maf;
+}
+
+// PLINK-aligned HWE exact p-values from PED-style genotype strings.
+// Missing rules match gvr_call_rate_from_ped_strings_cpp.
+// For loci with >2 observed alleles, keep top-2 alleles by count and treat others as missing.
+// [[Rcpp::export]]
+NumericVector gvr_hwe_from_ped_strings_cpp(CharacterMatrix geno_pairs) {
+  const int n = geno_pairs.nrow();
+  const int m = geno_pairs.ncol();
+  NumericVector pvals(m, NA_REAL);
+  if (n == 0 || m == 0) return pvals;
+
+  for (int j = 0; j < m; ++j) {
+    std::unordered_map<std::string, int> allele_count;
+    std::unordered_map<std::string, int> first_seen;
+    int seen_rank = 0;
+
+    for (int i = 0; i < n; ++i) {
+      if (geno_pairs(i, j) == NA_STRING) continue;
+      std::string a, b;
+      if (!parse_ped_pair(as<std::string>(geno_pairs(i, j)), a, b)) continue;
+      if (!is_missing_allele(a)) {
+        if (first_seen.find(a) == first_seen.end()) first_seen[a] = seen_rank++;
+        allele_count[a]++;
+      }
+      if (!is_missing_allele(b)) {
+        if (first_seen.find(b) == first_seen.end()) first_seen[b] = seen_rank++;
+        allele_count[b]++;
+      }
+    }
+
+    if (allele_count.empty()) {
+      pvals[j] = NA_REAL;
+      continue;
+    }
+    if (allele_count.size() == 1) {
+      pvals[j] = 1.0;
+      continue;
+    }
+
+    std::vector<std::pair<std::string, int>> alleles;
+    alleles.reserve(allele_count.size());
+    for (const auto& kv : allele_count) alleles.push_back(kv);
+    std::sort(alleles.begin(), alleles.end(),
+              [&](const std::pair<std::string, int>& lhs, const std::pair<std::string, int>& rhs) {
+                if (lhs.second != rhs.second) return lhs.second > rhs.second;
+                return first_seen[lhs.first] < first_seen[rhs.first];
+              });
+
+    const std::string major = alleles[0].first;
+    const std::string minor = alleles[1].first;
+
+    int hom_major = 0;
+    int het = 0;
+    int hom_minor = 0;
+    int valid = 0;
+    for (int i = 0; i < n; ++i) {
+      if (geno_pairs(i, j) == NA_STRING) continue;
+      std::string a, b;
+      if (!parse_ped_pair(as<std::string>(geno_pairs(i, j)), a, b)) continue;
+      if (is_missing_allele(a) || is_missing_allele(b)) continue;
+      const bool a_known = (a == major || a == minor);
+      const bool b_known = (b == major || b == minor);
+      if (!a_known || !b_known) continue;
+      valid++;
+      if (a == minor && b == minor) hom_minor++;
+      else if (a == major && b == major) hom_major++;
+      else het++;
+    }
+
+    if (valid > 0) {
+      pvals[j] = hwe_exact_pvalue_local(het, hom_major, hom_minor);
+    }
+  }
+
+  return pvals;
+}
+
+// PLINK-aligned individual heterozygosity from PED-style genotype strings.
+// Mirrors --het-style observed heterozygosity rate:
+//   het_rate = 1 - O(HOM)/N(NM), computed on polymorphic loci.
+// Missing rules match gvr_call_rate_from_ped_strings_cpp.
+// For loci with >2 observed alleles, keep top-2 alleles by count and treat others as missing.
+// [[Rcpp::export]]
+NumericVector gvr_individual_het_from_ped_strings_cpp(CharacterMatrix geno_pairs) {
+  const int n = geno_pairs.nrow();
+  const int m = geno_pairs.ncol();
+  NumericVector out(n, NA_REAL);
+  if (n == 0 || m == 0) return out;
+
+  std::vector<unsigned char> polymorphic(m, 0);
+  std::vector<std::string> major_allele(m), minor_allele(m);
+
+  // First pass: identify per-marker top2 alleles and polymorphic markers.
+  for (int j = 0; j < m; ++j) {
+    std::unordered_map<std::string, int> allele_count;
+    std::unordered_map<std::string, int> first_seen;
+    int seen_rank = 0;
+
+    for (int i = 0; i < n; ++i) {
+      if (geno_pairs(i, j) == NA_STRING) continue;
+      std::string a, b;
+      if (!parse_ped_pair(as<std::string>(geno_pairs(i, j)), a, b)) continue;
+      if (!is_missing_allele(a)) {
+        if (first_seen.find(a) == first_seen.end()) first_seen[a] = seen_rank++;
+        allele_count[a]++;
+      }
+      if (!is_missing_allele(b)) {
+        if (first_seen.find(b) == first_seen.end()) first_seen[b] = seen_rank++;
+        allele_count[b]++;
+      }
+    }
+
+    if (allele_count.empty()) continue;
+
+    std::vector<std::pair<std::string, int>> alleles;
+    alleles.reserve(allele_count.size());
+    for (const auto& kv : allele_count) alleles.push_back(kv);
+    std::sort(alleles.begin(), alleles.end(),
+              [&](const std::pair<std::string, int>& lhs, const std::pair<std::string, int>& rhs) {
+                if (lhs.second != rhs.second) return lhs.second > rhs.second;
+                return first_seen[lhs.first] < first_seen[rhs.first];
+              });
+
+    if (alleles.size() == 1) {
+      major_allele[j] = alleles[0].first;
+      minor_allele[j] = alleles[0].first;
+      continue;
+    }
+
+    major_allele[j] = alleles[0].first;
+    minor_allele[j] = alleles[1].first;
+
+    int minor_copies = 0;
+    int called_alleles = 0;
+    for (int i = 0; i < n; ++i) {
+      if (geno_pairs(i, j) == NA_STRING) continue;
+      std::string a, b;
+      if (!parse_ped_pair(as<std::string>(geno_pairs(i, j)), a, b)) continue;
+      if (is_missing_allele(a) || is_missing_allele(b)) continue;
+      const bool a_known = (a == major_allele[j] || a == minor_allele[j]);
+      const bool b_known = (b == major_allele[j] || b == minor_allele[j]);
+      if (!a_known || !b_known) continue;
+      minor_copies += static_cast<int>(a == minor_allele[j]) + static_cast<int>(b == minor_allele[j]);
+      called_alleles += 2;
+    }
+    if (called_alleles > 0 && minor_copies > 0 && minor_copies < called_alleles) {
+      polymorphic[j] = 1;
+    }
+  }
+
+  // Second pass: compute per-individual heterozygosity rate across polymorphic loci.
+  for (int i = 0; i < n; ++i) {
+    int valid = 0;
+    int het = 0;
+    for (int j = 0; j < m; ++j) {
+      if (!polymorphic[j]) continue;
+      if (geno_pairs(i, j) == NA_STRING) continue;
+      std::string a, b;
+      if (!parse_ped_pair(as<std::string>(geno_pairs(i, j)), a, b)) continue;
+      if (is_missing_allele(a) || is_missing_allele(b)) continue;
+      const bool a_known = (a == major_allele[j] || a == minor_allele[j]);
+      const bool b_known = (b == major_allele[j] || b == minor_allele[j]);
+      if (!a_known || !b_known) continue;
+      valid++;
+      if (a != b) het++;
+    }
+    if (valid > 0) out[i] = static_cast<double>(het) / static_cast<double>(valid);
+  }
+
+  return out;
+}
+
+// PLINK-aligned dosage matrix from PED-style genotype strings.
+// Missing rules match gvr_call_rate_from_ped_strings_cpp.
+// For loci with >2 observed alleles, keep top-2 alleles by count and treat others as missing.
+// Output dosage counts copies of minor allele (0/1/2), with NA for missing.
+// [[Rcpp::export]]
+NumericMatrix gvr_dosage_from_ped_strings_cpp(CharacterMatrix geno_pairs) {
+  const int n = geno_pairs.nrow();
+  const int m = geno_pairs.ncol();
+  NumericMatrix dosage(n, m);
+  std::fill(dosage.begin(), dosage.end(), NA_REAL);
+  if (n == 0 || m == 0) return dosage;
+
+  for (int j = 0; j < m; ++j) {
+    std::unordered_map<std::string, int> allele_count;
+    std::unordered_map<std::string, int> first_seen;
+    int seen_rank = 0;
+
+    for (int i = 0; i < n; ++i) {
+      if (geno_pairs(i, j) == NA_STRING) continue;
+      std::string a, b;
+      if (!parse_ped_pair(as<std::string>(geno_pairs(i, j)), a, b)) continue;
+      if (!is_missing_allele(a)) {
+        if (first_seen.find(a) == first_seen.end()) first_seen[a] = seen_rank++;
+        allele_count[a]++;
+      }
+      if (!is_missing_allele(b)) {
+        if (first_seen.find(b) == first_seen.end()) first_seen[b] = seen_rank++;
+        allele_count[b]++;
+      }
+    }
+
+    if (allele_count.empty()) continue;
+
+    std::vector<std::pair<std::string, int>> alleles;
+    alleles.reserve(allele_count.size());
+    for (const auto& kv : allele_count) alleles.push_back(kv);
+    std::sort(alleles.begin(), alleles.end(),
+              [&](const std::pair<std::string, int>& lhs, const std::pair<std::string, int>& rhs) {
+                if (lhs.second != rhs.second) return lhs.second > rhs.second;
+                return first_seen[lhs.first] < first_seen[rhs.first];
+              });
+
+    std::string major = alleles[0].first;
+    std::string minor = alleles[0].first;
+    if (alleles.size() > 1) minor = alleles[1].first;
+
+    for (int i = 0; i < n; ++i) {
+      if (geno_pairs(i, j) == NA_STRING) continue;
+      std::string a, b;
+      if (!parse_ped_pair(as<std::string>(geno_pairs(i, j)), a, b)) continue;
+      if (is_missing_allele(a) || is_missing_allele(b)) continue;
+
+      if (major == minor) {
+        if (a == major && b == major) dosage(i, j) = 0.0;
+        continue;
+      }
+
+      const bool a_known = (a == major || a == minor);
+      const bool b_known = (b == major || b == minor);
+      if (!a_known || !b_known) continue;
+      dosage(i, j) = static_cast<double>((a == minor) + (b == minor));
+    }
+  }
+
+  return dosage;
 }
