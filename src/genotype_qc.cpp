@@ -4,11 +4,6 @@
 #include <limits>
 #include <vector>
 
-extern "C" {
-#include <R_ext/BLAS.h>
-#include <R_ext/Lapack.h>
-}
-
 using namespace Rcpp;
 
 inline bool is_missing(double x) {
@@ -527,34 +522,29 @@ SEXP gvr_pca_from_dosage_cpp(NumericMatrix geno, int n_components = 20, int max_
     }
   }
 
-  // Eigenvalue decomposition using LAPACK (dsyev)
-  std::vector<double> evals(n, 0.0);
-  int nn = n;
-  int lda = n;
-  int info = 0;
-  int lwork = -1;
-  double wkopt = 0.0;
-  char jobz = 'V';  // Compute eigenvalues and eigenvectors
-  char uplo = 'U';  // Upper triangle
+  // Convert to NumericMatrix for eigenvalue decomposition using R's eigen()
+  NumericMatrix k_rcpp(n, n);
+  for (int i = 0; i < n; ++i) {
+    for (int j = 0; j < n; ++j) {
+      k_rcpp(i, j) = k_mat[(size_t)i + (size_t)j * (size_t)n];
+    }
+  }
 
-  // Query optimal workspace size
-  F77_CALL(dsyev)(&jobz, &uplo, &nn, k_mat.data(), &lda, evals.data(), &wkopt, &lwork, &info FCONE FCONE);
-  if (info != 0 || !R_finite(wkopt)) return R_NilValue;
-  lwork = std::max(1, (int)std::ceil(wkopt));
-  std::vector<double> work((size_t)lwork, 0.0);
+  // Use R's eigen function via Rcpp
+  Environment base("package:base");
+  Function eigen_func = base["eigen"];
+  List eigen_result = eigen_func(k_rcpp, Named("symmetric", true), Named("only.values", false));
   
-  // Perform eigenvalue decomposition
-  F77_CALL(dsyev)(&jobz, &uplo, &nn, k_mat.data(), &lda, evals.data(), work.data(), &lwork, &info FCONE FCONE);
-  if (info != 0) return R_NilValue;
+  NumericVector evals = eigen_result["values"];
+  NumericMatrix evecs = eigen_result["vectors"];
 
-  // LAPACK returns eigenvalues in ascending order, we want descending
-  // Keep eigenvalues that are finite and >= small tolerance (allows for numerical precision)
-  // This ensures we can return up to n components (including near-zero eigenvalues)
-  const double eval_tol = 1e-14;  // Tolerance for near-zero eigenvalues
+  // LAPACK/R returns eigenvalues in descending order
+  // Keep eigenvalues that are finite and >= small tolerance
+  const double eval_tol = 1e-14;
   std::vector<int> keep_eval_idx;
   keep_eval_idx.reserve(n);
-  for (int idx = n - 1; idx >= 0; --idx) {
-    if (R_finite(evals[idx]) && evals[idx] >= -eval_tol) {  // Allow slightly negative values due to numerical error
+  for (int idx = 0; idx < n; ++idx) {
+    if (R_finite(evals[idx]) && evals[idx] >= -eval_tol) {
       keep_eval_idx.push_back(idx);
     }
   }
@@ -570,15 +560,15 @@ SEXP gvr_pca_from_dosage_cpp(NumericMatrix geno, int n_components = 20, int max_
   double eval_sum = 0.0;
   for (int k = 0; k < n_keep; ++k) {
     double ev = evals[keep_eval_idx[k]];
-    if (!R_finite(ev)) ev = 0.0;  // Handle near-zero or slightly negative eigenvalues
+    if (!R_finite(ev)) ev = 0.0;
     if (ev < 0.0 && ev > -1e-12) ev = 0.0;  // Clamp small negative values (numerical error) to zero
     eigenvalues[k] = ev;
     eval_sum += ev;
   }
-  // Use total variance for normalization; if eval_sum is near-zero, variance will be 0
-  if (!R_finite(eval_sum) || eval_sum < 0.0) eval_sum = 1.0;  // Fallback to avoid division by zero
+  // Use total variance for normalization
+  if (!R_finite(eval_sum) || eval_sum < 0.0) eval_sum = 1.0;
 
-  // Extract eigenvectors (PC scores) and ensure consistent sign
+  // Extract eigenvectors (PC scores) from R's eigen result and ensure consistent sign
   for (int k = 0; k < n_keep; ++k) {
     const int col_idx = keep_eval_idx[k];
     
@@ -586,7 +576,7 @@ SEXP gvr_pca_from_dosage_cpp(NumericMatrix geno, int n_components = 20, int max_
     double max_abs = -1.0;
     int pivot = 0;
     for (int i = 0; i < n; ++i) {
-      double v = k_mat[(size_t)i + (size_t)col_idx * (size_t)n];
+      double v = evecs(i, col_idx);
       if (std::fabs(v) > max_abs) {
         max_abs = std::fabs(v);
         pivot = i;
@@ -595,11 +585,11 @@ SEXP gvr_pca_from_dosage_cpp(NumericMatrix geno, int n_components = 20, int max_
     
     // Ensure pivot is positive for consistent sign across runs
     double sign = 1.0;
-    double pivot_val = k_mat[(size_t)pivot + (size_t)col_idx * (size_t)n];
+    double pivot_val = evecs(pivot, col_idx);
     if (R_finite(pivot_val) && pivot_val < 0.0) sign = -1.0;
 
     for (int i = 0; i < n; ++i) {
-      scores(i, k) = sign * k_mat[(size_t)i + (size_t)col_idx * (size_t)n];
+      scores(i, k) = sign * evecs(i, col_idx);
     }
     variance[k] = (eigenvalues[k] / eval_sum) * 100.0;
   }

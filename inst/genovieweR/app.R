@@ -404,7 +404,6 @@ ui <- page_fillable(
                          choices = list(
                            "PLINK (.ped/.map)" = "plink_ped",
                            "PLINK (.bed/.bim/.fam)" = "plink_bed",
-                           "VCF (.vcf/.vcf.gz)" = "vcf",
                            "BLUPF90 (.txt + .map)" = "blupf90_txt"
                          ),
                          selected = "plink"),
@@ -522,7 +521,36 @@ ui <- page_fillable(
               br(),
               div(style = "margin-top: 15px;",
                   uiOutput("show_summary_btn"),
-                  uiOutput("show_summary_help")
+                  uiOutput("show_summary_help"),
+                  div(style = "margin-top: 10px;",
+                      checkboxInput(
+                        "summary_fast_mode",
+                        "Core summary statistics (base)",
+                        value = TRUE
+                      ),
+                      p(
+                        style = "font-size: 0.8rem; color: #888; margin-top: -8px;",
+                        "Runs core summary statistics (--missing, --freq, --hardy, --het). You can additionally enable PCA and/or relatedness below."
+                      ),
+                      checkboxInput(
+                        "enable_pca",
+                        "Enable PCA analysis (--pca)",
+                        value = FALSE
+                      ),
+                      p(
+                        style = "font-size: 0.8rem; color: #888; margin-top: -8px;",
+                        "PCA runs when this option is checked."
+                      ),
+                      checkboxInput(
+                        "enable_relatedness",
+                        "Enable sample relatedness analysis (--genome, slower)",
+                        value = FALSE
+                      ),
+                      p(
+                        style = "font-size: 0.8rem; color: #888; margin-top: -8px;",
+                        "Relatedness runs when this option is checked."
+                      )
+                  )
               ),
               br()
           ),
@@ -568,7 +596,7 @@ ui <- page_fillable(
               value = "per_individual",
                   div(style = "margin-top: 20px;",
                   h4("Per-Individual Plots"),
-                  p("Visualization of individual-level metrics: Sample missing rate and sample relatedness (IBD/PI_HAT)."),
+                  p("Visualization of individual-level metrics: Sample missing rate. Relatedness (IBD/PI_HAT) is optional."),
                   br(),
                   if (use_plotly) {
                     tagList(
@@ -576,9 +604,12 @@ ui <- page_fillable(
                           h5("Sample Missing Rate Distribution"),
                           plotlyOutput("per_individual_plot_missing", height = "400px")
                       ),
-                      div(style = "margin-bottom: 30px;",
-                          h5("Sample Relatedness Distribution"),
-                          plotlyOutput("per_individual_plot_relatedness", height = "400px")
+                      conditionalPanel(
+                        condition = "input.enable_relatedness",
+                        div(style = "margin-bottom: 30px;",
+                            h5("Sample Relatedness Distribution"),
+                            plotlyOutput("per_individual_plot_relatedness", height = "400px")
+                        )
                       )
                     )
                   } else {
@@ -587,9 +618,12 @@ ui <- page_fillable(
                           h5("Sample Missing Rate Distribution"),
                           plotOutput("per_individual_plot_missing", height = "400px")
                       ),
-                      div(style = "margin-bottom: 30px;",
-                          h5("Sample Relatedness Distribution"),
-                          plotOutput("per_individual_plot_relatedness", height = "400px")
+                      conditionalPanel(
+                        condition = "input.enable_relatedness",
+                        div(style = "margin-bottom: 30px;",
+                            h5("Sample Relatedness Distribution"),
+                            plotOutput("per_individual_plot_relatedness", height = "400px")
+                        )
                       )
                     )
                   },
@@ -844,7 +878,6 @@ server <- function(input, output, session) {
     shinyjs::reset("plink_bed_file")
     shinyjs::reset("plink_bim_file")
     shinyjs::reset("plink_fam_file")
-    shinyjs::reset("vcf_file")
     shinyjs::reset("blupf90_txt_file")
     shinyjs::reset("blupf90_map_file")
   })
@@ -992,7 +1025,6 @@ server <- function(input, output, session) {
       format_label <- switch(input$geno_format,
                              "plink_ped" = "PLINK (.ped/.map)",
                              "plink_bed" = "PLINK (.bed/.bim/.fam)",
-                             "vcf" = "VCF",
                              "blupf90_txt" = "BLUPF90 (.txt/.map)",
                              "PLINK")
       paste0("Samples: ", nrow(data$samples), "
@@ -1018,8 +1050,17 @@ server <- function(input, output, session) {
   
   # Generate summary and basic plots when Show Summary button is clicked
   observeEvent(input$show_summary, {
+    run_core <- isTRUE(input$summary_fast_mode)
+    include_pca_requested <- isTRUE(input$enable_pca)
+    include_relatedness_requested <- isTRUE(input$enable_relatedness)
+    include_pca <- include_pca_requested
+    include_relatedness <- include_relatedness_requested
     summary_plink_path <- if (input$geno_format %in% c("plink_ped", "plink_bed", "blupf90_txt")) find_plink_path() else NULL
-    summary_backend <- if (!is.null(summary_plink_path)) "PLINK" else "Rcpp"
+    summary_backend <- if (!is.null(summary_plink_path)) {
+      "PLINK"
+    } else {
+      "Rcpp"
+    }
     summary_backend_suffix <- paste0(" (backend: ", summary_backend, ")")
     withProgress(message = paste0("Loading and processing data...", summary_backend_suffix), value = 0, {
       tryCatch({
@@ -1073,18 +1114,22 @@ server <- function(input, output, session) {
               fam = input$plink_fam_file$datapath
             )
             data_obj
-          } else if (input$geno_format == "vcf") {
-            if (is.null(input$vcf_file)) {
-              showNotification("Please upload a .vcf file", type = "error")
-              return(NULL)
-            }
-            read_vcf_file(input$vcf_file$datapath)
           } else if (input$geno_format == "blupf90_txt") {
             if (is.null(input$blupf90_txt_file) || is.null(input$blupf90_map_file)) {
               showNotification("Please upload BLUPF90 .txt and .map files", type = "error")
               return(NULL)
             }
-            read_blupf90_txt(input$blupf90_txt_file$datapath, input$blupf90_map_file$datapath)
+            data_obj <- if (!is.null(summary_plink_path)) {
+              read_blupf90_txt_metadata(input$blupf90_txt_file$datapath, input$blupf90_map_file$datapath)
+            } else {
+              read_blupf90_txt(input$blupf90_txt_file$datapath, input$blupf90_map_file$datapath)
+            }
+            data_obj$plink_source <- list(
+              type = "blupf90_txt",
+              txt = input$blupf90_txt_file$datapath,
+              map = input$blupf90_map_file$datapath
+            )
+            data_obj
           } else {
             showNotification("Unknown genotype format", type = "error")
             return(NULL)
@@ -1141,15 +1186,21 @@ server <- function(input, output, session) {
           showNotification("Genotype matrix is required when PLINK backend is unavailable.", type = "error")
           return(NULL)
         }
+        if (!run_core && !include_pca && !include_relatedness) {
+          showNotification("No summary item selected. Enable at least one option.", type = "warning", duration = 8)
+          return(NULL)
+        }
         
-        setProgress(value = 0.8, message = paste0("Calculating basic statistics...", summary_backend_suffix))
-        
-        # Calculate basic statistics for visualization (without QC thresholds).
-        # For PLINK-compatible formats, prefer PLINK backend if available; otherwise fall back to R.
+        setProgress(value = 0.8, message = paste0("Calculating summary statistics...", summary_backend_suffix))
+
         if (!is.null(summary_plink_path)) {
-          basic_stats <- calculate_all_stats_plink(data)
+          basic_stats <- calculate_all_stats_plink(
+            data,
+            include_relatedness = include_relatedness,
+            include_pca = include_pca
+          )
         } else {
-          basic_stats <- calculate_all_stats_r(data)
+          basic_stats <- calculate_all_stats_r(data, include_relatedness = include_relatedness)
         }
         if (is.null(basic_stats)) {
           showNotification(
@@ -1163,12 +1214,19 @@ server <- function(input, output, session) {
           return(NULL)
         }
         
-        # Store basic stats for plotting (not QC results)
         summary_stats(basic_stats)
         summary_generated(TRUE)
         
+        enabled_parts <- character(0)
+        if (run_core) enabled_parts <- c(enabled_parts, "core")
+        if (include_pca) enabled_parts <- c(enabled_parts, "PCA")
+        if (include_relatedness) enabled_parts <- c(enabled_parts, "relatedness")
         setProgress(value = 1, message = paste0("Summary generated!", summary_backend_suffix))
-        showNotification("Summary and plots generated successfully!", type = "message")
+        showNotification(
+          paste0("Summary generated (", paste(enabled_parts, collapse = ", "), ")."),
+          type = "message",
+          duration = 6
+        )
         
         # Switch to per-individual plots tab
         updateTabsetPanel(session, "mainTabs", selected = "per_individual")
@@ -1264,7 +1322,7 @@ server <- function(input, output, session) {
             list(samples = samples, snps = snps)
           }
 
-          source_args <- get_plink_input_args(data)
+          source_args <- get_plink_input_args(data, prefix = prefix)
           if (is.null(source_args)) {
             if (!write_plink_text_files(prefix, data)) {
               showNotification("Failed to prepare PLINK input files.", type = "error")
@@ -1756,15 +1814,22 @@ server <- function(input, output, session) {
                              x = 0.5, y = 0.5, showarrow = FALSE))
       }
       
-      if (!is.list(data) || !all(c("samples", "genotypes") %in% names(data))) {
+      if (!is.list(data) || !"samples" %in% names(data)) {
         return(plotly_empty() %>% 
-               add_annotations(text = "Please load PLINK format data first",
+               add_annotations(text = "Sample metadata is not available",
                              x = 0.5, y = 0.5, showarrow = FALSE))
       }
       
       # Plot 1: Sample missing rate distribution
       if (!is.null(stats$individual_missing_rate)) {
-        miss_df <- data.frame(MissingRate = stats$individual_missing_rate)
+        miss_vals <- suppressWarnings(as.numeric(stats$individual_missing_rate))
+        miss_vals <- miss_vals[is.finite(miss_vals)]
+        if (length(miss_vals) == 0) {
+          return(plotly_empty() %>%
+                 add_annotations(text = "Sample missing rate data not available",
+                                 x = 0.5, y = 0.5, showarrow = FALSE))
+        }
+        miss_df <- data.frame(MissingRate = miss_vals)
         p_miss <- plot_ly() %>%
           add_histogram(data = miss_df, x = ~MissingRate, 
                        nbinsx = 30,
@@ -1783,6 +1848,11 @@ server <- function(input, output, session) {
       }
     })
     output$per_individual_plot_relatedness <- renderPlotly({
+      if (!isTRUE(input$enable_relatedness)) {
+        return(plotly_empty() %>%
+               add_annotations(text = "Sample relatedness is disabled.",
+                               x = 0.5, y = 0.5, showarrow = FALSE))
+      }
       req(geno_data())
       data <- geno_data()
       stats <- if (summary_generated() && !is.null(summary_stats())) {
@@ -1795,9 +1865,9 @@ server <- function(input, output, session) {
                                x = 0.5, y = 0.5, showarrow = FALSE))
       }
 
-      if (!is.list(data) || !all(c("samples", "genotypes") %in% names(data))) {
+      if (!is.list(data) || !"samples" %in% names(data)) {
         return(plotly_empty() %>%
-               add_annotations(text = "Please load genotype data first",
+               add_annotations(text = "Sample metadata is not available",
                                x = 0.5, y = 0.5, showarrow = FALSE))
       }
 
@@ -1806,6 +1876,13 @@ server <- function(input, output, session) {
           nrow(stats$individual_relatedness) > 0 &&
           "PI_HAT" %in% names(stats$individual_relatedness)) {
         relatedness_df <- stats$individual_relatedness
+        relatedness_df$PI_HAT <- suppressWarnings(as.numeric(relatedness_df$PI_HAT))
+        relatedness_df <- relatedness_df[is.finite(relatedness_df$PI_HAT), , drop = FALSE]
+        if (nrow(relatedness_df) == 0) {
+          return(plotly_empty() %>%
+                 add_annotations(text = "Sample relatedness data not available",
+                                 x = 0.5, y = 0.5, showarrow = FALSE))
+        }
         plot_ly() %>%
           add_histogram(data = relatedness_df, x = ~PI_HAT,
                         nbinsx = 50,
@@ -1839,15 +1916,22 @@ server <- function(input, output, session) {
                theme_void())
       }
       
-      if (!is.list(data) || !all(c("samples", "genotypes") %in% names(data))) {
+      if (!is.list(data) || !"samples" %in% names(data)) {
         return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
-                                 label = "Please load PLINK format data first", size = 5) +
+                                 label = "Sample metadata is not available", size = 5) +
                theme_void())
       }
       
       if (!is.null(stats$individual_missing_rate)) {
-        miss_df <- data.frame(MissingRate = stats$individual_missing_rate)
-        ggplot(miss_df, aes_string(x = "MissingRate")) +
+        miss_vals <- suppressWarnings(as.numeric(stats$individual_missing_rate))
+        miss_vals <- miss_vals[is.finite(miss_vals)]
+        if (length(miss_vals) == 0) {
+          return(ggplot() + annotate("text", x = 0.5, y = 0.5,
+                                     label = "Sample missing rate data not available", size = 5) +
+                   theme_void())
+        }
+        miss_df <- data.frame(MissingRate = miss_vals)
+        ggplot(miss_df, aes(x = MissingRate)) +
           geom_histogram(bins = 30, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
           labs(title = "Sample Missing Rate Distribution",
                x = "Missing Rate",
@@ -1861,6 +1945,11 @@ server <- function(input, output, session) {
       }
     })
     output$per_individual_plot_relatedness <- renderPlot({
+      if (!isTRUE(input$enable_relatedness)) {
+        return(ggplot() + annotate("text", x = 0.5, y = 0.5,
+                                   label = "Sample relatedness is disabled.", size = 5) +
+               theme_void())
+      }
       req(geno_data())
       data <- geno_data()
       stats <- if (summary_generated() && !is.null(summary_stats())) {
@@ -1873,17 +1962,26 @@ server <- function(input, output, session) {
                theme_void())
       }
 
-      if (!is.list(data) || !all(c("samples", "genotypes") %in% names(data))) {
+      if (!is.list(data) || !"samples" %in% names(data)) {
         return(ggplot() + annotate("text", x = 0.5, y = 0.5,
-                                   label = "Please load genotype data first", size = 5) +
+                                   label = "Sample metadata is not available", size = 5) +
                theme_void())
       }
 
-      if (!is.null(stats$individual_relatedness) &&
+      if (isTRUE(input$enable_relatedness) &&
+          !is.null(stats$individual_relatedness) &&
           is.data.frame(stats$individual_relatedness) &&
           nrow(stats$individual_relatedness) > 0 &&
           "PI_HAT" %in% names(stats$individual_relatedness)) {
-        ggplot(stats$individual_relatedness, aes_string(x = "PI_HAT")) +
+        rel_df <- stats$individual_relatedness
+        rel_df$PI_HAT <- suppressWarnings(as.numeric(rel_df$PI_HAT))
+        rel_df <- rel_df[is.finite(rel_df$PI_HAT), , drop = FALSE]
+        if (nrow(rel_df) == 0) {
+          return(ggplot() + annotate("text", x = 0.5, y = 0.5,
+                                     label = "Sample relatedness data not available", size = 5) +
+                   theme_void())
+        }
+        ggplot(rel_df, aes(x = PI_HAT)) +
           geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
           labs(title = "Sample Relatedness Distribution",
                x = "PI_HAT (Proportion IBD)",
@@ -1915,15 +2013,22 @@ server <- function(input, output, session) {
                              x = 0.5, y = 0.5, showarrow = FALSE))
       }
       
-      if (!is.list(data) || !all(c("genotypes", "map") %in% names(data))) {
+      if (!is.list(data) || !"map" %in% names(data)) {
         return(plotly_empty() %>% 
-               add_annotations(text = "Please load PLINK format data first",
+               add_annotations(text = "Marker metadata is not available",
                              x = 0.5, y = 0.5, showarrow = FALSE))
       }
       
       # Plot 1: SNP missing rate distribution
       if (!is.null(stats$marker_missing_rate)) {
-        miss_df <- data.frame(MissingRate = stats$marker_missing_rate)
+        miss_vals <- suppressWarnings(as.numeric(stats$marker_missing_rate))
+        miss_vals <- miss_vals[is.finite(miss_vals)]
+        if (length(miss_vals) == 0) {
+          return(plotly_empty() %>%
+                 add_annotations(text = "SNP missing rate data not available",
+                                 x = 0.5, y = 0.5, showarrow = FALSE))
+        }
+        miss_df <- data.frame(MissingRate = miss_vals)
         p_miss <- plot_ly() %>%
           add_histogram(data = miss_df, x = ~MissingRate,
                        nbinsx = 50,
@@ -1936,7 +2041,13 @@ server <- function(input, output, session) {
                 margin = list(t = 60, b = 60, l = 80, r = 40))
         p_miss
       } else if (!is.null(stats$call_rate)) {
-        marker_miss <- 1 - stats$call_rate
+        marker_miss <- suppressWarnings(as.numeric(1 - stats$call_rate))
+        marker_miss <- marker_miss[is.finite(marker_miss)]
+        if (length(marker_miss) == 0) {
+          return(plotly_empty() %>%
+                 add_annotations(text = "SNP missing rate data not available",
+                                 x = 0.5, y = 0.5, showarrow = FALSE))
+        }
         miss_df <- data.frame(MissingRate = marker_miss)
         p_miss <- plot_ly() %>%
           add_histogram(data = miss_df, x = ~MissingRate,
@@ -1971,14 +2082,21 @@ server <- function(input, output, session) {
                              x = 0.5, y = 0.5, showarrow = FALSE))
       }
       
-      if (!is.list(data) || !all(c("genotypes", "map") %in% names(data))) {
+      if (!is.list(data) || !"map" %in% names(data)) {
         return(plotly_empty() %>% 
-               add_annotations(text = "Please load PLINK format data first",
+               add_annotations(text = "Marker metadata is not available",
                              x = 0.5, y = 0.5, showarrow = FALSE))
       }
       
       if (!is.null(stats$maf)) {
-        maf_df <- data.frame(MAF = stats$maf)
+        maf_vals <- suppressWarnings(as.numeric(stats$maf))
+        maf_vals <- maf_vals[is.finite(maf_vals)]
+        if (length(maf_vals) == 0) {
+          return(plotly_empty() %>%
+                 add_annotations(text = "MAF data not available",
+                                 x = 0.5, y = 0.5, showarrow = FALSE))
+        }
+        maf_df <- data.frame(MAF = maf_vals)
         p_maf <- plot_ly() %>%
           add_histogram(data = maf_df, x = ~MAF,
                       nbinsx = 50,
@@ -1993,7 +2111,7 @@ server <- function(input, output, session) {
         # Add threshold line if QC has been run
         if (!is.null(qc_results()) && exists("input") && !is.null(input$maf_threshold)) {
           threshold <- input$maf_threshold
-          maf_hist <- hist(maf_df$MAF, breaks = 50, plot = FALSE)
+          maf_hist <- hist(maf_vals, breaks = 50, plot = FALSE)
           y_max <- max(maf_hist$counts)
           p_maf <- p_maf %>% 
             add_lines(x = rep(threshold, 2), y = c(0, y_max), 
@@ -2024,9 +2142,9 @@ server <- function(input, output, session) {
                              x = 0.5, y = 0.5, showarrow = FALSE))
       }
       
-      if (!is.list(data) || !all(c("genotypes", "map") %in% names(data))) {
+      if (!is.list(data) || !"map" %in% names(data)) {
         return(plotly_empty() %>% 
-               add_annotations(text = "Please load PLINK format data first",
+               add_annotations(text = "Marker metadata is not available",
                              x = 0.5, y = 0.5, showarrow = FALSE))
       }
       
@@ -2108,15 +2226,22 @@ Please run Summary or QC first",
                theme_void())
       }
       
-      if (!is.list(data) || !all(c("genotypes", "map") %in% names(data))) {
+      if (!is.list(data) || !"map" %in% names(data)) {
         return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
-                                 label = "Please load PLINK format data first", size = 5) +
+                                 label = "Marker metadata is not available", size = 5) +
                theme_void())
       }
       
       if (!is.null(stats$marker_missing_rate)) {
-        miss_df <- data.frame(MissingRate = stats$marker_missing_rate)
-        ggplot(miss_df, aes_string(x = "MissingRate")) +
+        miss_vals <- suppressWarnings(as.numeric(stats$marker_missing_rate))
+        miss_vals <- miss_vals[is.finite(miss_vals)]
+        if (length(miss_vals) == 0) {
+          return(ggplot() + annotate("text", x = 0.5, y = 0.5,
+                                     label = "SNP missing rate data not available", size = 5) +
+                   theme_void())
+        }
+        miss_df <- data.frame(MissingRate = miss_vals)
+        ggplot(miss_df, aes(x = MissingRate)) +
           geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
           labs(title = "SNP Missing Rate Distribution",
                x = "Missing Rate",
@@ -2124,9 +2249,15 @@ Please run Summary or QC first",
           theme_bw() +
           theme(plot.title = element_text(hjust = 0.5, size = 14))
       } else if (!is.null(stats$call_rate)) {
-        marker_miss <- 1 - stats$call_rate
+        marker_miss <- suppressWarnings(as.numeric(1 - stats$call_rate))
+        marker_miss <- marker_miss[is.finite(marker_miss)]
+        if (length(marker_miss) == 0) {
+          return(ggplot() + annotate("text", x = 0.5, y = 0.5,
+                                     label = "SNP missing rate data not available", size = 5) +
+                   theme_void())
+        }
         miss_df <- data.frame(MissingRate = marker_miss)
-        ggplot(miss_df, aes_string(x = "MissingRate")) +
+        ggplot(miss_df, aes(x = MissingRate)) +
           geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
           labs(title = "SNP Missing Rate Distribution",
                x = "Missing Rate",
@@ -2155,15 +2286,22 @@ Please run Summary or QC first",
                theme_void())
       }
       
-      if (!is.list(data) || !all(c("genotypes", "map") %in% names(data))) {
+      if (!is.list(data) || !"map" %in% names(data)) {
         return(ggplot() + annotate("text", x = 0.5, y = 0.5, 
-                                 label = "Please load PLINK format data first", size = 5) +
+                                 label = "Marker metadata is not available", size = 5) +
                theme_void())
       }
       
       if (!is.null(stats$maf)) {
-        maf_df <- data.frame(MAF = stats$maf)
-        p_maf <- ggplot(maf_df, aes_string(x = "MAF")) +
+        maf_vals <- suppressWarnings(as.numeric(stats$maf))
+        maf_vals <- maf_vals[is.finite(maf_vals)]
+        if (length(maf_vals) == 0) {
+          return(ggplot() + annotate("text", x = 0.5, y = 0.5,
+                                     label = "MAF data not available", size = 5) +
+                   theme_void())
+        }
+        maf_df <- data.frame(MAF = maf_vals)
+        p_maf <- ggplot(maf_df, aes(x = MAF)) +
           geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
           labs(title = "Minor Allele Frequency (MAF) Distribution",
                x = "Minor Allele Frequency",
@@ -2219,7 +2357,7 @@ Please run Summary or QC first",
               hwe_threshold <- 1e-5
               hwe_threshold_log10 <- -log10(hwe_threshold)
               
-              ggplot(hwe_df, aes_string(x = "minus_log10_p")) +
+              ggplot(hwe_df, aes(x = minus_log10_p)) +
                 geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
                 labs(title = "Hardy-Weinberg Equilibrium (HWE) Distribution",
                      x = expression(-log[10](HWE~exact~test~p-value)),
@@ -2484,6 +2622,10 @@ Please run Summary or QC first", size = 4) +
   observe({
     req(geno_data())
     data <- geno_data()
+    if (!isTRUE(input$enable_pca)) {
+      pca_result(NULL)
+      return()
+    }
 
     # Prefer PLINK PCA from summary_stats if available.
     stats <- if (summary_generated() && !is.null(summary_stats())) {
@@ -2684,7 +2826,7 @@ Please run Summary or QC first", size = 4) +
 
       pca <- pca_result()
       if (is.null(pca) || is.null(pca$scores) || nrow(pca$scores) == 0) {
-        return(empty_pca_plot("PCA not yet available. Run Summary or load data with PLINK PCA first."))
+        return(empty_pca_plot("PCA not available. Enable '--pca' and click Show Summary."))
       }
       pca_plot <- pca
       pca_plot$scores <- align_pca_scores_for_plot(pca_plot$scores)
@@ -3055,38 +3197,42 @@ Please run Summary or QC first", size = 4) +
       return(NULL)
     }
     
-    if (is.list(data) && all(c("samples", "genotypes") %in% names(data))) {
+    if (is.list(data) && "samples" %in% names(data)) {
       plots <- list()
       
       # Plot 1: Sample missing rate
       if (!is.null(stats$individual_missing_rate)) {
-        miss_df <- data.frame(MissingRate = stats$individual_missing_rate)
-        p_miss <- ggplot(miss_df, aes_string(x = "MissingRate")) +
+        miss_vals <- suppressWarnings(as.numeric(stats$individual_missing_rate))
+        miss_vals <- miss_vals[is.finite(miss_vals)]
+        if (length(miss_vals) > 0) {
+          miss_df <- data.frame(MissingRate = miss_vals)
+          p_miss <- ggplot(miss_df, aes(x = MissingRate)) +
           geom_histogram(bins = 30, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
           labs(title = "Sample Missing Rate Distribution",
                x = "Missing Rate",
                y = "Number of Samples") +
           theme_bw() +
           theme(plot.title = element_text(hjust = 0.5, size = 14))
-        
-        if (!is.null(qc_results())) {
+          plots$missing_rate <- p_miss
         }
-        
-        plots$missing_rate <- p_miss
       }
       if (!is.null(stats$individual_relatedness) &&
           is.data.frame(stats$individual_relatedness) &&
           nrow(stats$individual_relatedness) > 0 &&
           "PI_HAT" %in% names(stats$individual_relatedness)) {
         rel_df <- stats$individual_relatedness
-        p_rel <- ggplot(rel_df, aes_string(x = "PI_HAT")) +
-          geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
-          labs(title = "Sample Relatedness Distribution",
-               x = "PI_HAT (Proportion IBD)",
-               y = "Number of Sample Pairs") +
-          theme_bw() +
-          theme(plot.title = element_text(hjust = 0.5, size = 14))
-        plots$relatedness <- p_rel
+        rel_df$PI_HAT <- suppressWarnings(as.numeric(rel_df$PI_HAT))
+        rel_df <- rel_df[is.finite(rel_df$PI_HAT), , drop = FALSE]
+        if (nrow(rel_df) > 0) {
+          p_rel <- ggplot(rel_df, aes(x = PI_HAT)) +
+            geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+            labs(title = "Sample Relatedness Distribution",
+                 x = "PI_HAT (Proportion IBD)",
+                 y = "Number of Sample Pairs") +
+            theme_bw() +
+            theme(plot.title = element_text(hjust = 0.5, size = 14))
+          plots$relatedness <- p_rel
+        }
       }
       
       if (length(plots) > 0) {
@@ -3114,58 +3260,56 @@ Please run Summary or QC first", size = 4) +
       return(NULL)
     }
     
-    if (is.list(data) && all(c("genotypes", "map") %in% names(data))) {
+    if (is.list(data) && "map" %in% names(data)) {
       plots <- list()
       
       # Plot 1: SNP missing rate
       if (!is.null(stats$marker_missing_rate)) {
-        miss_df <- data.frame(MissingRate = stats$marker_missing_rate)
-        p_miss <- ggplot(miss_df, aes_string(x = "MissingRate")) +
-          geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
-          labs(title = "SNP Missing Rate Distribution",
-               x = "Missing Rate",
-               y = "Number of SNPs") +
-          theme_bw() +
-          theme(plot.title = element_text(hjust = 0.5, size = 14))
-        
-        if (!is.null(qc_results())) {
+        miss_vals <- suppressWarnings(as.numeric(stats$marker_missing_rate))
+        miss_vals <- miss_vals[is.finite(miss_vals)]
+        if (length(miss_vals) > 0) {
+          miss_df <- data.frame(MissingRate = miss_vals)
+          p_miss <- ggplot(miss_df, aes(x = MissingRate)) +
+            geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+            labs(title = "SNP Missing Rate Distribution",
+                 x = "Missing Rate",
+                 y = "Number of SNPs") +
+            theme_bw() +
+            theme(plot.title = element_text(hjust = 0.5, size = 14))
+          plots$snp_missing <- p_miss
         }
-        
-        plots$snp_missing <- p_miss
       } else if (!is.null(stats$call_rate)) {
         # Fallback
-        marker_miss <- 1 - stats$call_rate
-        miss_df <- data.frame(MissingRate = marker_miss)
-        p_miss <- ggplot(miss_df, aes_string(x = "MissingRate")) +
-          geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
-          labs(title = "SNP Missing Rate Distribution",
-               x = "Missing Rate",
-               y = "Number of SNPs") +
-          theme_bw() +
-          theme(plot.title = element_text(hjust = 0.5, size = 14))
-        
-        if (!is.null(qc_results())) {
+        marker_miss <- suppressWarnings(as.numeric(1 - stats$call_rate))
+        marker_miss <- marker_miss[is.finite(marker_miss)]
+        if (length(marker_miss) > 0) {
+          miss_df <- data.frame(MissingRate = marker_miss)
+          p_miss <- ggplot(miss_df, aes(x = MissingRate)) +
+            geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+            labs(title = "SNP Missing Rate Distribution",
+                 x = "Missing Rate",
+                 y = "Number of SNPs") +
+            theme_bw() +
+            theme(plot.title = element_text(hjust = 0.5, size = 14))
+          plots$snp_missing <- p_miss
         }
-        
-        plots$snp_missing <- p_miss
       }
       
       # Plot 2: MAF distribution
       if (!is.null(stats$maf)) {
-        maf_df <- data.frame(MAF = stats$maf)
-        p_maf <- ggplot(maf_df, aes_string(x = "MAF")) +
-          geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
-          labs(title = "Minor Allele Frequency (MAF) Distribution",
-               x = "Minor Allele Frequency",
-               y = "Number of SNPs") +
-          theme_bw() +
-          theme(plot.title = element_text(hjust = 0.5, size = 14))
-        
-        if (!is.null(qc_results())) {
-            geom_vline(xintercept = input$maf_threshold, linetype = "dashed", color = "red", linewidth = 1)
+        maf_vals <- suppressWarnings(as.numeric(stats$maf))
+        maf_vals <- maf_vals[is.finite(maf_vals)]
+        if (length(maf_vals) > 0) {
+          maf_df <- data.frame(MAF = maf_vals)
+          p_maf <- ggplot(maf_df, aes(x = MAF)) +
+            geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+            labs(title = "Minor Allele Frequency (MAF) Distribution",
+                 x = "Minor Allele Frequency",
+                 y = "Number of SNPs") +
+            theme_bw() +
+            theme(plot.title = element_text(hjust = 0.5, size = 14))
+          plots$maf <- p_maf
         }
-        
-        plots$maf <- p_maf
       }
       
       # Plot 3: HWE p-value distribution
@@ -3192,7 +3336,7 @@ Please run Summary or QC first", size = 4) +
               hwe_threshold_log10 <- -log10(hwe_threshold)
               
               # Plot HWE histogram with -log10(p-value) on x-axis
-              p_hwe <- ggplot(hwe_df, aes_string(x = "minus_log10_p")) +
+              p_hwe <- ggplot(hwe_df, aes(x = minus_log10_p)) +
                 geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
                 labs(title = "Hardy-Weinberg Equilibrium (HWE) Distribution",
                      x = expression(-log[10](HWE~exact~test~p-value)),
@@ -3639,55 +3783,7 @@ Please run Summary or QC first", size = 4) +
   )
 }
 
-# Read VCF file into internal format
-read_vcf_file <- function(vcf_path) {
-  if (!requireNamespace("vcfR", quietly = TRUE)) {
-    stop("vcfR package is required to read VCF files.")
-  }
-  
-  vcf <- vcfR::read.vcfR(vcf_path, verbose = FALSE)
-  gt <- vcfR::extract.gt(vcf, element = "GT", as.numeric = FALSE)
-  if (is.null(gt) || nrow(gt) == 0) {
-    stop("No genotype data found in VCF.")
-  }
-  
-  # Convert GT to numeric minor allele counts (0/1/2)
-  geno_matrix <- matrix(NA_real_, nrow = nrow(gt), ncol = ncol(gt))
-  for (i in seq_len(nrow(gt))) {
-    for (j in seq_len(ncol(gt))) {
-      g <- gt[i, j]
-      if (is.na(g) || g == "." || g == "./." || g == ".|.") {
-        geno_matrix[i, j] <- NA_real_
-      } else {
-        alleles <- unlist(strsplit(g, "[/|]"))
-        if (length(alleles) == 2 && all(alleles %in% c("0", "1"))) {
-          geno_matrix[i, j] <- as.numeric(alleles[1]) + as.numeric(alleles[2])
-        } else {
-          geno_matrix[i, j] <- NA_real_
-        }
-      }
-    }
-  }
-  
-  geno_matrix <- t(geno_matrix)  # samples x markers
-  colnames(geno_matrix) <- vcf@fix[, "ID"]
-  
-  map <- data.frame(
-    Chromosome = vcf@fix[, "CHROM"],
-    SNP_ID = ifelse(vcf@fix[, "ID"] == ".", paste0(vcf@fix[, "CHROM"], ":", vcf@fix[, "POS"]), vcf@fix[, "ID"]),
-    Genetic_Distance = 0,
-    Physical_Position = as.integer(vcf@fix[, "POS"]),
-    stringsAsFactors = FALSE
-  )
-  
-  samples <- data.frame(
-    Family_ID = colnames(gt),
-    Sample_ID = colnames(gt),
-    stringsAsFactors = FALSE
-  )
-  
-  list(samples = samples, genotypes = geno_matrix, map = map)
-}
+# VCF reading functionality has been removed for performance optimization
 
 # Read PLINK BED/BIM/FAM into internal format
 read_plink_bed <- function(bed_path, bim_path, fam_path) {
@@ -3730,8 +3826,8 @@ read_plink_bed <- function(bed_path, bim_path, fam_path) {
   list(samples = samples, genotypes = geno_matrix, map = map)
 }
 
-# Read BLUPF90 TXT + MAP into internal format (numeric genotypes)
-read_blupf90_txt <- function(txt_path, map_path) {
+# Read and clean BLUPF90 map file.
+read_blupf90_map <- function(map_path) {
   map_data <- if (use_data_table && requireNamespace("data.table", quietly = TRUE)) {
     data.table::fread(map_path, header = FALSE, data.table = FALSE, showProgress = FALSE)
   } else {
@@ -3755,7 +3851,57 @@ read_blupf90_txt <- function(txt_path, map_path) {
     stop("BLUPF90 map file has no marker rows after cleaning.", call. = FALSE)
   }
   colnames(map_data) <- c("Chromosome", "SNP_ID", "Genetic_Distance", "Physical_Position")
-  
+  map_data
+}
+
+# Fast metadata reader for BLUPF90 TXT + MAP (sample IDs + marker map only).
+read_blupf90_txt_metadata <- function(txt_path, map_path) {
+  map_data <- read_blupf90_map(map_path)
+
+  sample_col <- if (use_data_table && requireNamespace("data.table", quietly = TRUE)) {
+    data.table::fread(
+      txt_path,
+      header = FALSE,
+      select = 1L,
+      data.table = FALSE,
+      showProgress = FALSE,
+      colClasses = "character"
+    )
+  } else {
+    lines <- readLines(txt_path, warn = FALSE)
+    if (length(lines) == 0) {
+      data.frame(V1 = character(0), stringsAsFactors = FALSE)
+    } else {
+      tok <- sub("\\s+.*$", "", trimws(lines))
+      data.frame(V1 = tok, stringsAsFactors = FALSE)
+    }
+  }
+
+  sample_col <- as.data.frame(sample_col, stringsAsFactors = FALSE)
+  if (ncol(sample_col) < 1) {
+    stop("BLUPF90 txt file must contain at least one ID column.", call. = FALSE)
+  }
+  ids <- trimws(as.character(sample_col[[1]]))
+  ids <- ids[!is.na(ids) & nzchar(ids)]
+  if (length(ids) > 0 && grepl("id|sample|animal", tolower(ids[1]))) {
+    ids <- ids[-1]
+  }
+  if (length(ids) == 0) {
+    stop("BLUPF90 txt file has no usable sample IDs after cleaning.", call. = FALSE)
+  }
+
+  sample_ids <- data.frame(
+    Family_ID = ids,
+    Sample_ID = ids,
+    stringsAsFactors = FALSE
+  )
+  list(samples = sample_ids, map = map_data, genotypes = NULL)
+}
+
+# Read BLUPF90 TXT + MAP into internal format (numeric genotypes)
+read_blupf90_txt <- function(txt_path, map_path) {
+  map_data <- read_blupf90_map(map_path)
+
   geno_data <- if (use_data_table && requireNamespace("data.table", quietly = TRUE)) {
     data.table::fread(
       txt_path,
@@ -3910,6 +4056,21 @@ get_plink_input_args <- function(data, prefix = NULL) {
         file.exists(src$ped) && file.exists(src$map)) {
       return(c("--ped", src$ped, "--map", src$map))
     }
+    if (identical(src$type, "blupf90_txt") &&
+        !is.null(src$txt) && !is.null(src$map) &&
+        file.exists(src$txt) && file.exists(src$map) &&
+        !is.null(prefix) && nzchar(prefix)) {
+      ok <- write_blupf90_txt_as_plink_files(
+        prefix = prefix,
+        txt_path = src$txt,
+        map_path = src$map,
+        target_samples = if (!is.null(data$samples)) data$samples else NULL,
+        target_map = if (!is.null(data$map)) data$map else NULL
+      )
+      if (isTRUE(ok)) {
+        return(c("--file", prefix))
+      }
+    }
   }
 
   if (!is.null(prefix) && nzchar(prefix)) {
@@ -3925,6 +4086,46 @@ get_plink_input_args <- function(data, prefix = NULL) {
   }
 
   NULL
+}
+
+# Materialize BLUPF90 TXT/MAP as temporary PLINK text files.
+# This keeps upload/reading lightweight and defers heavy conversion until needed.
+write_blupf90_txt_as_plink_files <- function(prefix, txt_path, map_path, target_samples = NULL, target_map = NULL) {
+  blup_data <- tryCatch({
+    read_blupf90_txt(txt_path, map_path)
+  }, error = function(e) {
+    cat("Warning: failed to parse BLUPF90 input for PLINK conversion:", e$message, "\n")
+    NULL
+  })
+  if (is.null(blup_data) || !is.list(blup_data) ||
+      !all(c("samples", "genotypes", "map") %in% names(blup_data))) {
+    return(FALSE)
+  }
+
+  # Align marker order to already-filtered target map when possible.
+  if (is.data.frame(target_map) && nrow(target_map) > 0 && nrow(blup_data$map) > 0) {
+    src_ids <- as.character(blup_data$map$SNP_ID)
+    tgt_ids <- as.character(target_map$SNP_ID)
+    idx <- match(tgt_ids, src_ids)
+    if (all(!is.na(idx))) {
+      blup_data$map <- blup_data$map[idx, , drop = FALSE]
+      blup_data$genotypes <- blup_data$genotypes[, idx, drop = FALSE]
+    }
+  }
+
+  # Align sample order to current target samples when possible.
+  if (is.data.frame(target_samples) && "Sample_ID" %in% names(target_samples) &&
+      nrow(target_samples) > 0 && nrow(blup_data$samples) > 0) {
+    src_sid <- as.character(blup_data$samples$Sample_ID)
+    tgt_sid <- as.character(target_samples$Sample_ID)
+    sidx <- match(tgt_sid, src_sid)
+    if (all(!is.na(sidx))) {
+      blup_data$samples <- blup_data$samples[sidx, , drop = FALSE]
+      blup_data$genotypes <- blup_data$genotypes[sidx, , drop = FALSE]
+    }
+  }
+
+  write_plink_text_files(prefix, blup_data)
 }
 
 get_plink_chr_args <- function(data) {
@@ -4474,19 +4675,20 @@ calculate_individual_call_rate <- function(data, geno_matrix = NULL, call_rate_p
   gvr_individual_call_rate(geno_matrix)
 }
 
-# Calculate all statistics using plink commands (via plinkR)
-# This function runs plink --missing, --freq, --hardy, --het, and --pca.
-calculate_all_stats_plink <- function(data) {
+# Calculate all statistics using PLINK commands (via plinkR).
+# Core stats: --missing --freq --hardy --het
+# Optional heavy stats: --pca and --genome
+calculate_all_stats_plink <- function(data, include_relatedness = FALSE, include_pca = TRUE) {
   if (!is.list(data) || !all(c("samples", "map") %in% names(data))) {
     return(NULL)
   }
   if (!is.null(data$input_format) && !data$input_format %in% c("plink_ped", "plink_bed", "blupf90_txt")) {
-    return(calculate_all_stats_r(data))
+    return(calculate_all_stats_r(data, include_relatedness = include_relatedness))
   }
   
   plink_path <- find_plink_path()
   if (is.null(plink_path)) {
-    if (!is.null(data$genotypes)) return(calculate_all_stats_r(data))
+    if (!is.null(data$genotypes)) return(calculate_all_stats_r(data, include_relatedness = include_relatedness))
     return(NULL)
   }
   
@@ -4496,13 +4698,13 @@ calculate_all_stats_plink <- function(data) {
     dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
     prefix <- file.path(tmp_dir, "temp_data")
 
-    input_args <- get_plink_input_args(data)
+    input_args <- get_plink_input_args(data, prefix = prefix)
     if (is.null(input_args)) {
       if (!is.null(data$genotypes) && write_plink_text_files(prefix, data)) {
         input_args <- c("--file", prefix)
       } else {
         unlink(tmp_dir, recursive = TRUE, force = TRUE)
-        if (!is.null(data$genotypes)) return(calculate_all_stats_r(data))
+        if (!is.null(data$genotypes)) return(calculate_all_stats_r(data, include_relatedness = include_relatedness))
         return(NULL)
       }
     }
@@ -4510,28 +4712,30 @@ calculate_all_stats_plink <- function(data) {
     
     stats_output <- paste0(prefix, "_stats")
     
-    # Run plink --missing --freq --hardy --het --pca together (combined for efficiency)
-    # This combines five commands into one to reduce file I/O and startup overhead
+    # Run PLINK core stats first.
     # Add timeout to prevent hanging
     plink_start_time <- Sys.time()
     plink_success <- FALSE
+    core_args <- c(
+      input_args,
+      "--allow-extra-chr",
+      "--nonfounders",
+      chr_args,
+      "--missing",
+      "--freq",
+      "--hardy",
+      "--het"
+    )
+    if (isTRUE(include_pca)) {
+      core_args <- c(core_args, "--pca")
+    }
+    core_args <- c(core_args, "--out", stats_output)
     if (requireNamespace("R.utils", quietly = TRUE)) {
       tryCatch({
         R.utils::withTimeout({
           result <- system2(
             plink_path,
-            args = c(
-              input_args,
-              "--allow-extra-chr",
-              "--nonfounders",
-              chr_args,
-              "--missing",
-              "--freq",
-              "--hardy",
-              "--het",
-              "--pca",
-              "--out", stats_output
-            ),
+            args = core_args,
             stdout = FALSE,
             stderr = FALSE
           )
@@ -4546,18 +4750,7 @@ calculate_all_stats_plink <- function(data) {
       # Fallback without timeout
       result <- system2(
         plink_path,
-        args = c(
-          input_args,
-          "--allow-extra-chr",
-          "--nonfounders",
-          chr_args,
-          "--missing",
-          "--freq",
-          "--hardy",
-          "--het",
-          "--pca",
-          "--out", stats_output
-        ),
+        args = core_args,
         stdout = FALSE,
         stderr = FALSE
       )
@@ -4570,7 +4763,7 @@ calculate_all_stats_plink <- function(data) {
       }
     }
     
-    # Check if PLINK output files were created (PCA files are optional)
+    # Check if PLINK output files were created.
     if (!plink_success || 
         !file.exists(paste0(stats_output, ".imiss")) ||
         !file.exists(paste0(stats_output, ".lmiss")) ||
@@ -4580,10 +4773,13 @@ calculate_all_stats_plink <- function(data) {
       cat("PLINK command failed or output files missing
 ")
       unlink(tmp_dir, recursive = TRUE, force = TRUE)
+      if (!is.null(data$genotypes)) {
+        return(calculate_all_stats_r(data, include_relatedness = include_relatedness))
+      }
       return(NULL)
     }
     
-    # Read PCA results if available (--pca generates .eigenvec and .eigenval files)
+    # Read PCA results if requested (--pca generates .eigenvec and .eigenval files)
     pca_scores <- NULL
     pca_variance <- NULL
     pca_eigenvalues <- NULL
@@ -4591,7 +4787,7 @@ calculate_all_stats_plink <- function(data) {
     eigenvec_file <- paste0(stats_output, ".eigenvec")
     eigenval_file <- paste0(stats_output, ".eigenval")
     
-    if (file.exists(eigenvec_file) && file.exists(eigenval_file)) {
+    if (isTRUE(include_pca) && file.exists(eigenvec_file) && file.exists(eigenval_file)) {
       tryCatch({
         # Read .eigenvec file: FID IID PC1 PC2 PC3 ...
         eigenvec_data <- read.table(eigenvec_file, header = FALSE, stringsAsFactors = FALSE, sep = "")
@@ -4624,11 +4820,33 @@ calculate_all_stats_plink <- function(data) {
     # Note: --hardy output will be in stats_output.hwe (not stats_output_hwe.hwe)
     # We'll adjust the file reading accordingly
 
-    # Run PLINK IBD/relatedness (--genome)
-    genome_output <- paste0(stats_output, "_genome")
-    if (requireNamespace("R.utils", quietly = TRUE)) {
-      tryCatch({
-        R.utils::withTimeout({
+    genome_output <- NULL
+    if (isTRUE(include_relatedness)) {
+      # Run PLINK IBD/relatedness (--genome) only when user explicitly enables it.
+      genome_output <- paste0(stats_output, "_genome")
+      if (requireNamespace("R.utils", quietly = TRUE)) {
+        tryCatch({
+          R.utils::withTimeout({
+            system2(
+              plink_path,
+              args = c(
+                input_args,
+                "--allow-extra-chr",
+                "--nonfounders",
+                chr_args,
+                "--genome",
+                "--out", genome_output
+              ),
+              stdout = FALSE,
+              stderr = FALSE
+            )
+          }, timeout = 180)
+        }, error = function(e) {
+          cat("Warning: PLINK --genome did not complete:", e$message, "
+")
+        })
+      } else {
+        tryCatch({
           system2(
             plink_path,
             args = c(
@@ -4642,30 +4860,11 @@ calculate_all_stats_plink <- function(data) {
             stdout = FALSE,
             stderr = FALSE
           )
-        }, timeout = 180)
-      }, error = function(e) {
-        cat("Warning: PLINK --genome did not complete:", e$message, "
+        }, error = function(e) {
+          cat("Warning: PLINK --genome failed:", e$message, "
 ")
-      })
-    } else {
-      tryCatch({
-        system2(
-          plink_path,
-          args = c(
-            input_args,
-            "--allow-extra-chr",
-            "--nonfounders",
-            chr_args,
-            "--genome",
-            "--out", genome_output
-          ),
-          stdout = FALSE,
-          stderr = FALSE
-        )
-      }, error = function(e) {
-        cat("Warning: PLINK --genome failed:", e$message, "
-")
-      })
+        })
+      }
     }
     
     # Read results and extract statistics
@@ -4840,18 +5039,20 @@ calculate_all_stats_plink <- function(data) {
       }
     }
 
-    # Read .genome (sample relatedness / IBD estimates)
-    genome_file <- paste0(genome_output, ".genome")
-    if (file.exists(genome_file)) {
-      tryCatch({
-        genome_data <- read.table(genome_file, header = TRUE, stringsAsFactors = FALSE, sep = "")
-        if (is.data.frame(genome_data) && nrow(genome_data) > 0 && "PI_HAT" %in% names(genome_data)) {
-          results$individual_relatedness <- genome_data
-        }
-      }, error = function(e) {
-        cat("Warning: failed to read .genome file:", e$message, "
+    if (isTRUE(include_relatedness) && !is.null(genome_output)) {
+      # Read .genome (sample relatedness / IBD estimates)
+      genome_file <- paste0(genome_output, ".genome")
+      if (file.exists(genome_file)) {
+        tryCatch({
+          genome_data <- read.table(genome_file, header = TRUE, stringsAsFactors = FALSE, sep = "")
+          if (is.data.frame(genome_data) && nrow(genome_data) > 0 && "PI_HAT" %in% names(genome_data)) {
+            results$individual_relatedness <- genome_data
+          }
+        }, error = function(e) {
+          cat("Warning: failed to read .genome file:", e$message, "
 ")
-      })
+        })
+      }
     }
     
     # Clean up temporary files
@@ -4904,14 +5105,14 @@ calculate_all_stats_plink <- function(data) {
     # On error, log and return NULL (will trigger error message in UI)
     cat("Error in calculate_all_stats_plink:", e$message, "
 ")
-    if (!is.null(data$genotypes)) return(calculate_all_stats_r(data))
+    if (!is.null(data$genotypes)) return(calculate_all_stats_r(data, include_relatedness = include_relatedness))
     return(NULL)
   })
 }
 
 # Calculate all statistics using local fallback (Rcpp-backed for numeric genotypes)
 # Used when PLINK is unavailable.
-calculate_all_stats_r <- function(data) {
+calculate_all_stats_r <- function(data, include_relatedness = FALSE) {
   if (!is.list(data) || !all(c("samples", "genotypes", "map") %in% names(data))) {
     return(NULL)
   }
@@ -4920,9 +5121,7 @@ calculate_all_stats_r <- function(data) {
     
     data <- prepare_numeric_genotypes(data)
     geno_num <- data$genotypes_numeric
-    relatedness_geno <- get_plink_aligned_numeric_genotypes(data)
-    if (is.null(relatedness_geno)) relatedness_geno <- geno_num
-    if (is.null(geno_num)) geno_num <- relatedness_geno
+    if (is.null(geno_num)) geno_num <- get_plink_aligned_numeric_genotypes(data)
     if (is.null(geno_num)) return(NULL)
     call_rate_pair <- get_plink_aligned_call_rates(data)
     maf_values <- get_plink_aligned_maf(data)
@@ -4971,8 +5170,13 @@ calculate_all_stats_r <- function(data) {
       hwe_values = hwe_values
     )
     
-    cat("  [6/7] Computing sample relatedness (this may take a while)...\n")
-    results$individual_relatedness <- calculate_sample_relatedness(data, geno_num = relatedness_geno)
+    if (isTRUE(include_relatedness)) {
+      cat("  [6/7] Computing sample relatedness (this may take a while)...\n")
+      results$individual_relatedness <- calculate_sample_relatedness(data, geno_num = geno_num)
+    } else {
+      cat("  [6/7] Skipping sample relatedness (--genome disabled).\n")
+      results$individual_relatedness <- NULL
+    }
     
     cat("  [7/7] Statistical calculations completed!\n")
     
@@ -5000,7 +5204,7 @@ calculate_sample_relatedness <- function(data, geno_num = NULL) {
       dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
       on.exit(unlink(tmp_dir, recursive = TRUE, force = TRUE), add = TRUE)
       prefix <- file.path(tmp_dir, "temp_data")
-      input_args <- get_plink_input_args(data)
+      input_args <- get_plink_input_args(data, prefix = prefix)
       if (is.null(input_args)) {
         if (!write_plink_text_files(prefix, data)) return(NULL)
         input_args <- c("--file", prefix)
@@ -5106,7 +5310,7 @@ calculate_hwe_plink <- function(data) {
     dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
     prefix <- file.path(tmp_dir, "temp_data")
 
-    input_args <- get_plink_input_args(data)
+    input_args <- get_plink_input_args(data, prefix = prefix)
     if (is.null(input_args)) {
       if (!write_plink_text_files(prefix, data)) {
         unlink(tmp_dir, recursive = TRUE, force = TRUE)

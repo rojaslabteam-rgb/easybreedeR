@@ -60,17 +60,66 @@ derive_plink_prefix <- function(file_names) {
 # This mirrors PLINK-style additive coding (0/1/2 minor-allele copies; 5 for missing).
 use_rcpp_blup_convert <- FALSE
 eb_ped_to_blup_codes_cpp_fn <- NULL
-tryCatch({
-  ns <- asNamespace("easybreedeR")
-  if (exists("eb_ped_to_blup_codes_cpp", mode = "function", envir = ns, inherits = FALSE)) {
-    eb_ped_to_blup_codes_cpp_fn <- get("eb_ped_to_blup_codes_cpp", envir = ns, inherits = FALSE)
-    use_rcpp_blup_convert <- TRUE
-    message("Rcpp backend available - PLINK-compatible fallback conversion enabled")
+rcpp_target_env <- environment()
+
+resolve_src_root <- function() {
+  wd <- getwd()
+  roots <- unique(vapply(
+    c(wd, file.path(wd, ".."), file.path(wd, "..", "..")),
+    function(p) normalizePath(p, winslash = "/", mustWork = FALSE),
+    character(1)
+  ))
+  for (root in roots) {
+    if (file.exists(file.path(root, "src", "plink_blup_convert.cpp"))) {
+      return(root)
+    }
   }
-}, error = function(e) {
-  use_rcpp_blup_convert <- FALSE
-  eb_ped_to_blup_codes_cpp_fn <- NULL
-})
+  NULL
+}
+
+load_rcpp_blup_backend <- function() {
+  fn <- tryCatch({
+    if (requireNamespace("easybreedeR", quietly = TRUE)) {
+      ns <- asNamespace("easybreedeR")
+      if (exists("eb_ped_to_blup_codes_cpp", mode = "function", envir = ns, inherits = FALSE)) {
+        return(get("eb_ped_to_blup_codes_cpp", envir = ns, inherits = FALSE))
+      }
+    }
+    NULL
+  }, error = function(e) NULL)
+  if (is.function(fn)) {
+    return(fn)
+  }
+
+  # Fallback for source deployments (e.g., shinyapps.io).
+  if (!requireNamespace("Rcpp", quietly = TRUE)) {
+    return(NULL)
+  }
+  src_root <- resolve_src_root()
+  cpp_file <- if (!is.null(src_root)) file.path(src_root, "src", "plink_blup_convert.cpp") else ""
+  if (!nzchar(cpp_file) || !file.exists(cpp_file)) {
+    return(NULL)
+  }
+  ok <- isTRUE(tryCatch({
+    Rcpp::sourceCpp(cpp_file, env = rcpp_target_env, rebuild = FALSE, showOutput = FALSE, verbose = FALSE)
+    TRUE
+  }, error = function(e) FALSE))
+  if (!ok) {
+    return(NULL)
+  }
+  if (exists("eb_ped_to_blup_codes_cpp", mode = "function", envir = rcpp_target_env, inherits = FALSE)) {
+    return(get("eb_ped_to_blup_codes_cpp", envir = rcpp_target_env, inherits = FALSE))
+  }
+  NULL
+}
+
+eb_ped_to_blup_codes_cpp_fn <- load_rcpp_blup_backend()
+use_rcpp_blup_convert <- is.function(eb_ped_to_blup_codes_cpp_fn)
+if (use_rcpp_blup_convert) {
+  message("Rcpp backend available - PLINK-compatible fallback conversion enabled")
+} else {
+  message("Rcpp backend unavailable; fallback converter is disabled")
+}
 
 convert_plink_to_blupf90_rcpp <- function(ped_path, map_path, out_prefix) {
   if (!is.function(eb_ped_to_blup_codes_cpp_fn)) {
