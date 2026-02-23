@@ -1824,8 +1824,10 @@ FILE_POS
       if (input$opt_store_accuracy_orig) line <- paste(line, "orig")
       options <- c(options, line)
     }
-    # Removed from default generation: OPTION acctype
-    # if (!is.null(input$opt_acctype) && nzchar(input$opt_acctype)) options <- c(options, paste("OPTION acctype", input$opt_acctype))
+    # acctype: keep default behavior when 1.0 (no line), emit only when 0.5
+    if (!is.null(input$opt_acctype) && nzchar(input$opt_acctype) && identical(input$opt_acctype, "0.5")) {
+      options <- c(options, "OPTION acctype 0.5")
+    }
     if (isTRUE(input$opt_correct_acc_inb_direct0)) options <- c(options, "OPTION correct_accuracy_by_inbreeding_direct 0")
     
     # Heterogeneous residuals
