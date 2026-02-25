@@ -245,14 +245,15 @@ BEGIN_RCPP
 END_RCPP
 }
 // eb_ped_to_blup_codes_cpp
-List eb_ped_to_blup_codes_cpp(CharacterMatrix allele1, CharacterMatrix allele2);
-RcppExport SEXP _easybreedeR_eb_ped_to_blup_codes_cpp(SEXP allele1SEXP, SEXP allele2SEXP) {
+List eb_ped_to_blup_codes_cpp(CharacterMatrix allele1, CharacterMatrix allele2, std::string counted_allele);
+RcppExport SEXP _easybreedeR_eb_ped_to_blup_codes_cpp(SEXP allele1SEXP, SEXP allele2SEXP, SEXP counted_alleleSEXP) {
 BEGIN_RCPP
     Rcpp::RObject rcpp_result_gen;
     Rcpp::RNGScope rcpp_rngScope_gen;
     Rcpp::traits::input_parameter< CharacterMatrix >::type allele1(allele1SEXP);
     Rcpp::traits::input_parameter< CharacterMatrix >::type allele2(allele2SEXP);
-    rcpp_result_gen = Rcpp::wrap(eb_ped_to_blup_codes_cpp(allele1, allele2));
+    Rcpp::traits::input_parameter< std::string >::type counted_allele(counted_alleleSEXP);
+    rcpp_result_gen = Rcpp::wrap(eb_ped_to_blup_codes_cpp(allele1, allele2, counted_allele));
     return rcpp_result_gen;
 END_RCPP
 }
@@ -331,7 +332,7 @@ static const R_CallMethodDef CallEntries[] = {
     {"_easybreedeR_fast_descendant_summary", (DL_FUNC) &_easybreedeR_fast_descendant_summary, 3},
     {"_easybreedeR_fast_inbreeding_cpp", (DL_FUNC) &_easybreedeR_fast_inbreeding_cpp, 3},
     {"_easybreedeR_fast_top_contrib_cpp", (DL_FUNC) &_easybreedeR_fast_top_contrib_cpp, 7},
-    {"_easybreedeR_eb_ped_to_blup_codes_cpp", (DL_FUNC) &_easybreedeR_eb_ped_to_blup_codes_cpp, 2},
+    {"_easybreedeR_eb_ped_to_blup_codes_cpp", (DL_FUNC) &_easybreedeR_eb_ped_to_blup_codes_cpp, 3},
     {"_easybreedeR_gvr_call_rate_from_ped_strings_cpp", (DL_FUNC) &_easybreedeR_gvr_call_rate_from_ped_strings_cpp, 1},
     {"_easybreedeR_gvr_maf_from_ped_strings_cpp", (DL_FUNC) &_easybreedeR_gvr_maf_from_ped_strings_cpp, 1},
     {"_easybreedeR_gvr_hwe_from_ped_strings_cpp", (DL_FUNC) &_easybreedeR_gvr_hwe_from_ped_strings_cpp, 1},

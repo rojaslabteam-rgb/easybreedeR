@@ -11,6 +11,8 @@ using namespace Rcpp;
 
 namespace {
 
+const char* PED_DOT_AS_ALLELE_SENTINEL = "__PLINK_PED_DOT_ALLELE__";
+
 std::string trim_copy(const std::string& x) {
   std::string s = x;
   auto not_space = [](unsigned char ch) { return !std::isspace(ch); };
@@ -34,8 +36,29 @@ std::string normalize_allele(SEXP x) {
   return upper_copy(s);
 }
 
+// PLINK .ped parsing can preserve "." as an actual allele (it later appears as
+// "0" in BIM/RAW labels), distinct from the default missing genotype code "0".
+// Keep a private sentinel to avoid conflating "." with missing during coding.
+std::string normalize_allele_for_plink_ped(SEXP x) {
+  std::string s = normalize_allele(x);
+  if (s == ".") return PED_DOT_AS_ALLELE_SENTINEL;
+  return s;
+}
+
+std::string plink_ped_output_allele_label(const std::string& a) {
+  if (a == PED_DOT_AS_ALLELE_SENTINEL) return "0";
+  return a;
+}
+
 bool is_missing_allele(const std::string& a) {
   return a.empty() || a == "0" || a == "NA" || a == "N" || a == "." || a == "-9";
+}
+
+// PLINK .ped default missing genotype code is "0" (unless --missing-genotype
+// is specified). To mirror plink/plinkR conversion behavior, do not treat
+// strings like N/NA/./-9 as missing here.
+bool is_missing_allele_plink_ped_default(const std::string& a) {
+  return a.empty() || a == "0";
 }
 
 bool parse_ped_pair(const std::string& s_in, std::string& a, std::string& b) {
@@ -111,12 +134,20 @@ double hwe_exact_pvalue_local(int obs_hets, int obs_hom1, int obs_hom2) {
 // - dosage: 0/1/2 for A1 copies, 5 for missing/unusable
 // - a1/a2: PLINK-like minor/major allele labels for each marker
 // [[Rcpp::export]]
-List eb_ped_to_blup_codes_cpp(CharacterMatrix allele1, CharacterMatrix allele2) {
+List eb_ped_to_blup_codes_cpp(CharacterMatrix allele1, CharacterMatrix allele2,
+                              std::string counted_allele = "A1") {
   const int n_samples = allele1.nrow();
   const int n_markers = allele1.ncol();
   if (allele2.nrow() != n_samples || allele2.ncol() != n_markers) {
     stop("allele1 and allele2 must have the same dimensions");
   }
+
+  counted_allele = upper_copy(trim_copy(counted_allele));
+  if (counted_allele.empty()) counted_allele = "A1";
+  if (counted_allele != "A1" && counted_allele != "A2") {
+    stop("counted_allele must be 'A1' or 'A2'");
+  }
+  const bool count_a2 = (counted_allele == "A2");
 
   IntegerMatrix dosage(n_samples, n_markers);
   CharacterVector a1_out(n_markers);
@@ -128,16 +159,16 @@ List eb_ped_to_blup_codes_cpp(CharacterMatrix allele1, CharacterMatrix allele2) 
     int seen_rank = 0;
 
     for (int i = 0; i < n_samples; ++i) {
-      const std::string a = normalize_allele(allele1(i, j));
-      const std::string b = normalize_allele(allele2(i, j));
+      const std::string a = normalize_allele_for_plink_ped(allele1(i, j));
+      const std::string b = normalize_allele_for_plink_ped(allele2(i, j));
 
-      if (!is_missing_allele(a)) {
+      if (!is_missing_allele_plink_ped_default(a)) {
         if (first_seen.find(a) == first_seen.end()) {
           first_seen[a] = seen_rank++;
         }
         ++allele_count[a];
       }
-      if (!is_missing_allele(b)) {
+      if (!is_missing_allele_plink_ped_default(b)) {
         if (first_seen.find(b) == first_seen.end()) {
           first_seen[b] = seen_rank++;
         }
@@ -169,37 +200,61 @@ List eb_ped_to_blup_codes_cpp(CharacterMatrix allele1, CharacterMatrix allele2) 
       a1 = "0";
       a2 = alleles[0].first;
     } else {
-      const std::string major = alleles[0].first;
-      const std::string second = alleles[1].first;
-      const int major_count = alleles[0].second;
-      const int second_count = alleles[1].second;
+      const std::string keep1 = alleles[0].first;
+      const std::string keep2 = alleles[1].first;
 
-      if (major_count == second_count) {
-        // Tie-break to mirror PLINK's stable behavior: later-seen allele becomes A1.
-        const int major_rank = first_seen[major];
-        const int second_rank = first_seen[second];
-        if (major_rank < second_rank) {
-          a1 = second;
-          a2 = major;
-        } else {
-          a1 = major;
-          a2 = second;
+      // PLINK assigns A1/A2 after rare alleles are dropped and any genotype
+      // carrying a dropped allele becomes missing. This can change the effective
+      // minor/major ordering compared with the raw per-allele counts.
+      int keep1_eff_count = 0;
+      int keep2_eff_count = 0;
+      for (int i = 0; i < n_samples; ++i) {
+        const std::string x = normalize_allele_for_plink_ped(allele1(i, j));
+        const std::string y = normalize_allele_for_plink_ped(allele2(i, j));
+        if (is_missing_allele_plink_ped_default(x) || is_missing_allele_plink_ped_default(y)) {
+          continue;
         }
+        const bool x_known = (x == keep1 || x == keep2);
+        const bool y_known = (y == keep1 || y == keep2);
+        if (!x_known || !y_known) {
+          continue;
+        }
+        keep1_eff_count += static_cast<int>(x == keep1) + static_cast<int>(y == keep1);
+        keep2_eff_count += static_cast<int>(x == keep2) + static_cast<int>(y == keep2);
+      }
+
+      if (keep1_eff_count == 0 && keep2_eff_count == 0) {
+        // Pathological corner case; fall back to pre-drop counts to keep output deterministic.
+        keep1_eff_count = alleles[0].second;
+        keep2_eff_count = alleles[1].second;
+      }
+
+      if (keep1_eff_count == keep2_eff_count) {
+        // If post-pruning effective counts tie, PLINK keeps the preselected
+        // top-two order (A1=second, A2=top) instead of re-breaking the tie by
+        // first-seen rank on the pruned counts.
+        a1 = keep2;
+        a2 = keep1;
       } else {
         // A1 is minor, A2 is major.
-        a1 = second;
-        a2 = major;
+        if (keep1_eff_count < keep2_eff_count) {
+          a1 = keep1;
+          a2 = keep2;
+        } else {
+          a1 = keep2;
+          a2 = keep1;
+        }
       }
     }
 
-    a1_out[j] = a1;
-    a2_out[j] = a2;
+    a1_out[j] = plink_ped_output_allele_label(a1);
+    a2_out[j] = plink_ped_output_allele_label(a2);
 
     for (int i = 0; i < n_samples; ++i) {
-      const std::string x = normalize_allele(allele1(i, j));
-      const std::string y = normalize_allele(allele2(i, j));
+      const std::string x = normalize_allele_for_plink_ped(allele1(i, j));
+      const std::string y = normalize_allele_for_plink_ped(allele2(i, j));
 
-      if (is_missing_allele(x) || is_missing_allele(y)) {
+      if (is_missing_allele_plink_ped_default(x) || is_missing_allele_plink_ped_default(y)) {
         dosage(i, j) = 5;
         continue;
       }
@@ -222,14 +277,25 @@ List eb_ped_to_blup_codes_cpp(CharacterMatrix allele1, CharacterMatrix allele2) 
         continue;
       }
 
-      dosage(i, j) = static_cast<int>(x == a1) + static_cast<int>(y == a1);
+      int d = static_cast<int>(x == a1) + static_cast<int>(y == a1);
+      if (count_a2) d = 2 - d;
+      dosage(i, j) = d;
+    }
+
+    if (count_a2 && a1 == "0") {
+      // Preserve PLINK2-style A2-count flip behavior for monomorphic variants:
+      // valid A2/A2 genotypes become 2 instead of 0 (missing remains 5).
+      for (int i = 0; i < n_samples; ++i) {
+        if (dosage(i, j) != 5) dosage(i, j) = 2 - dosage(i, j);
+      }
     }
   }
 
   return List::create(
     _["dosage"] = dosage,
     _["a1"] = a1_out,
-    _["a2"] = a2_out
+    _["a2"] = a2_out,
+    _["counted_allele"] = counted_allele
   );
 }
 

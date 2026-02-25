@@ -40,13 +40,119 @@ get_label <- get_label_local
 # small helper
 `%||%` <- function(x, y) if (is.null(x) || identical(x, "")) y else x
 
-# Determine PLINK prefix from uploaded PED/MAP pair.
+# plinkR is optional. Prefer plinkR when available, but also support direct
+# PLINK CLI usage so users do not need the plinkR R package installed.
+get_plinkr_checked_backend <- function() {
+  if (!requireNamespace("plinkR", quietly = TRUE)) {
+    return(NULL)
+  }
+  chk <- tryCatch({
+    ns <- asNamespace("plinkR")
+    if (exists("check_plink", mode = "function", envir = ns, inherits = FALSE)) {
+      plinkR::check_plink(verbose = FALSE)
+    } else {
+      NULL
+    }
+  }, error = function(e) NULL)
+
+  if (is.list(chk) && "found" %in% names(chk) && !isTRUE(chk$found)) {
+    return(NULL)
+  }
+
+  exe <- if (is.list(chk) && "exe" %in% names(chk)) chk$exe else Sys.which("plink")
+  exe <- if (is.character(exe) && length(exe) >= 1) exe[1] else ""
+  if (!nzchar(exe)) exe <- Sys.which("plink")[1]
+  if (!is.character(exe) || length(exe) == 0 || !nzchar(exe) || !file.exists(exe)) {
+    return(NULL)
+  }
+
+  list(exe = exe, via = "plinkR")
+}
+
+get_plink_cli_backend <- function() {
+  exe <- Sys.which("plink")
+  exe <- if (is.character(exe) && length(exe) >= 1) exe[1] else ""
+  if (!nzchar(exe) || !file.exists(exe)) {
+    return(NULL)
+  }
+  list(exe = exe, via = "cli")
+}
+
+get_plink_blup_backend <- function() {
+  get_plinkr_checked_backend() %||% get_plink_cli_backend()
+}
+
+has_plinkr_blup_backend <- function() {
+  !is.null(get_plink_blup_backend())
+}
+
+# Built-in pure-R fallback backend (no compiled code required) for PED/MAP path.
+has_r_blup_backend <- function() {
+  TRUE
+}
+
+# BED/BIM/FAM R backend follows the snpStats path (Suggests).
+has_r_blup_backend_bfile <- function() {
+  # Deployment hint: keep gdata in rsconnect dependency snapshot (Suggests).
+  invisible(requireNamespace("gdata", quietly = TRUE))
+  requireNamespace("snpStats", quietly = TRUE)
+}
+
+# PLINK v1.9 (--recode A) and PLINK2 (--export A) can differ in which allele
+# copy count is emitted in .raw/.export A output. We mirror the currently
+# detected plinkR backend so the Rcpp fallback matches the preferred backend.
+get_plinkr_blup_counted_allele <- function() {
+  # Manual override for debugging/compatibility:
+  # Sys.setenv(EASYBLUP_COUNTED_ALLELE = "A1") or "A2"
+  forced <- toupper(trimws(Sys.getenv("EASYBLUP_COUNTED_ALLELE", "")))
+  if (forced %in% c("A1", "A2")) {
+    return(forced)
+  }
+
+  if (!requireNamespace("plinkR", quietly = TRUE)) {
+    exe2 <- Sys.which("plink2")
+    if (is.character(exe2) && length(exe2) >= 1 && nzchar(exe2[1])) {
+      return("A2")
+    }
+    exe1 <- Sys.which("plink")
+    if (is.character(exe1) && length(exe1) >= 1 && nzchar(exe1[1])) {
+      return("A1")
+    }
+    return("A1")
+  }
+  chk <- tryCatch({
+    ns <- asNamespace("plinkR")
+    if (exists("check_plink", mode = "function", envir = ns, inherits = FALSE)) {
+      plinkR::check_plink(verbose = FALSE)
+    } else {
+      NULL
+    }
+  }, error = function(e) NULL)
+  exe <- if (is.list(chk) && "exe" %in% names(chk)) chk$exe else NULL
+  exe_base <- if (is.character(exe) && length(exe) >= 1 && nzchar(exe[1])) basename(exe[1]) else ""
+  if (nzchar(exe_base) && grepl("^plink2", tolower(exe_base))) {
+    "A2"
+  } else {
+    "A1"
+  }
+}
+
+# Determine PLINK prefix from uploaded files.
 derive_plink_prefix <- function(file_names) {
   if (is.null(file_names) || length(file_names) == 0) return(NULL)
   norm_names <- basename(file_names)
+  bed_idx <- grepl("\\.bed$", norm_names, ignore.case = TRUE)
+  bim_idx <- grepl("\\.bim$", norm_names, ignore.case = TRUE)
+  fam_idx <- grepl("\\.fam$", norm_names, ignore.case = TRUE)
   ped_idx <- grepl("\\.ped$", norm_names, ignore.case = TRUE)
   map_idx <- grepl("\\.map$", norm_names, ignore.case = TRUE)
-  candidate <- if (any(ped_idx)) {
+  candidate <- if (any(bed_idx)) {
+    norm_names[bed_idx][1]
+  } else if (any(bim_idx)) {
+    norm_names[bim_idx][1]
+  } else if (any(fam_idx)) {
+    norm_names[fam_idx][1]
+  } else if (any(ped_idx)) {
     norm_names[ped_idx][1]
   } else if (any(map_idx)) {
     norm_names[map_idx][1]
@@ -128,9 +234,26 @@ convert_plink_to_blupf90_rcpp <- function(ped_path, map_path, out_prefix) {
 
   read_tab <- function(path) {
     if (requireNamespace("data.table", quietly = TRUE)) {
-      data.table::fread(path, header = FALSE, data.table = FALSE, showProgress = FALSE, colClasses = "character")
+      # Preserve literal allele strings such as "NA" to match PLINK .ped parsing.
+      data.table::fread(
+        path,
+        header = FALSE,
+        data.table = FALSE,
+        showProgress = FALSE,
+        colClasses = "character",
+        na.strings = NULL
+      )
     } else {
-      read.table(path, header = FALSE, stringsAsFactors = FALSE, colClasses = "character", fill = TRUE, comment.char = "")
+      # Preserve literal allele strings such as "NA" to match PLINK .ped parsing.
+      read.table(
+        path,
+        header = FALSE,
+        stringsAsFactors = FALSE,
+        colClasses = "character",
+        fill = TRUE,
+        comment.char = "",
+        na.strings = character()
+      )
     }
   }
 
@@ -141,6 +264,15 @@ convert_plink_to_blupf90_rcpp <- function(ped_path, map_path, out_prefix) {
   map_df <- map_df[, 1:4, drop = FALSE]
   colnames(map_df) <- c("CHR", "SNP", "CM", "BP")
   marker_n <- nrow(map_df)
+
+  chr_numeric <- suppressWarnings(as.numeric(map_df$CHR))
+  valid_chr <- chr_numeric[is.finite(chr_numeric) & chr_numeric > 0]
+  max_chr <- if (length(valid_chr) > 0) max(valid_chr) else 40
+  zero_chr_idx <- is.finite(chr_numeric) & chr_numeric == 0
+  chr_for_map <- as.character(map_df$CHR)
+  if (any(zero_chr_idx)) {
+    chr_for_map[zero_chr_idx] <- as.character(max_chr)
+  }
 
   ped_df <- read_tab(ped_path)
   if (ncol(ped_df) < 7 || nrow(ped_df) == 0) {
@@ -161,21 +293,58 @@ convert_plink_to_blupf90_rcpp <- function(ped_path, map_path, out_prefix) {
   allele1 <- as.matrix(ped_df[, allele1_idx, drop = FALSE])
   allele2 <- as.matrix(ped_df[, allele2_idx, drop = FALSE])
 
-  conv <- eb_ped_to_blup_codes_cpp_fn(allele1, allele2)
+  counted_allele <- get_plinkr_blup_counted_allele()
+  cpp_formals <- tryCatch(names(formals(eb_ped_to_blup_codes_cpp_fn)), error = function(e) character())
+  if ("counted_allele" %in% cpp_formals) {
+    conv <- eb_ped_to_blup_codes_cpp_fn(allele1, allele2, counted_allele = counted_allele)
+  } else {
+    conv <- eb_ped_to_blup_codes_cpp_fn(allele1, allele2)
+  }
   dosage <- conv$dosage
   a1 <- as.character(conv$a1)
   a2 <- as.character(conv$a2)
+
+  # Backward-compatibility fallback for older 2-argument compiled backends.
+  # Newer Rcpp backends accept counted_allele directly.
+  if (!("counted_allele" %in% cpp_formals) && identical(counted_allele, "A2")) {
+    non_missing <- dosage != 5L
+    dosage[non_missing] <- 2L - dosage[non_missing]
+  }
 
   out_txt <- paste0(out_prefix, ".txt")
   out_map <- paste0(out_prefix, ".map")
   out_bim <- paste0(out_prefix, ".bim")
 
-  txt_df <- data.frame(ID = sample_id, dosage, check.names = FALSE, stringsAsFactors = FALSE)
-  write.table(txt_df, file = out_txt, quote = FALSE, row.names = FALSE, col.names = FALSE, sep = " ")
-  write.table(map_df, file = out_map, quote = FALSE, row.names = FALSE, col.names = FALSE, sep = " ")
+  # Match plinkR::plink_to_blupf90(..., format="continuous"): one ID column plus a
+  # contiguous 0/1/2/5 genotype string (no separators between markers).
+  con <- file(out_txt, open = "wt")
+  on.exit(close(con), add = TRUE)
+  write_chunk <- function(idx) {
+    lines <- vapply(idx, function(i) {
+      paste0(sample_id[i], " ", paste0(as.integer(dosage[i, ]), collapse = ""))
+    }, character(1))
+    writeLines(lines, con = con, sep = "\n")
+  }
+  n_samples <- nrow(dosage)
+  if (n_samples > 0) {
+    chunk_size <- 1000L
+    starts <- seq.int(1L, n_samples, by = chunk_size)
+    for (s in starts) {
+      e <- min(s + chunk_size - 1L, n_samples)
+      write_chunk(seq.int(s, e))
+    }
+  }
+  map_out_df <- data.frame(
+    CHR = chr_for_map,
+    SNP = map_df$SNP,
+    CM = map_df$CM,
+    BP = map_df$BP,
+    stringsAsFactors = FALSE
+  )
+  write.table(map_out_df, file = out_map, quote = FALSE, row.names = FALSE, col.names = FALSE, sep = "\t")
 
   bim_df <- data.frame(
-    CHR = map_df$CHR,
+    CHR = chr_for_map,
     SNP = map_df$SNP,
     CM = map_df$CM,
     BP = map_df$BP,
@@ -188,8 +357,652 @@ convert_plink_to_blupf90_rcpp <- function(ped_path, map_path, out_prefix) {
   list(
     txt = out_txt,
     map = out_map,
-    bim = out_bim
+    bim = out_bim,
+    max_chr = max_chr,
+    counted_allele = counted_allele
   )
+}
+
+eb_ped_to_blup_codes_r <- function(allele1, allele2, counted_allele = "A1") {
+  if (!is.matrix(allele1) || !is.matrix(allele2)) {
+    stop("allele1 and allele2 must be matrices", call. = FALSE)
+  }
+  n_samples <- nrow(allele1)
+  n_markers <- ncol(allele1)
+  if (nrow(allele2) != n_samples || ncol(allele2) != n_markers) {
+    stop("allele1 and allele2 must have the same dimensions", call. = FALSE)
+  }
+
+  counted_allele <- toupper(trimws(as.character(counted_allele %||% "A1")))
+  if (!counted_allele %in% c("A1", "A2")) {
+    stop("counted_allele must be 'A1' or 'A2'", call. = FALSE)
+  }
+  count_a2 <- identical(counted_allele, "A2")
+
+  dot_sentinel <- "__PLINK_PED_DOT_ALLELE__"
+
+  normalize_vec <- function(x) {
+    s <- as.character(x)
+    s[is.na(s)] <- ""
+    s <- toupper(trimws(s))
+    s[s == "."] <- dot_sentinel
+    s
+  }
+  is_missing_ped_default <- function(x) {
+    !nzchar(x) | x == "0"
+  }
+  to_output_allele <- function(x) {
+    y <- as.character(x)
+    y[y == dot_sentinel] <- "0"
+    y
+  }
+
+  dosage <- matrix(5L, nrow = n_samples, ncol = n_markers)
+  a1_out <- character(n_markers)
+  a2_out <- character(n_markers)
+
+  for (j in seq_len(n_markers)) {
+    xj <- normalize_vec(allele1[, j])
+    yj <- normalize_vec(allele2[, j])
+
+    allele_count <- integer(0)
+    first_seen <- integer(0)
+    seen_rank <- 0L
+
+    for (i in seq_len(n_samples)) {
+      x <- xj[i]
+      y <- yj[i]
+      if (!is_missing_ped_default(x)) {
+        if (is.na(first_seen[x])) {
+          first_seen[x] <- seen_rank
+          seen_rank <- seen_rank + 1L
+        }
+        allele_count[x] <- (if (is.na(allele_count[x])) 0L else allele_count[x]) + 1L
+      }
+      if (!is_missing_ped_default(y)) {
+        if (is.na(first_seen[y])) {
+          first_seen[y] <- seen_rank
+          seen_rank <- seen_rank + 1L
+        }
+        allele_count[y] <- (if (is.na(allele_count[y])) 0L else allele_count[y]) + 1L
+      }
+    }
+
+    if (length(allele_count) == 0) {
+      a1 <- "0"
+      a2 <- "0"
+    } else if (length(allele_count) == 1) {
+      a1 <- "0"
+      a2 <- names(allele_count)[1]
+    } else {
+      allele_names <- names(allele_count)
+      ord <- order(-unname(allele_count[allele_names]), unname(first_seen[allele_names]))
+      keep1 <- allele_names[ord[1]]  # top after stable sort on raw counts
+      keep2 <- allele_names[ord[2]]  # second after stable sort on raw counts
+
+      keep1_eff <- 0L
+      keep2_eff <- 0L
+      for (i in seq_len(n_samples)) {
+        x <- xj[i]
+        y <- yj[i]
+        if (is_missing_ped_default(x) || is_missing_ped_default(y)) next
+        if (!(x %in% c(keep1, keep2)) || !(y %in% c(keep1, keep2))) next
+        keep1_eff <- keep1_eff + as.integer(x == keep1) + as.integer(y == keep1)
+        keep2_eff <- keep2_eff + as.integer(x == keep2) + as.integer(y == keep2)
+      }
+      if (keep1_eff == 0L && keep2_eff == 0L) {
+        keep1_eff <- as.integer(allele_count[[keep1]])
+        keep2_eff <- as.integer(allele_count[[keep2]])
+      }
+
+      if (keep1_eff == keep2_eff) {
+        # PLINK-compatible tie fallback after multiallelic pruning: keep preselected order.
+        a1 <- keep2
+        a2 <- keep1
+      } else if (keep1_eff < keep2_eff) {
+        a1 <- keep1
+        a2 <- keep2
+      } else {
+        a1 <- keep2
+        a2 <- keep1
+      }
+    }
+
+    a1_out[j] <- to_output_allele(a1)
+    a2_out[j] <- to_output_allele(a2)
+
+    for (i in seq_len(n_samples)) {
+      x <- xj[i]
+      y <- yj[i]
+      if (is_missing_ped_default(x) || is_missing_ped_default(y)) {
+        dosage[i, j] <- 5L
+        next
+      }
+      if (identical(a1, "0")) {
+        dosage[i, j] <- if (identical(x, a2) && identical(y, a2)) 0L else 5L
+        next
+      }
+      if (!(x %in% c(a1, a2)) || !(y %in% c(a1, a2))) {
+        dosage[i, j] <- 5L
+        next
+      }
+      d <- as.integer(x == a1) + as.integer(y == a1)
+      if (count_a2) d <- 2L - d
+      dosage[i, j] <- d
+    }
+
+    if (count_a2 && identical(a1, "0")) {
+      idx <- dosage[, j] != 5L
+      dosage[idx, j] <- 2L - dosage[idx, j]
+    }
+  }
+
+  list(
+    dosage = dosage,
+    a1 = a1_out,
+    a2 = a2_out,
+    counted_allele = counted_allele
+  )
+}
+
+convert_plink_to_blupf90_r <- function(ped_path, map_path, out_prefix) {
+  read_tab <- function(path) {
+    if (requireNamespace("data.table", quietly = TRUE)) {
+      data.table::fread(
+        path,
+        header = FALSE,
+        data.table = FALSE,
+        showProgress = FALSE,
+        colClasses = "character",
+        na.strings = NULL
+      )
+    } else {
+      read.table(
+        path,
+        header = FALSE,
+        stringsAsFactors = FALSE,
+        colClasses = "character",
+        fill = TRUE,
+        comment.char = "",
+        na.strings = character()
+      )
+    }
+  }
+
+  map_df <- read_tab(map_path)
+  if (ncol(map_df) < 4 || nrow(map_df) == 0) {
+    stop("Invalid .map file: need at least 4 columns and >=1 marker row.", call. = FALSE)
+  }
+  map_df <- map_df[, 1:4, drop = FALSE]
+  colnames(map_df) <- c("CHR", "SNP", "CM", "BP")
+  marker_n <- nrow(map_df)
+
+  chr_numeric <- suppressWarnings(as.numeric(map_df$CHR))
+  valid_chr <- chr_numeric[is.finite(chr_numeric) & chr_numeric > 0]
+  max_chr <- if (length(valid_chr) > 0) max(valid_chr) else 40
+  zero_chr_idx <- is.finite(chr_numeric) & chr_numeric == 0
+  chr_for_map <- as.character(map_df$CHR)
+  if (any(zero_chr_idx)) {
+    chr_for_map[zero_chr_idx] <- as.character(max_chr)
+  }
+
+  ped_df <- read_tab(ped_path)
+  if (ncol(ped_df) < 7 || nrow(ped_df) == 0) {
+    stop("Invalid .ped file: need >=7 columns and >=1 sample row.", call. = FALSE)
+  }
+
+  expected_cols <- 6 + marker_n * 2
+  if (ncol(ped_df) < expected_cols) {
+    stop(sprintf("PED/MAP mismatch: ped has %d cols, expected at least %d for %d markers.", ncol(ped_df), expected_cols, marker_n), call. = FALSE)
+  }
+
+  ped_df <- ped_df[, seq_len(expected_cols), drop = FALSE]
+  sample_id <- as.character(ped_df[[2]])
+  sample_id[!nzchar(sample_id) | is.na(sample_id)] <- as.character(ped_df[[1]][!nzchar(sample_id) | is.na(sample_id)])
+
+  allele1_idx <- seq(7, expected_cols - 1, by = 2)
+  allele2_idx <- seq(8, expected_cols, by = 2)
+  allele1 <- as.matrix(ped_df[, allele1_idx, drop = FALSE])
+  allele2 <- as.matrix(ped_df[, allele2_idx, drop = FALSE])
+
+  counted_allele <- get_plinkr_blup_counted_allele()
+  conv <- eb_ped_to_blup_codes_r(allele1, allele2, counted_allele = counted_allele)
+  dosage <- conv$dosage
+  a1 <- as.character(conv$a1)
+  a2 <- as.character(conv$a2)
+
+  out_txt <- paste0(out_prefix, ".txt")
+  out_map <- paste0(out_prefix, ".map")
+  out_bim <- paste0(out_prefix, ".bim")
+
+  con <- file(out_txt, open = "wt")
+  on.exit(close(con), add = TRUE)
+  n_samples <- nrow(dosage)
+  if (n_samples > 0) {
+    chunk_size <- 1000L
+    starts <- seq.int(1L, n_samples, by = chunk_size)
+    for (s in starts) {
+      e <- min(s + chunk_size - 1L, n_samples)
+      lines <- vapply(seq.int(s, e), function(i) {
+        paste0(sample_id[i], " ", paste0(as.integer(dosage[i, ]), collapse = ""))
+      }, character(1))
+      writeLines(lines, con = con, sep = "\n")
+    }
+  }
+
+  map_out_df <- data.frame(
+    CHR = chr_for_map,
+    SNP = map_df$SNP,
+    CM = map_df$CM,
+    BP = map_df$BP,
+    stringsAsFactors = FALSE
+  )
+  write.table(map_out_df, file = out_map, quote = FALSE, row.names = FALSE, col.names = FALSE, sep = "\t")
+
+  bim_df <- data.frame(
+    CHR = chr_for_map,
+    SNP = map_df$SNP,
+    CM = map_df$CM,
+    BP = map_df$BP,
+    A1 = a1,
+    A2 = a2,
+    stringsAsFactors = FALSE
+  )
+  write.table(bim_df, file = out_bim, quote = FALSE, row.names = FALSE, col.names = FALSE, sep = "\t")
+
+  list(
+    txt = out_txt,
+    map = out_map,
+    bim = out_bim,
+    max_chr = max_chr,
+    counted_allele = counted_allele
+  )
+}
+
+convert_plink_to_blupf90_r_bfile <- function(bed_path, bim_path, fam_path, out_prefix) {
+  if (!requireNamespace("snpStats", quietly = TRUE)) {
+    stop("R BED/BIM/FAM backend requires the 'snpStats' package (Suggests).", call. = FALSE)
+  }
+
+  data <- snpStats::read.plink(
+    bed_path,
+    bim_path,
+    fam_path,
+    na.strings = c("0", "-9"),
+    sep = ".",
+    select.subjects = NULL,
+    select.snps = NULL
+  )
+
+  if (is.null(data$genotypes) || nrow(data$genotypes) == 0 || ncol(data$genotypes) == 0) {
+    stop("snpStats::read.plink returned an empty genotype matrix.", call. = FALSE)
+  }
+  if (is.null(data$map) || nrow(data$map) == 0 || ncol(data$map) < 4) {
+    stop("snpStats::read.plink returned an invalid map table.", call. = FALSE)
+  }
+
+  # Match plinkR continuous output style: one sample ID column + compact genotype string.
+  sample_ids <- rownames(data$genotypes)
+  if (is.null(sample_ids)) {
+    sample_ids <- as.character(seq_len(nrow(data$genotypes)))
+  }
+  sample_ids <- as.character(sample_ids)
+  sample_ids[!nzchar(sample_ids) | is.na(sample_ids)] <- as.character(which(!nzchar(sample_ids) | is.na(sample_ids)))
+  rownames(data$genotypes) <- sample_ids
+
+  out_txt <- paste0(out_prefix, ".txt")
+  out_map <- paste0(out_prefix, ".map")
+  out_bim <- paste0(out_prefix, ".bim")
+
+  dosage_num <- as(data$genotypes, "numeric")
+  counted_allele <- get_plinkr_blup_counted_allele()
+  if (identical(counted_allele, "A1")) {
+    dosage_num <- 2 - dosage_num
+  }
+  dosage <- matrix(5L, nrow = nrow(dosage_num), ncol = ncol(dosage_num))
+  non_missing <- !is.na(dosage_num)
+  dosage[non_missing] <- as.integer(dosage_num[non_missing])
+
+  con <- file(out_txt, open = "wt")
+  on.exit(close(con), add = TRUE)
+  if (nrow(dosage) > 0) {
+    chunk_size <- 1000L
+    starts <- seq.int(1L, nrow(dosage), by = chunk_size)
+    for (s in starts) {
+      e <- min(s + chunk_size - 1L, nrow(dosage))
+      lines <- vapply(seq.int(s, e), function(i) {
+        paste0(sample_ids[i], " ", paste0(as.character(dosage[i, ]), collapse = ""))
+      }, character(1))
+      writeLines(lines, con = con, sep = "\n")
+    }
+  }
+
+  bim_df <- read.table(
+    bim_path,
+    header = FALSE,
+    stringsAsFactors = FALSE,
+    colClasses = "character",
+    na.strings = character()
+  )
+  if (ncol(bim_df) < 4 || nrow(bim_df) == 0) {
+    stop("Input .bim file is malformed.", call. = FALSE)
+  }
+  map_df <- bim_df[, 1:4, drop = FALSE]
+  colnames(map_df) <- c("CHR", "SNP", "CM", "BP")
+
+  chr_numeric <- suppressWarnings(as.numeric(map_df$CHR))
+  valid_chr <- chr_numeric[is.finite(chr_numeric) & chr_numeric > 0]
+  max_chr <- if (length(valid_chr) > 0) max(valid_chr) else 40
+  zero_chr_idx <- is.finite(chr_numeric) & chr_numeric == 0
+  chr_for_map <- as.character(map_df$CHR)
+  if (any(zero_chr_idx)) {
+    chr_for_map[zero_chr_idx] <- as.character(max_chr)
+  }
+
+  map_out_df <- data.frame(
+    CHR = chr_for_map,
+    SNP = map_df$SNP,
+    CM = map_df$CM,
+    BP = map_df$BP,
+    stringsAsFactors = FALSE
+  )
+  write.table(map_out_df, file = out_map, quote = FALSE, row.names = FALSE, col.names = FALSE, sep = "\t")
+
+  # Preserve BED/BIM/FAM allele metadata exactly to match plinkR baseline path.
+  same_bim_path <- identical(
+    normalizePath(bim_path, winslash = "/", mustWork = FALSE),
+    normalizePath(out_bim, winslash = "/", mustWork = FALSE)
+  )
+  if (!same_bim_path) {
+    file.copy(bim_path, out_bim, overwrite = TRUE)
+  }
+
+  list(
+    txt = out_txt,
+    map = out_map,
+    bim = if (file.exists(out_bim)) out_bim else NULL,
+    max_chr = max_chr,
+    counted_allele = counted_allele,
+    via = "R (snpStats)"
+  )
+}
+
+convert_plink_to_blupf90_plink_cli_bfile <- function(bed_path, bim_path, fam_path, out_prefix, plink_exe = NULL) {
+  plink_exe <- plink_exe %||% {
+    cli <- get_plink_cli_backend()
+    if (!is.null(cli)) cli$exe else ""
+  }
+  if (!is.character(plink_exe) || length(plink_exe) == 0 || !nzchar(plink_exe) || !file.exists(plink_exe)) {
+    stop("PLINK executable not found for direct CLI conversion.", call. = FALSE)
+  }
+
+  prefix <- out_prefix
+  required_files <- c(paste0(prefix, ".bed"), paste0(prefix, ".bim"), paste0(prefix, ".fam"))
+  if (!all(file.exists(required_files))) {
+    stop("PLINK CLI conversion expects <prefix>.bed/.bim/.fam to exist.", call. = FALSE)
+  }
+
+  run_plink <- function(args) {
+    out <- tryCatch(
+      suppressWarnings(system2(plink_exe, args = args, stdout = TRUE, stderr = TRUE)),
+      error = function(e) e
+    )
+    status <- attr(out, "status")
+    if (inherits(out, "error") || (!is.null(status) && status != 0)) {
+      msg <- if (inherits(out, "error")) out$message else paste(out, collapse = "\n")
+      stop(paste0("PLINK CLI failed: ", msg), call. = FALSE)
+    }
+    invisible(TRUE)
+  }
+
+  bim_meta <- read.table(
+    paste0(prefix, ".bim"),
+    header = FALSE,
+    stringsAsFactors = FALSE,
+    colClasses = "character",
+    na.strings = character()
+  )
+  if (ncol(bim_meta) < 4 || nrow(bim_meta) == 0) {
+    stop("Input .bim file is malformed.", call. = FALSE)
+  }
+  chr_numeric <- suppressWarnings(as.numeric(bim_meta[[1]]))
+  valid_chr <- chr_numeric[is.finite(chr_numeric) & chr_numeric > 0]
+  max_chr <- if (length(valid_chr) > 0) max(valid_chr) else 40
+
+  # Match plinkR path: include chromosome/sex/nonfounder flags for broad compatibility.
+  run_plink(c(
+    "--bfile", prefix,
+    "--allow-extra-chr",
+    "--chr-set", as.character(max_chr),
+    "--allow-no-sex",
+    "--nonfounders",
+    "--recode", "A",
+    "--out", prefix
+  ))
+
+  out_raw <- paste0(prefix, ".raw")
+  out_bim <- paste0(prefix, ".bim")
+  if (!file.exists(out_raw) || !file.exists(out_bim)) {
+    stop("PLINK CLI conversion did not produce expected .raw/.bim outputs.", call. = FALSE)
+  }
+
+  raw_df <- read.table(out_raw, header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
+  if (ncol(raw_df) < 7 || nrow(raw_df) == 0) {
+    stop("PLINK .raw output is empty or malformed.", call. = FALSE)
+  }
+  bim_df <- read.table(out_bim, header = FALSE, stringsAsFactors = FALSE, colClasses = "character", na.strings = character())
+  if (ncol(bim_df) < 6) {
+    stop("PLINK .bim output is malformed.", call. = FALSE)
+  }
+
+  sample_id <- as.character(raw_df$IID %||% raw_df[[2]])
+  if ("FID" %in% names(raw_df)) {
+    fid <- as.character(raw_df$FID)
+    sample_id[!nzchar(sample_id) | is.na(sample_id)] <- fid[!nzchar(sample_id) | is.na(sample_id)]
+  }
+
+  dosage <- as.matrix(raw_df[, -(1:6), drop = FALSE])
+  storage.mode(dosage) <- "integer"
+
+  counted_allele <- if (grepl("^plink2", tolower(basename(plink_exe)))) "A2" else "A1"
+  if (identical(counted_allele, "A2")) {
+    non_missing <- !is.na(dosage)
+    dosage[non_missing] <- 2L - dosage[non_missing]
+  }
+
+  out_txt <- paste0(prefix, ".txt")
+  out_map <- paste0(prefix, ".map")
+
+  con <- file(out_txt, open = "wt")
+  on.exit(close(con), add = TRUE)
+  if (nrow(dosage) > 0) {
+    chunk_size <- 1000L
+    starts <- seq.int(1L, nrow(dosage), by = chunk_size)
+    for (s in starts) {
+      e <- min(s + chunk_size - 1L, nrow(dosage))
+      lines <- vapply(seq.int(s, e), function(i) {
+        codes <- dosage[i, ]
+        codes_chr <- ifelse(is.na(codes), "5", as.character(codes))
+        paste0(sample_id[i], " ", paste0(codes_chr, collapse = ""))
+      }, character(1))
+      writeLines(lines, con = con, sep = "\n")
+    }
+  }
+
+  map_out <- bim_df[, 1:4, drop = FALSE]
+  chr_map_numeric <- suppressWarnings(as.numeric(map_out[[1]]))
+  valid_chr_map <- chr_map_numeric[is.finite(chr_map_numeric) & chr_map_numeric > 0]
+  max_chr_map <- if (length(valid_chr_map) > 0) max(valid_chr_map) else 40
+  zero_chr_idx <- is.finite(chr_map_numeric) & chr_map_numeric == 0
+  if (any(zero_chr_idx)) {
+    map_out[zero_chr_idx, 1] <- as.character(max_chr_map)
+  }
+  write.table(map_out, file = out_map, quote = FALSE, row.names = FALSE, col.names = FALSE, sep = "\t")
+
+  list(
+    txt = out_txt,
+    map = out_map,
+    bim = out_bim,
+    counted_allele = counted_allele,
+    plink_exe = plink_exe
+  )
+}
+
+convert_plink_to_blupf90_plink_backend_bfile <- function(bed_path, bim_path, fam_path, out_prefix) {
+  backend <- get_plink_blup_backend()
+  if (is.null(backend)) {
+    stop("No PLINK backend available.", call. = FALSE)
+  }
+
+  if (identical(backend$via, "plinkR") && requireNamespace("plinkR", quietly = TRUE)) {
+    plinkr_out_prefix <- paste0(out_prefix, "__plinkr_out")
+    plinkR::plink_to_blupf90(prefix = out_prefix, out_prefix = plinkr_out_prefix, verbose = TRUE)
+    out_txt <- paste0(out_prefix, ".txt")
+    out_map <- paste0(out_prefix, ".map")
+    out_bim <- paste0(out_prefix, ".bim")
+    file.copy(paste0(plinkr_out_prefix, ".txt"), out_txt, overwrite = TRUE)
+    file.copy(paste0(plinkr_out_prefix, ".map"), out_map, overwrite = TRUE)
+    if (file.exists(paste0(plinkr_out_prefix, ".bim"))) {
+      file.copy(paste0(plinkr_out_prefix, ".bim"), out_bim, overwrite = TRUE)
+    }
+    for (ext in c(".txt", ".map", ".bim")) {
+      f <- paste0(plinkr_out_prefix, ext)
+      if (file.exists(f)) unlink(f, force = TRUE)
+    }
+    if (!file.exists(out_txt) || !file.exists(out_map)) {
+      stop("PLINK (via plinkR) output files not found.", call. = FALSE)
+    }
+    return(list(txt = out_txt, map = out_map, bim = if (file.exists(out_bim)) out_bim else NULL, via = "plinkR", plink_exe = backend$exe))
+  }
+
+  cli_res <- convert_plink_to_blupf90_plink_cli_bfile(
+    bed_path = bed_path,
+    bim_path = bim_path,
+    fam_path = fam_path,
+    out_prefix = out_prefix,
+    plink_exe = backend$exe
+  )
+  cli_res$via <- "cli"
+  cli_res
+}
+
+convert_plink_to_blupf90_plink_cli <- function(ped_path, map_path, out_prefix, plink_exe = NULL) {
+  plink_exe <- plink_exe %||% {
+    cli <- get_plink_cli_backend()
+    if (!is.null(cli)) cli$exe else ""
+  }
+  if (!is.character(plink_exe) || length(plink_exe) == 0 || !nzchar(plink_exe) || !file.exists(plink_exe)) {
+    stop("PLINK executable not found for direct CLI conversion.", call. = FALSE)
+  }
+
+  prefix <- out_prefix
+  if (!file.exists(paste0(prefix, ".ped")) || !file.exists(paste0(prefix, ".map"))) {
+    stop("PLINK CLI conversion expects <prefix>.ped and <prefix>.map to exist.", call. = FALSE)
+  }
+
+  run_plink <- function(args) {
+    out <- tryCatch(
+      suppressWarnings(system2(plink_exe, args = args, stdout = TRUE, stderr = TRUE)),
+      error = function(e) e
+    )
+    status <- attr(out, "status")
+    if (inherits(out, "error") || (!is.null(status) && status != 0)) {
+      msg <- if (inherits(out, "error")) out$message else paste(out, collapse = "\n")
+      stop(paste0("PLINK CLI failed: ", msg), call. = FALSE)
+    }
+    invisible(TRUE)
+  }
+
+  # Build BIM/FAM and recode additive counts.
+  run_plink(c("--file", prefix, "--make-bed", "--out", prefix))
+  run_plink(c("--file", prefix, "--recode", "A", "--out", prefix))
+
+  out_raw <- paste0(prefix, ".raw")
+  out_bim <- paste0(prefix, ".bim")
+  if (!file.exists(out_raw) || !file.exists(out_bim)) {
+    stop("PLINK CLI conversion did not produce expected .raw/.bim outputs.", call. = FALSE)
+  }
+
+  raw_df <- read.table(out_raw, header = TRUE, stringsAsFactors = FALSE, check.names = FALSE)
+  if (ncol(raw_df) < 7 || nrow(raw_df) == 0) {
+    stop("PLINK .raw output is empty or malformed.", call. = FALSE)
+  }
+  bim_df <- read.table(out_bim, header = FALSE, stringsAsFactors = FALSE, colClasses = "character", na.strings = character())
+  if (ncol(bim_df) < 6) {
+    stop("PLINK .bim output is malformed.", call. = FALSE)
+  }
+
+  sample_id <- as.character(raw_df$IID %||% raw_df[[2]])
+  if ("FID" %in% names(raw_df)) {
+    fid <- as.character(raw_df$FID)
+    sample_id[!nzchar(sample_id) | is.na(sample_id)] <- fid[!nzchar(sample_id) | is.na(sample_id)]
+  }
+
+  dosage <- as.matrix(raw_df[, -(1:6), drop = FALSE])
+  storage.mode(dosage) <- "integer"
+
+  counted_allele <- get_plinkr_blup_counted_allele()
+  if (identical(counted_allele, "A2")) {
+    non_missing <- !is.na(dosage)
+    dosage[non_missing] <- 2L - dosage[non_missing]
+  }
+
+  out_txt <- paste0(prefix, ".txt")
+  out_map <- paste0(prefix, ".map")
+
+  con <- file(out_txt, open = "wt")
+  on.exit(close(con), add = TRUE)
+  if (nrow(dosage) > 0) {
+    chunk_size <- 1000L
+    starts <- seq.int(1L, nrow(dosage), by = chunk_size)
+    for (s in starts) {
+      e <- min(s + chunk_size - 1L, nrow(dosage))
+      lines <- vapply(seq.int(s, e), function(i) {
+        codes <- dosage[i, ]
+        codes_chr <- ifelse(is.na(codes), "5", as.character(codes))
+        paste0(sample_id[i], " ", paste0(codes_chr, collapse = ""))
+      }, character(1))
+      writeLines(lines, con = con, sep = "\n")
+    }
+  }
+
+  map_out <- bim_df[, 1:4, drop = FALSE]
+  write.table(map_out, file = out_map, quote = FALSE, row.names = FALSE, col.names = FALSE, sep = "\t")
+
+  list(
+    txt = out_txt,
+    map = out_map,
+    bim = out_bim,
+    counted_allele = counted_allele,
+    plink_exe = plink_exe
+  )
+}
+
+convert_plink_to_blupf90_plink_backend <- function(ped_path, map_path, out_prefix) {
+  backend <- get_plink_blup_backend()
+  if (is.null(backend)) {
+    stop("No PLINK backend available.", call. = FALSE)
+  }
+
+  if (identical(backend$via, "plinkR") && requireNamespace("plinkR", quietly = TRUE)) {
+    plinkR::plink_to_blupf90(prefix = out_prefix, out_prefix = out_prefix, verbose = TRUE)
+    out_txt <- paste0(out_prefix, ".txt")
+    out_map <- paste0(out_prefix, ".map")
+    out_bim <- paste0(out_prefix, ".bim")
+    if (!file.exists(out_txt) || !file.exists(out_map)) {
+      stop("PLINK (via plinkR) output files not found.", call. = FALSE)
+    }
+    return(list(txt = out_txt, map = out_map, bim = if (file.exists(out_bim)) out_bim else NULL, via = "plinkR", plink_exe = backend$exe))
+  }
+
+  cli_res <- convert_plink_to_blupf90_plink_cli(
+    ped_path = ped_path,
+    map_path = map_path,
+    out_prefix = out_prefix,
+    plink_exe = backend$exe
+  )
+  cli_res$via <- "cli"
+  cli_res
 }
 
 # ====== UI Definition ======
@@ -486,16 +1299,18 @@ ui <- page_fillable(
       order: 1 !important;
       width: 100% !important;
     }
-    .geno-helper-file-input-wrapper .form-group #geno_help_plink_ped_progress,
-    .geno-helper-file-input-wrapper .form-group #geno_help_plink_map_progress {
+    .geno-helper-file-input-wrapper .form-group #geno_help_plink_bed_progress,
+    .geno-helper-file-input-wrapper .form-group #geno_help_plink_bim_progress,
+    .geno-helper-file-input-wrapper .form-group #geno_help_plink_fam_progress {
       order: 2 !important;
       width: 100% !important;
       margin-top: 8px !important;
       margin-bottom: 0 !important;
       display: block !important;
     }
-    .geno-helper-file-input-wrapper .form-group #geno_help_plink_ped_progress .progress-bar,
-    .geno-helper-file-input-wrapper .form-group #geno_help_plink_map_progress .progress-bar {
+    .geno-helper-file-input-wrapper .form-group #geno_help_plink_bed_progress .progress-bar,
+    .geno-helper-file-input-wrapper .form-group #geno_help_plink_bim_progress .progress-bar,
+    .geno-helper-file-input-wrapper .form-group #geno_help_plink_fam_progress .progress-bar {
       width: 100% !important;
     }
     /* Ensure the textInput wrapper container aligns properly */
@@ -652,7 +1467,7 @@ ui <- page_fillable(
       
       // Reposition progress bars for file inputs - ensure they appear below span and input
       function repositionFileInputProgressBars() {
-        var progressBarIds = ['geno_help_plink_ped_progress', 'geno_help_plink_map_progress'];
+        var progressBarIds = ['geno_help_plink_bed_progress', 'geno_help_plink_bim_progress', 'geno_help_plink_fam_progress'];
         progressBarIds.forEach(function(progressId) {
           var progressDiv = document.getElementById(progressId);
           if (progressDiv) {
@@ -1016,12 +1831,12 @@ server <- function(input, output, session) {
   
   output$geno_format_label_ui <- renderUI({
     # Show a small helper icon when PLINK conversion backend is available:
-    # preferred plinkR/PLINK path, or Rcpp fallback path.
+    # preferred PLINK path, or snpStats BED/BIM/FAM fallback path.
     label_text <- get_label("genotype_format", lang())
-    has_plinkr <- requireNamespace("plinkR", quietly = TRUE)
-    has_rcpp <- isTRUE(use_rcpp_blup_convert) && is.function(eb_ped_to_blup_codes_cpp_fn)
+    has_plinkr <- has_plinkr_blup_backend()
+    has_r <- has_r_blup_backend_bfile()
     
-    if (!has_plinkr && !has_rcpp) {
+    if (!has_plinkr && !has_r) {
       return(label_text)
     }
     
@@ -1063,7 +1878,7 @@ server <- function(input, output, session) {
           "📝 ", "Accepted format: .txt files")
     } else {
       div(style = "font-size: 0.85rem; color: #666; margin-top: 5px;",
-          "📝 ", "Accepted formats: .ped and .map files")
+          "📝 ", "Accepted formats: .bed, .bim and .fam files")
     }
   })
   
@@ -2007,38 +2822,32 @@ OPTION out_se_covar_function
   
   # ====== Genotype format help: PLINK -> BLUPF90 conversion ======
   observeEvent(input$geno_format_help, {
-    has_plinkr <- requireNamespace("plinkR", quietly = TRUE)
-    has_rcpp <- isTRUE(use_rcpp_blup_convert) && is.function(eb_ped_to_blup_codes_cpp_fn)
-    if (!has_plinkr && !has_rcpp) {
+    has_plinkr <- has_plinkr_blup_backend()
+    has_r <- has_r_blup_backend_bfile()
+    if (!has_plinkr && !has_r) {
       showNotification(
         if (tolower(lang()) == "zh") {
-          "未检测到可用的转换后端：请安装 plinkR/PLINK，或启用 Rcpp 转换器。"
+          "未检测到可用的转换后端。"
         } else {
-          "No conversion backend available. Install plinkR/PLINK or enable the Rcpp converter."
+          "No conversion backend available."
         },
         type = "error", duration = 8
       )
       return(NULL)
     }
 
-    backend_text <- if (has_plinkr && has_rcpp) {
-      if (tolower(lang()) == "zh") {
-        "可用后端：PLINK（优先）+ Rcpp（回退）"
-      } else {
-        "Available backend: PLINK (preferred) + Rcpp fallback"
-      }
-    } else if (has_plinkr) {
-      if (tolower(lang()) == "zh") {
-        "可用后端：PLINK"
-      } else {
-        "Available backend: PLINK"
-      }
+    if (tolower(lang()) == "zh") {
+      backend_parts <- c(
+        if (has_plinkr) "PLINK（优先）",
+        if (has_r) "R/snpStats（第二选择）"
+      )
+      backend_text <- paste0("可用后端：", paste(backend_parts, collapse = " + "))
     } else {
-      if (tolower(lang()) == "zh") {
-        "可用后端：Rcpp（未检测到 plinkR/PLINK）"
-      } else {
-        "Available backend: Rcpp (plinkR/PLINK not detected)"
-      }
+      backend_parts <- c(
+        if (has_plinkr) "PLINK (preferred)",
+        if (has_r) "R/snpStats (second choice)"
+      )
+      backend_text <- paste0("Available backends: ", paste(backend_parts, collapse = " + "))
     }
     
     showModal(
@@ -2063,9 +2872,9 @@ OPTION out_se_covar_function
         tagList(
           div(class = "geno-helper-info-box",
             p(if (tolower(lang()) == "zh") {
-              "需要帮助？这里可以将 PLINK (.ped/.map) 转换为 BLUPF90 (.txt/.map/.bim)。转换后的文件将直接保存到您选择的输出目录。"
+              "需要帮助？这里可以将 PLINK (.bed/.bim/.fam) 转换为 BLUPF90 (.txt/.map/.bim)。转换后的文件将直接保存到您选择的输出目录。"
             } else {
-              "Need help? Use this tool to convert PLINK (.ped/.map) to BLUPF90 (.txt/.map/.bim). Converted files will be saved directly to your selected output directory."
+              "Need help? Use this tool to convert PLINK (.bed/.bim/.fam) to BLUPF90 (.txt/.map/.bim). Converted files will be saved directly to your selected output directory."
             }),
             p(style = "margin-bottom:0;color:#4a4a4a;font-size:0.9rem;", backend_text)
           ),
@@ -2075,31 +2884,38 @@ OPTION out_se_covar_function
                if (tolower(lang()) == "zh") "📋 转换方向" else "📋 Conversion Direction"),
             p(style = "margin: 0; color: #555;",
               if (tolower(lang()) == "zh") {
-                "PLINK (.ped/.map) → BLUPF90 (.txt/.map/.bim)"
+                "PLINK (.bed/.bim/.fam) → BLUPF90 (.txt/.map/.bim)"
               } else {
-                "PLINK (.ped/.map) → BLUPF90 (.txt/.map/.bim)"
+                "PLINK (.bed/.bim/.fam) → BLUPF90 (.txt/.map/.bim)"
               })
           ),
           
           div(class = "geno-helper-direction-card",
               h4(if (tolower(lang()) == "zh") "PLINK → BLUPF90" else "PLINK → BLUPF90"),
               p(if (tolower(lang()) == "zh") {
-                "请上传同一前缀的 .ped 和 .map 文件（例如 mydata.ped / mydata.map）。转换完成后，文件将保存到您选择的输出目录。"
+                "请上传同一前缀的 .bed、.bim 和 .fam 文件（例如 mydata.bed / mydata.bim / mydata.fam）。转换完成后，文件将保存到您选择的输出目录。"
               } else {
-                "Upload matching .ped and .map files (e.g. mydata.ped / mydata.map). After conversion, files will be saved to your selected output directory."
+                "Upload matching .bed, .bim and .fam files (e.g. mydata.bed / mydata.bim / mydata.fam). After conversion, files will be saved to your selected output directory."
               }),
               
               div(class = "geno-helper-file-input-wrapper",
-                fileInput("geno_help_plink_ped", 
-                         label = tags$strong("📄 PLINK .ped 文件"), 
-                         accept = c(".ped"),
+                fileInput("geno_help_plink_bed", 
+                         label = tags$strong("📄 PLINK .bed 文件"), 
+                         accept = c(".bed"),
                          buttonLabel = if (tolower(lang()) == "zh") "选择文件" else "Choose File",
                          placeholder = if (tolower(lang()) == "zh") "未选择文件" else "No file selected")
               ),
               div(class = "geno-helper-file-input-wrapper",
-                fileInput("geno_help_plink_map", 
-                         label = tags$strong("📄 PLINK .map 文件"), 
-                         accept = c(".map"),
+                fileInput("geno_help_plink_bim", 
+                         label = tags$strong("📄 PLINK .bim 文件"), 
+                         accept = c(".bim"),
+                         buttonLabel = if (tolower(lang()) == "zh") "选择文件" else "Choose File",
+                         placeholder = if (tolower(lang()) == "zh") "未选择文件" else "No file selected")
+              ),
+              div(class = "geno-helper-file-input-wrapper",
+                fileInput("geno_help_plink_fam", 
+                         label = tags$strong("📄 PLINK .fam 文件"), 
+                         accept = c(".fam"),
                          buttonLabel = if (tolower(lang()) == "zh") "选择文件" else "Choose File",
                          placeholder = if (tolower(lang()) == "zh") "未选择文件" else "No file selected")
               ),
@@ -2197,14 +3013,14 @@ OPTION out_se_covar_function
   }, ignoreInit = TRUE)
   
   observeEvent(input$geno_convert_run, {
-    has_plinkr <- requireNamespace("plinkR", quietly = TRUE)
-    has_rcpp <- isTRUE(use_rcpp_blup_convert) && is.function(eb_ped_to_blup_codes_cpp_fn)
-    if (!has_plinkr && !has_rcpp) {
+    has_plinkr <- has_plinkr_blup_backend()
+    has_r <- has_r_blup_backend_bfile()
+    if (!has_plinkr && !has_r) {
       showNotification(
         if (tolower(lang()) == "zh") {
-          "未检测到可用后端：请安装 plinkR/PLINK，或启用 Rcpp 转换器。"
+          "未检测到可用的转换后端。"
         } else {
-          "No conversion backend available. Install plinkR/PLINK or enable the Rcpp converter."
+          "No conversion backend available."
         },
         type = "error", duration = 10
       )
@@ -2213,27 +3029,45 @@ OPTION out_se_covar_function
     
     cleanup_conversion_files()
     
-    req(input$geno_help_plink_ped, input$geno_help_plink_map)
+    req(input$geno_help_plink_bed, input$geno_help_plink_bim, input$geno_help_plink_fam)
       
       withProgress(message = if (tolower(lang()) == "zh") "正在转换 PLINK → BLUPF90..." else "Converting PLINK → BLUPF90...",
                    detail = if (tolower(lang()) == "zh") "准备文件..." else "Preparing files...",
                    value = 0, {
         
-        ped_name <- input$geno_help_plink_ped$name[1]
-        ped_datapath <- input$geno_help_plink_ped$datapath[1]
-        map_datapath <- input$geno_help_plink_map$datapath[1]
+        bed_name <- input$geno_help_plink_bed$name[1]
+        bim_name <- input$geno_help_plink_bim$name[1]
+        fam_name <- input$geno_help_plink_fam$name[1]
+        bed_datapath <- input$geno_help_plink_bed$datapath[1]
+        bim_datapath <- input$geno_help_plink_bim$datapath[1]
+        fam_datapath <- input$geno_help_plink_fam$datapath[1]
+
+        prefixes <- tools::file_path_sans_ext(c(basename(bed_name), basename(bim_name), basename(fam_name)))
+        if (length(unique(prefixes)) != 1L) {
+          showNotification(
+            if (tolower(lang()) == "zh") {
+              "请上传同一前缀的 .bed/.bim/.fam 文件。"
+            } else {
+              "Please upload matching .bed/.bim/.fam files with the same prefix."
+            },
+            type = "error", duration = 10
+          )
+          return(NULL)
+        }
         
         # 使用临时目录进行转换
         tmp_dir <- tempfile(pattern = "easyblup_plink_", tmpdir = tempdir())
         dir.create(tmp_dir, recursive = TRUE, showWarnings = FALSE)
         
-        base_prefix <- tools::file_path_sans_ext(basename(ped_name))
+        base_prefix <- prefixes[1]
         target_prefix <- file.path(tmp_dir, base_prefix)
         
-        ped_target <- paste0(target_prefix, ".ped")
-        map_target <- paste0(target_prefix, ".map")
-        file.copy(ped_datapath, ped_target, overwrite = TRUE)
-        file.copy(map_datapath, map_target, overwrite = TRUE)
+        bed_target <- paste0(target_prefix, ".bed")
+        bim_target <- paste0(target_prefix, ".bim")
+        fam_target <- paste0(target_prefix, ".fam")
+        file.copy(bed_datapath, bed_target, overwrite = TRUE)
+        file.copy(bim_datapath, bim_target, overwrite = TRUE)
+        file.copy(fam_datapath, fam_target, overwrite = TRUE)
         
         backend_used <- NULL
         conversion_error <- NULL
@@ -2245,25 +3079,29 @@ OPTION out_se_covar_function
           )
 
           plink_res <- tryCatch({
-            plinkR::plink_to_blupf90(prefix = target_prefix, out_prefix = target_prefix, verbose = TRUE)
-            TRUE
+            convert_plink_to_blupf90_plink_backend_bfile(
+              bed_path = bed_target,
+              bim_path = bim_target,
+              fam_path = fam_target,
+              out_prefix = target_prefix
+            )
           }, error = function(e) e)
 
           out_txt <- paste0(target_prefix, ".txt")
           out_map <- paste0(target_prefix, ".map")
           out_bim <- paste0(target_prefix, ".bim")
-          plink_ok <- isTRUE(plink_res) && file.exists(out_txt) && file.exists(out_map)
+          plink_ok <- !inherits(plink_res, "error") && file.exists(out_txt) && file.exists(out_map)
 
           if (plink_ok) {
-            backend_used <- "PLINK"
+            backend_used <- if (is.list(plink_res) && identical(plink_res$via, "cli")) "PLINK (CLI)" else "PLINK"
           } else {
             conversion_error <- if (inherits(plink_res, "error")) plink_res$message else "PLINK output files not found."
-            if (has_rcpp) {
+            if (has_r) {
               showNotification(
                 if (tolower(lang()) == "zh") {
-                  paste0("PLINK 转换失败，自动回退到 Rcpp：", conversion_error)
+                  paste0("PLINK 转换失败，自动回退到 R/snpStats 后端：", conversion_error)
                 } else {
-                  paste0("PLINK conversion failed. Falling back to Rcpp: ", conversion_error)
+                  paste0("PLINK conversion failed. Falling back to R/snpStats backend: ", conversion_error)
                 },
                 type = "warning", duration = 10
               )
@@ -2271,23 +3109,24 @@ OPTION out_se_covar_function
           }
         }
 
-        if (is.null(backend_used) && has_rcpp) {
+        if (is.null(backend_used) && has_r) {
           setProgress(
             value = 0.45,
-            detail = if (tolower(lang()) == "zh") "正在运行 Rcpp 转换（回退）..." else "Running Rcpp conversion (fallback)..."
+            detail = if (tolower(lang()) == "zh") "正在运行 R/snpStats 转换（第二选择）..." else "Running R/snpStats conversion (second choice)..."
           )
-          rcpp_res <- tryCatch({
-            convert_plink_to_blupf90_rcpp(
-              ped_path = ped_target,
-              map_path = map_target,
+          r_res <- tryCatch({
+            convert_plink_to_blupf90_r_bfile(
+              bed_path = bed_target,
+              bim_path = bim_target,
+              fam_path = fam_target,
               out_prefix = target_prefix
             )
           }, error = function(e) e)
 
-          if (inherits(rcpp_res, "error")) {
-            conversion_error <- rcpp_res$message
+          if (inherits(r_res, "error")) {
+            conversion_error <- r_res$message
           } else {
-            backend_used <- "Rcpp"
+            backend_used <- "R/snpStats"
           }
         }
 

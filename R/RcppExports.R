@@ -73,8 +73,8 @@ fast_top_contrib_cpp <- function(ids, sires, dams, F, target_id, max_depth = 6L,
     .Call(`_easybreedeR_fast_top_contrib_cpp`, ids, sires, dams, F, target_id, max_depth, top_k)
 }
 
-eb_ped_to_blup_codes_cpp <- function(allele1, allele2) {
-    .Call(`_easybreedeR_eb_ped_to_blup_codes_cpp`, allele1, allele2)
+eb_ped_to_blup_codes_cpp <- function(allele1, allele2, counted_allele = "A1") {
+    .Call(`_easybreedeR_eb_ped_to_blup_codes_cpp`, allele1, allele2, counted_allele)
 }
 
 gvr_call_rate_from_ped_strings_cpp <- function(geno_pairs) {

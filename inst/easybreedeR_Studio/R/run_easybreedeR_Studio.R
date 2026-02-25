@@ -161,6 +161,61 @@ run_easybreedeR_Studio <- function() {
       lang <- suite_language()
       code <- tryCatch(language_code(lang), error = function(e) "en")
       l <- function(key) suite_safe_get_label(key, code)
+      make_dep_rows <- function(specs, ncol = 4L) {
+        if (length(specs) == 0) return(NULL)
+        width <- as.integer(12L / ncol)
+        groups <- split(specs, ceiling(seq_along(specs) / ncol))
+        shiny::tagList(lapply(groups, function(group) {
+          cols <- lapply(group, function(spec) {
+            label <- if (!is.null(spec$label) && nzchar(spec$label)) spec$label else spec$name
+            href <- if (!is.null(spec$href) && nzchar(spec$href)) spec$href else NULL
+            item <- if (!is.null(href) && nzchar(href)) {
+              shiny::tags$a(
+                href = href,
+                target = "_blank",
+                class = "dependency-link",
+                shiny::tags$span(class = "dependency-name", label)
+              )
+            } else {
+              shiny::tags$div(
+                class = "dependency-item-no-link",
+                shiny::tags$span(class = "dependency-name", label)
+              )
+            }
+            shiny::column(width, div(class = "dependency-item", item))
+          })
+          do.call(shiny::fluidRow, cols)
+        }))
+      }
+
+      required_dep_specs <- list(
+        list(name = "shiny", label = "shiny (>= 1.7.0)", href = "https://github.com/rstudio/shiny"),
+        list(name = "data.table", label = "data.table", href = "https://github.com/Rdatatable/data.table"),
+        list(name = "bslib", label = "bslib (>= 0.4.0)", href = "https://github.com/rstudio/bslib"),
+        list(name = "shinyjs", label = "shinyjs", href = "https://github.com/daattali/shinyjs"),
+        list(name = "dplyr", label = "dplyr", href = "https://github.com/tidyverse/dplyr"),
+        list(name = "DT", label = "DT (>= 0.20)", href = "https://github.com/rstudio/DT"),
+        list(name = "visNetwork", label = "visNetwork", href = "https://github.com/datastorm-open/visNetwork"),
+        list(name = "igraph", label = "igraph", href = "https://github.com/igraph/rigraph"),
+        list(name = "digest", label = "digest", href = "https://github.com/eddelbuettel/digest"),
+        list(name = "htmltools", label = "htmltools", href = "https://github.com/rstudio/htmltools"),
+        list(name = "httpuv", label = "httpuv", href = "https://github.com/rstudio/httpuv"),
+        list(name = "Rcpp", label = "Rcpp", href = "https://github.com/RcppCore/Rcpp"),
+        list(name = "plotly", label = "plotly", href = "https://github.com/ropensci/plotly")
+      )
+
+      optional_dep_specs <- list(
+        list(name = "jsonlite", label = "jsonlite (>= 1.8.0)", href = "https://github.com/jeroen/jsonlite"),
+        list(name = "shinyFiles", label = "shinyFiles", href = "https://github.com/thomasp85/shinyFiles"),
+        list(name = "fs", label = "fs", href = "https://github.com/r-lib/fs"),
+        list(name = "snpStats", label = "snpStats", href = "https://bioconductor.org/packages/snpStats/"),
+        list(name = "gdata", label = "gdata", href = "https://cran.r-project.org/package=gdata"),
+        list(name = "pedigreeTools", label = "pedigreeTools", href = "https://github.com/Rpedigree/pedigreeTools"),
+        list(name = "readxl", label = "readxl", href = "https://github.com/tidyverse/readxl"),
+        list(name = "curl", label = "curl", href = "https://github.com/jeroen/curl"),
+        list(name = "testthat", label = "testthat (>= 3.0.0)", href = "https://github.com/r-lib/testthat")
+      )
+
       shiny::tagList(
         div(class = "cards-container",
           div(class = "section-title",
@@ -275,34 +330,33 @@ run_easybreedeR_Studio <- function() {
               )
             )
           ),
+          make_dep_rows(optional_dep_specs),
+          shiny::div(
+            style = "margin-top: 8px; color: #666; font-size: 13px;",
+            if (identical(code, "zh")) {
+              "以上为当前项目 DESCRIPTION 中的可选 R 包依赖（Suggests）。"
+            } else if (identical(code, "pt")) {
+              "Acima estao as dependencias opcionais (Suggests) atuais no DESCRIPTION do projeto."
+            } else {
+              "The packages above are the current optional R dependencies (Suggests) in the project DESCRIPTION."
+            }
+          ),
           div(class = "section-title", style = "margin-top: 48px;",
             shiny::h2(
               shiny::tags$span(class = "material-symbols-outlined", "library_books"),
               l("suite_required_dependencies")
             )
           ),
-          shiny::fluidRow(
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/rstudio/shiny", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "shiny")))),
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/rstudio/bslib", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "bslib")))),
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/rstudio/DT", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "DT")))),
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/jeroen/jsonlite", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "jsonlite"))))
-          ),
-          shiny::fluidRow(
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/ropensci/plotly", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "plotly")))),
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/thomasp85/shinyFiles", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "shinyFiles")))),
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/r-lib/fs", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "fs")))),
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/datastorm-open/visNetwork", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "visNetwork"))))
-          ),
-          shiny::fluidRow(
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/igraph/igraph", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "igraph")))),
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/tidyverse/readxl", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "readxl")))),
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/RcppCore/Rcpp", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "Rcpp")))),
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/Rdatatable/data.table", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "data.table"))))
-          ),
-          shiny::fluidRow(
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/jeroen/curl", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "curl")))),
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/r-lib/testthat", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "testthat")))),
-            shiny::column(3, div(class = "dependency-item", shiny::tags$a(href = "https://github.com/Rpedigree/pedigreeTools", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "pedigreeTools"))))
+          make_dep_rows(required_dep_specs),
+          shiny::div(
+            style = "margin-top: 8px; color: #666; font-size: 13px;",
+            if (identical(code, "zh")) {
+              "以上为当前项目 DESCRIPTION 中的必需 R 包依赖（Imports）。"
+            } else if (identical(code, "pt")) {
+              "Acima estao as dependencias obrigatorias (Imports) atuais no DESCRIPTION do projeto."
+            } else {
+              "The packages above are the current required R dependencies (Imports) in the project DESCRIPTION."
+            }
           ),
           div(class = "section-title", style = "margin-top: 48px;",
             shiny::h2(

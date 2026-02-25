@@ -1,7 +1,7 @@
 Package: easybreedeR
 Type: Package
 Title: An Online Integrated R Shiny Application for Breeding Data Analysis
-Version: 0.6.1
+Version: 0.6.3
 Authors@R:
     person(given = "Huangyi",
            family = "Tang",
@@ -35,6 +35,9 @@ Suggests:
     jsonlite (>= 1.8.0),
     shinyFiles,
     fs,
+    plinkR,
+    snpStats,
+    gdata,
     pedigreeTools,
     readxl,
     curl,
