@@ -1,0 +1,45 @@
+test_that("QC handles missing, monomorphic and invalid dosage values", {
+  g <- cbind(c(0, 1, 2, NA), rep(0, 4), rep(NA_real_, 4), c(-1, 3, .5, Inf))
+  expect_equal(as.numeric(gvr_marker_call_rate(g)), c(.75, 1, 0, 0))
+  expect_equal(as.numeric(gvr_maf(g)), c(.5, 0, NA, NA))
+  expect_equal(as.numeric(gvr_marker_het(g)), c(1/3, 0, NA, NA))
+  expect_equal(as.numeric(gvr_hwe_exact(g)), c(1, 1, NA, NA))
+  expect_length(gvr_marker_call_rate(matrix(numeric(), 0, 0)), 0)
+})
+
+test_that("PCA agrees with an independent Gram matrix calculation", {
+  g <- matrix(c(0,0,1,2, 0,1,2,2, 2,0,1,0), nrow = 4)
+  p <- colMeans(g) / 2
+  x <- sweep(sweep(g, 2, 2*p), 2, sqrt(2*p*(1-p)), "/")
+  ref <- eigen(tcrossprod(x) / ncol(x), symmetric = TRUE)
+  result <- gvr_pca_from_dosage_cpp(g, n_components = 2L)
+  expect_equal(as.numeric(result$eigenvalues), ref$values[1:2], tolerance = 1e-10)
+  expect_equal(as.numeric(result$variance), ref$values[1:2] / sum(ref$values) * 100, tolerance = 1e-10)
+  expect_equal(abs(result$scores), abs(ref$vectors[, 1:2]), ignore_attr = TRUE, tolerance = 1e-10)
+  withr::local_envvar(EASYBREEDER_PCA_MEMORY_MB = "0.0001")
+  expect_error(gvr_pca_from_dosage_cpp(g), "exceeds")
+  withr::local_envvar(c(EASYBREEDER_PCA_MEMORY_MB = "512", EASYBREEDER_PCA_MAX_COMPARISONS = "1"))
+  expect_error(gvr_pca_from_dosage_cpp(g), "computation limit")
+})
+
+test_that("PED string conversion retains missingness and allele counts", {
+  pairs <- matrix(c("A A", "A G", "G G", "0 0"), ncol = 1)
+  expect_equal(as.numeric(gvr_maf_from_ped_strings_cpp(pairs)), .5)
+  expect_equal(as.numeric(gvr_call_rate_from_ped_strings_cpp(pairs)$marker_call_rate), .75)
+  a1 <- matrix(c("A", "A", "G", "0"), ncol = 1)
+  a2 <- matrix(c("A", "G", "G", "0"), ncol = 1)
+  first <- eb_ped_to_blup_codes_cpp(a1, a2, "A1")
+  second <- eb_ped_to_blup_codes_cpp(a1, a2, "A2")
+  expect_equal(first$dosage[4, 1], 5L)
+  expect_equal(second$dosage[4, 1], 5L)
+  expect_equal(as.numeric(first$dosage[1:3, 1] + second$dosage[1:3, 1]), rep(2, 3))
+  expect_error(eb_ped_to_blup_codes_cpp(a1, a2[1:2, , drop = FALSE]), "same dimensions")
+})
+
+test_that("relatedness rejects oversized work and invalid dimensions", {
+  g <- matrix(rep(c(0,1,2), 6), nrow = 3)
+  expect_error(gvr_relatedness_pairs(g, "one"), "sample_ids")
+  expect_error(gvr_relatedness_pairs(g, letters[1:3], max_pairs = -1L), "non-negative")
+  withr::local_envvar(EASYBREEDER_RELATEDNESS_MAX_PAIRS = "2")
+  expect_error(gvr_relatedness_pairs(g, letters[1:3]), "exceeds")
+})

@@ -1,0 +1,27 @@
+test_that("pedigree uploads use content identity and clear only their workspace", {
+  withr::local_options(options())
+  on.exit(graphics.off(), add = TRUE)
+  app <- load_test_app("pedivieweR")
+  files <- withr::local_tempdir()
+  f1 <- file.path(files, "one.txt")
+  f2 <- file.path(files, "two.txt")
+  writeLines(c("ID Sire Dam", "A 0 0", "B 0 0"), f1)
+  writeLines(c("ID Sire Dam", "C 0 0", "D 0 0"), f2)
+  Sys.setFileTime(f2, file.info(f1)$mtime)
+  upload <- function(path) data.frame(name = "same.txt", size = file.info(path)$size,
+                                     type = "text/plain", datapath = path)
+  shiny::testServer(app$server, {
+    session$setInputs(sep = " ", file = upload(f1))
+    expect_identical(raw_data()$ID, c("A", "B"))
+    hash1 <- uploaded_file_hash()
+    session$setInputs(file = upload(f2))
+    expect_false(identical(uploaded_file_hash(), hash1))
+    expect_identical(raw_data()$ID, c("C", "D"))
+    path <- session_workspace
+    expect_gt(length(list.files(path)), 0)
+    session$setInputs(clear_all = 1)
+    expect_length(list.files(path), 0)
+    session$close()
+    expect_false(dir.exists(path))
+  })
+})

@@ -3,8 +3,20 @@
 #include <cmath>
 #include <limits>
 #include <vector>
+#include <cstdlib>
 
 using namespace Rcpp;
+
+static double positive_runtime_limit(const char* name, double fallback) {
+  const char* raw = std::getenv(name);
+  if (raw == NULL) return fallback;
+  char* end = NULL;
+  double value = std::strtod(raw, &end);
+  if (end == raw || *end != '\0' || !std::isfinite(value) || value <= 0.0) {
+    Rcpp::stop("%s must be a positive finite number.", name);
+  }
+  return value;
+}
 
 inline bool is_missing(double x) {
   return NumericVector::is_na(x) || !R_finite(x);
@@ -242,6 +254,8 @@ DataFrame gvr_relatedness_pairs(NumericMatrix geno, CharacterVector sample_ids,
   // 1) compute IBS counts and method-of-moments initializer
   // 2) refine Z0/Z1/Z2 with EM on per-locus pair likelihoods under Z states.
   int n = geno.nrow(), m = geno.ncol();
+  if (sample_ids.size() != n) Rcpp::stop("sample_ids must match the number of genotype rows.");
+  if (max_pairs < 0 || max_markers < 1) Rcpp::stop("max_pairs must be non-negative and max_markers must be positive.");
   if (n < 2 || m < 1) {
     return DataFrame::create(
       _["FID1"] = CharacterVector(0), _["IID1"] = CharacterVector(0),
@@ -253,6 +267,11 @@ DataFrame gvr_relatedness_pairs(NumericMatrix geno, CharacterVector sample_ids,
     );
   }
   int use_m = std::min(m, max_markers);
+  const double pair_count = std::min((double)max_pairs, (double)n * (n - 1) / 2.0);
+  if (pair_count > positive_runtime_limit("EASYBREEDER_RELATEDNESS_MAX_PAIRS", 100000.0) ||
+      pair_count * use_m > positive_runtime_limit("EASYBREEDER_RELATEDNESS_MAX_COMPARISONS", 100000000.0)) {
+    Rcpp::stop("Local relatedness exceeds the configured pair/comparison limit. Reduce the dataset or run PLINK locally.");
+  }
   if (min_valid < 1) min_valid = 1;
   if (min_valid > use_m) min_valid = use_m;
 
@@ -424,6 +443,13 @@ SEXP gvr_pca_from_dosage_cpp(NumericMatrix geno, int n_components = 20, int max_
   const int n = geno.nrow();
   const int m = geno.ncol();
   if (n < 2 || m < 2) return R_NilValue;
+  const double estimated_mb = (24.0 * n * m + 48.0 * n * n) / (1024.0 * 1024.0);
+  const double budget_mb = positive_runtime_limit("EASYBREEDER_PCA_MEMORY_MB", 512.0);
+  const double max_samples = positive_runtime_limit("EASYBREEDER_PCA_MAX_SAMPLES", 5000.0);
+  if (estimated_mb > budget_mb || n > max_samples ||
+      (double)n * (n + 1.0) / 2.0 * m > positive_runtime_limit("EASYBREEDER_PCA_MAX_COMPARISONS", 100000000.0)) {
+    Rcpp::stop("Local PCA exceeds the configured memory, sample or computation limit. Use a smaller dataset or run PLINK locally.");
+  }
   if (n_components < 1) n_components = 1;
   // max_markers <= 0 means "use all valid markers" (PLINK-like default).
   const bool limit_markers = (max_markers > 0);
@@ -508,25 +534,18 @@ SEXP gvr_pca_from_dosage_cpp(NumericMatrix geno, int n_components = 20, int max_
   }
 
   // Compute Gram matrix K = X * X' / m (PLINK-style covariance matrix)
-  std::vector<double> k_mat((size_t)n * (size_t)n, 0.0);
+  NumericMatrix k_rcpp(n, n);
   const double inv_m = 1.0 / (double)m_keep;
   for (int j = 0; j < n; ++j) {
+    Rcpp::checkUserInterrupt();
     for (int i = 0; i <= j; ++i) {
       double acc = 0.0;
       for (int c = 0; c < m_keep; ++c) {
         acc += x_std(i, c) * x_std(j, c);
       }
       const double val = acc * inv_m;
-      k_mat[(size_t)i + (size_t)j * (size_t)n] = val;
-      k_mat[(size_t)j + (size_t)i * (size_t)n] = val;
-    }
-  }
-
-  // Convert to NumericMatrix for eigenvalue decomposition using R's eigen()
-  NumericMatrix k_rcpp(n, n);
-  for (int i = 0; i < n; ++i) {
-    for (int j = 0; j < n; ++j) {
-      k_rcpp(i, j) = k_mat[(size_t)i + (size_t)j * (size_t)n];
+      k_rcpp(i, j) = val;
+      k_rcpp(j, i) = val;
     }
   }
 
@@ -558,15 +577,17 @@ SEXP gvr_pca_from_dosage_cpp(NumericMatrix geno, int n_components = 20, int max_
   NumericVector variance(n_keep);
   NumericMatrix scores(n, n_keep);
   double eval_sum = 0.0;
+  for (int idx : keep_eval_idx) {
+    if (R_finite(evals[idx]) && evals[idx] > 0.0) eval_sum += evals[idx];
+  }
   for (int k = 0; k < n_keep; ++k) {
     double ev = evals[keep_eval_idx[k]];
     if (!R_finite(ev)) ev = 0.0;
     if (ev < 0.0 && ev > -1e-12) ev = 0.0;  // Clamp small negative values (numerical error) to zero
     eigenvalues[k] = ev;
-    eval_sum += ev;
   }
   // Use total variance for normalization
-  if (!R_finite(eval_sum) || eval_sum < 0.0) eval_sum = 1.0;
+  if (!R_finite(eval_sum) || eval_sum <= 0.0) eval_sum = 1.0;
 
   // Extract eigenvectors (PC scores) from R's eigen result and ensure consistent sign
   for (int k = 0; k < n_keep; ++k) {

@@ -103,6 +103,16 @@ TRANSLATIONS <- list(
     zh = "BLUPF90 参数卡生成与基因型格式转换",
     pt = "Gerador de parâmetros BLUPF90 e conversão de formato de genótipos"
   ),
+  xmosome_app_name = list(
+    en = "Xmosome_blupf90kit",
+    zh = "Xmosome_blupf90kit",
+    pt = "Xmosome_blupf90kit"
+  ),
+  suite_xmosome_desc = list(
+    en = "Advanced BLUPF90 / renumf90 parameter builder with progressive OPTIONS and Auto/Manual editing",
+    zh = "进阶 BLUPF90 / renumf90 参数构建器，支持渐进 OPTIONS 与 Auto/Manual 编辑",
+    pt = "Construtor avançado de parâmetros BLUPF90 / renumf90 com OPTIONS progressivas e edição Auto/Manual"
+  ),
   suite_launch = list(
     en = "Launch",
     zh = "启动",
@@ -201,9 +211,9 @@ TRANSLATIONS <- list(
     pt = "Número máximo de cromossomos a incluir (1 ao número selecionado). Apenas cromossomos 1 ao selecionado serão incluídos na análise"
   ),
   genoviewer_show_summary_plots = list(
-    en = "📊 Show Summary & Plots",
-    zh = "📊 显示摘要与图表",
-    pt = "📊 Mostrar Resumo e Gráficos"
+    en = "Show Summary & Plots",
+    zh = "显示摘要与图表",
+    pt = "Mostrar Resumo e Gráficos"
   ),
   genoviewer_show_summary_help = list(
     en = "Generate basic visualizations from loaded data",
@@ -221,9 +231,9 @@ TRANSLATIONS <- list(
     pt = "Defina os limites de controle de qualidade e filtre os dados."
   ),
   genoviewer_run_qc = list(
-    en = "🔍 Run Quality Control",
-    zh = "🔍 运行质量控制",
-    pt = "🔍 Executar Controle de Qualidade"
+    en = "Run Quality Control",
+    zh = "运行质量控制",
+    pt = "Executar Controle de Qualidade"
   ),
   genoviewer_data_preview = list(
     en = "Data Preview",
@@ -286,9 +296,9 @@ TRANSLATIONS <- list(
     pt = "Separador:"
   ),
   pediviewer_auto_process = list(
-    en = "🚀 Auto-detect, calculate F & visualize",
-    zh = "🚀 自动检测、计算 F 并可视化",
-    pt = "🚀 Auto-detectar, calcular F e visualizar"
+    en = "Auto-detect, calculate F & visualize",
+    zh = "自动检测、计算 F 并可视化",
+    pt = "Auto-detectar, calcular F e visualizar"
   ),
   pediviewer_auto_process_help = list(
     en = "Automatically detect columns, calculate inbreeding, and generate visualization after upload",
@@ -306,9 +316,9 @@ TRANSLATIONS <- list(
     pt = "Processar Dados"
   ),
   pediviewer_search_individual = list(
-    en = "🔍 Search Individual ID:",
-    zh = "🔍 搜索个体ID：",
-    pt = "🔍 Buscar ID do Indivíduo:"
+    en = "Search Individual ID:",
+    zh = "搜索个体ID：",
+    pt = "Buscar ID do Indivíduo:"
   ),
   pediviewer_search_placeholder = list(
     en = "Enter individual ID to visualize pedigree",
@@ -331,14 +341,14 @@ TRANSLATIONS <- list(
     pt = "Mostrar Maior Endogamia"
   ),
   pediviewer_refresh = list(
-    en = "🔄 Refresh",
-    zh = "🔄 刷新",
-    pt = "🔄 Atualizar"
+    en = "Refresh",
+    zh = "刷新",
+    pt = "Atualizar"
   ),
   pediviewer_network_legend = list(
-    en = "📊 Network Legend:",
-    zh = "📊 网络图例：",
-    pt = "📊 Legenda da Rede:"
+    en = "Network Legend:",
+    zh = "网络图例：",
+    pt = "Legenda da Rede:"
   ),
   pediviewer_legend_male = list(
     en = "Male (M)",
@@ -361,9 +371,9 @@ TRANSLATIONS <- list(
     pt = "Indivíduo Alvo"
   ),
   pediviewer_legend_hint = list(
-    en = "💡 Node size represents inbreeding coefficient (F): Larger nodes = Higher inbreeding",
-    zh = "💡 节点大小代表近交系数 (F)：越大表示近交越高",
-    pt = "💡 O tamanho do nó representa o coeficiente de endogamia (F): maior nó = maior endogamia"
+    en = "Node size represents inbreeding coefficient (F): Larger nodes = Higher inbreeding",
+    zh = "节点大小代表近交系数 (F)：越大表示近交越高",
+    pt = "O tamanho do nó representa o coeficiente de endogamia (F): maior nó = maior endogamia"
   ),
   pediviewer_download_relatives = list(
     en = "Download Relatives",
@@ -386,9 +396,9 @@ TRANSLATIONS <- list(
     pt = "Exportação de Animal Selecionado"
   ),
   pediviewer_download_selected_range = list(
-    en = "📥 Download Selected Range",
-    zh = "📥 下载选定范围",
-    pt = "📥 Baixar Faixa Selecionada"
+    en = "Download Selected Range",
+    zh = "下载选定范围",
+    pt = "Baixar Faixa Selecionada"
   ),
   pediviewer_export_scope_help = list(
     en = "Exports: the selected individual and all relatives within the current 'Search Depth (generations)'.",
@@ -431,14 +441,14 @@ TRANSLATIONS <- list(
     pt = "✓ Cálculo automático ativado"
   ),
   pediviewer_auto_processing_enabled = list(
-    en = "🔄 Auto-processing enabled - Data will be processed automatically when validation passes",
-    zh = "🔄 已启用自动处理 - 验证通过后将自动处理数据",
-    pt = "🔄 Processamento automático ativado - Os dados serão processados automaticamente quando a validação passar"
+    en = "Auto-processing enabled - Data will be processed automatically when validation passes",
+    zh = "已启用自动处理 - 验证通过后将自动处理数据",
+    pt = "Processamento automático ativado - Os dados serão processados automaticamente quando a validação passar"
   ),
   pediviewer_download_pedigree_with_inbreeding = list(
-    en = "📥 Download pedigree with inbreeding",
-    zh = "📥 下载含近交系数的系谱",
-    pt = "📥 Baixar pedigree com endogamia"
+    en = "Download pedigree with inbreeding",
+    zh = "下载含近交系数的系谱",
+    pt = "Baixar pedigree com endogamia"
   ),
   pediviewer_format_label = list(
     en = "Format:",
@@ -456,19 +466,19 @@ TRANSLATIONS <- list(
     pt = "Tabela"
   ),
   pediviewer_download_qc_report = list(
-    en = "📥 Download QC Report",
-    zh = "📥 下载质控报告",
-    pt = "📥 Baixar Relatório de QC"
+    en = "Download QC Report",
+    zh = "下载质控报告",
+    pt = "Baixar Relatório de QC"
   ),
   pediviewer_download_fixed_pedigree = list(
-    en = "📥 Download Fixed Pedigree",
-    zh = "📥 下载修复后的系谱",
-    pt = "📥 Baixar Pedigree Corrigido"
+    en = "Download Fixed Pedigree",
+    zh = "下载修复后的系谱",
+    pt = "Baixar Pedigree Corrigido"
   ),
   pediviewer_download_structure_report = list(
-    en = "📥 Download Structure Report",
-    zh = "📥 下载结构报告",
-    pt = "📥 Baixar Relatório de Estrutura"
+    en = "Download Structure Report",
+    zh = "下载结构报告",
+    pt = "Baixar Relatório de Estrutura"
   ),
   pediviewer_pedigree_structure = list(
     en = "Pedigree Structure",
@@ -501,9 +511,9 @@ TRANSLATIONS <- list(
     pt = "Limpar Tudo"
   ),
   pediviewer_start_analysis = list(
-    en = "🚀 Start Analysis",
-    zh = "🚀 开始分析",
-    pt = "🚀 Iniciar Análise"
+    en = "Start Analysis",
+    zh = "开始分析",
+    pt = "Iniciar Análise"
   ),
   pediviewer_start_analysis_help = list(
     en = "Click to begin processing and analyzing the pedigree data after selecting column mappings.",
@@ -511,9 +521,9 @@ TRANSLATIONS <- list(
     pt = "Clique para iniciar o processamento e análise dos dados do pedigree após selecionar o mapeamento de colunas."
   ),
   pediviewer_highlight_generations = list(
-    en = "🔍 Highlight Generations:",
-    zh = "🔍 高亮世代：",
-    pt = "🔍 Destacar Gerações:"
+    en = "Highlight Generations:",
+    zh = "高亮世代：",
+    pt = "Destacar Gerações:"
   ),
   pediviewer_top10_sire = list(
     en = "Top 10 Most Influential Sires",
@@ -865,24 +875,24 @@ TRANSLATIONS <- list(
     pt = "Construtor de Modelo"
   ),
   easyblup_traits = list(
-    en = "🧬 Traits (y)",
-    zh = "🧬 性状 (y)",
-    pt = "🧬 Características (y)"
+    en = "Traits (y)",
+    zh = "性状 (y)",
+    pt = "Características (y)"
   ),
   easyblup_fixed_effects = list(
-    en = "📊 Fixed Effects (b)",
-    zh = "📊 固定效应 (b)",
-    pt = "📊 Efeitos Fixos (b)"
+    en = "Fixed Effects (b)",
+    zh = "固定效应 (b)",
+    pt = "Efeitos Fixos (b)"
   ),
   easyblup_animal_id = list(
-    en = "🐄 Animal ID (a)",
-    zh = "🐄 动物ID (a)",
-    pt = "🐄 ID do Animal (a)"
+    en = "Animal ID (a)",
+    zh = "动物ID (a)",
+    pt = "ID do Animal (a)"
   ),
   easyblup_random_effects = list(
-    en = "🎲 Random Effects (r)",
-    zh = "🎲 随机效应 (r)",
-    pt = "🎲 Efeitos Aleatórios (r)"
+    en = "Random Effects (r)",
+    zh = "随机效应 (r)",
+    pt = "Efeitos Aleatórios (r)"
   ),
   easyblup_optional_effects = list(
     en = "➕ Additional Effects (Optional)",
@@ -895,14 +905,14 @@ TRANSLATIONS <- list(
     pt = "Visualização e Editor de Arquivo de Parâmetros"
   ),
   easyblup_reset_param = list(
-    en = "🔄 Reset to Default",
-    zh = "🔄 重置为默认",
-    pt = "🔄 Restaurar Padrão"
+    en = "Reset to Default",
+    zh = "重置为默认",
+    pt = "Restaurar Padrão"
   ),
   easyblup_download_param = list(
-    en = "📥 Download Parameter File",
-    zh = "📥 下载参数文件",
-    pt = "📥 Baixar Arquivo de Parâmetros"
+    en = "Download Parameter File",
+    zh = "下载参数文件",
+    pt = "Baixar Arquivo de Parâmetros"
   ),
   
   # === easyblup: Right Panel ===
@@ -1260,4 +1270,273 @@ get_label <- function(key, lang = "en", app = NULL) {
   }
   
   return(key)
+}
+
+# ====== Landscape A4 print stylesheet ======
+# Shared by datavieweR / pedivieweR / genovieweR / easyblup / Studio.
+# Polished single-page landscape A4 print of the current UI view.
+easybreedeR_a4_layout_css <- function() {
+  paste(c(
+    "/* ---- Mild screen polish (does not crush layout) ---- */",
+    ".three-panel-container { min-height: 0; }",
+    ".js-plotly-plot, .plotly, .shiny-plot-output, .vis-network,",
+    ".html-widget.plotly, .html-widget.visNetwork { max-height: 560px; }",
+    "",
+    "/* ---- Print: landscape A4, clean one-page snapshot ---- */",
+    "@page { size: A4 landscape; margin: 8mm; }",
+    "@media print {",
+    "  * {",
+    "    -webkit-print-color-adjust: exact !important;",
+    "    print-color-adjust: exact !important;",
+    "    box-shadow: none !important;",
+    "    text-shadow: none !important;",
+    "  }",
+    "",
+    "  html, body {",
+    "    width: 100% !important;",
+    "    height: auto !important;",
+    "    margin: 0 !important;",
+    "    padding: 0 !important;",
+    "    overflow: visible !important;",
+    "    background: #ffffff !important;",
+    "    color: #222 !important;",
+    "    font-size: 9pt !important;",
+    "    line-height: 1.35 !important;",
+    "  }",
+    "",
+    "  /* Fit the app frame onto one landscape sheet */",
+    "  .page-fillable, .bslib-page-fill {",
+    "    display: flex !important;",
+    "    flex-direction: column !important;",
+    "    width: 100% !important;",
+    "    height: 194mm !important;",
+    "    max-height: 194mm !important;",
+    "    margin: 0 !important;",
+    "    padding: 0 !important;",
+    "    overflow: hidden !important;",
+    "    background: #fff !important;",
+    "    border: 1px solid #CFB991 !important;",
+    "    border-radius: 4px !important;",
+    "  }",
+    "",
+    "  /* Hide interactive chrome */",
+    "  .toggle-btn-left, .toggle-btn-right,",
+    "  .show-readme-btn, .readme-sidebar, #showReadmeBtn,",
+    "  .navbar-right-group, .github-star-btn,",
+    "  #settingsDropdownTop, #dropdownMenuLangTop,",
+    "  .selectize-dropdown, .dropdown-menu,",
+    "  .dataTables_filter, .dataTables_length,",
+    "  .dataTables_paginate, .dataTables_info,",
+    "  .shiny-file-input-progress,",
+    "  a.action-button[href='#'],",
+    "  .btn-close, .modal, .modal-backdrop { display: none !important; }",
+    "",
+    "  /* Title band */",
+    "  .title-bar {",
+    "    flex: 0 0 auto !important;",
+    "    padding: 6px 14px !important;",
+    "    background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%) !important;",
+    "    border-bottom: 2px solid #A8894A !important;",
+    "    text-align: center !important;",
+    "  }",
+    "  .title-bar h1 {",
+    "    margin: 0 !important;",
+    "    font-size: 14pt !important;",
+    "    font-weight: 700 !important;",
+    "    color: #111 !important;",
+    "    letter-spacing: 0.02em !important;",
+    "  }",
+    "  .title-bar p {",
+    "    margin: 2px 0 0 0 !important;",
+    "    font-size: 8.5pt !important;",
+    "    color: #222 !important;",
+    "    opacity: 0.85 !important;",
+    "  }",
+    "",
+    "  /* Three panels as a clean report grid */",
+    "  .three-panel-container {",
+    "    flex: 1 1 auto !important;",
+    "    display: grid !important;",
+    "    grid-template-columns: 52mm 1fr 52mm !important;",
+    "    gap: 0 !important;",
+    "    height: auto !important;",
+    "    min-height: 0 !important;",
+    "    overflow: hidden !important;",
+    "    background: #fff !important;",
+    "  }",
+    "  .left-panel, .right-panel, .center-panel {",
+    "    width: auto !important;",
+    "    max-width: none !important;",
+    "    height: 100% !important;",
+    "    overflow: hidden !important;",
+    "    padding: 8px 10px !important;",
+    "    background: #fff !important;",
+    "  }",
+    "  .left-panel {",
+    "    border-right: 1.5px solid #CFB991 !important;",
+    "    background: #FBF8F2 !important;",
+    "  }",
+    "  .right-panel {",
+    "    border-left: 1.5px solid #CFB991 !important;",
+    "    background: #FBF8F2 !important;",
+    "  }",
+    "  .left-panel.hidden, .right-panel.hidden {",
+    "    display: none !important;",
+    "  }",
+    "  .three-panel-container:has(.left-panel.hidden):has(.right-panel.hidden) {",
+    "    grid-template-columns: 1fr !important;",
+    "  }",
+    "  .three-panel-container:has(.left-panel.hidden):not(:has(.right-panel.hidden)) {",
+    "    grid-template-columns: 1fr 52mm !important;",
+    "  }",
+    "  .three-panel-container:has(.right-panel.hidden):not(:has(.left-panel.hidden)) {",
+    "    grid-template-columns: 52mm 1fr !important;",
+    "  }",
+    "",
+    "  /* Section cards */",
+    "  .panel-section {",
+    "    background: #fff !important;",
+    "    border: 1px solid #D9C9A3 !important;",
+    "    border-radius: 4px !important;",
+    "    padding: 6px 8px !important;",
+    "    margin-bottom: 6px !important;",
+    "  }",
+    "  .section-title {",
+    "    font-size: 9.5pt !important;",
+    "    font-weight: 700 !important;",
+    "    color: #2c3e50 !important;",
+    "    margin: 0 0 4px 0 !important;",
+    "    padding-bottom: 3px !important;",
+    "    border-bottom: 1.5px solid #CEB888 !important;",
+    "  }",
+    "  .subsection-title {",
+    "    font-size: 8.5pt !important;",
+    "    font-weight: 600 !important;",
+    "    margin: 4px 0 2px 0 !important;",
+    "  }",
+    "",
+    "  /* Tabs */",
+    "  .nav-tabs {",
+    "    border-bottom: 1.5px solid #CEB888 !important;",
+    "    margin-bottom: 4px !important;",
+    "    flex-wrap: nowrap !important;",
+    "  }",
+    "  .nav-tabs .nav-link {",
+    "    padding: 3px 10px !important;",
+    "    font-size: 8.5pt !important;",
+    "    font-weight: 600 !important;",
+    "    color: #444 !important;",
+    "    border: none !important;",
+    "    background: transparent !important;",
+    "  }",
+    "  .nav-tabs .nav-link.active {",
+    "    color: #111 !important;",
+    "    background: #F5ECD7 !important;",
+    "    border: 1px solid #CEB888 !important;",
+    "    border-bottom-color: #F5ECD7 !important;",
+    "    border-radius: 4px 4px 0 0 !important;",
+    "  }",
+    "  .tab-content { border-top: none !important; padding-top: 4px !important; }",
+    "  .card, .bslib-card {",
+    "    border: 1px solid #E6D9B8 !important;",
+    "    border-radius: 4px !important;",
+    "    overflow: hidden !important;",
+    "  }",
+    "  .card-body, .bslib-card .card-body { padding: 6px 8px !important; }",
+    "  .card-header, .bslib-card-header {",
+    "    padding: 4px 8px !important;",
+    "    background: #F8F4EA !important;",
+    "    border-bottom: 1px solid #E6D9B8 !important;",
+    "  }",
+    "",
+    "  /* Forms / controls — readable but quiet */",
+    "  label, .control-label, .form-label, .help-block,",
+    "  .checkbox label, .radio label {",
+    "    font-size: 8pt !important;",
+    "    color: #333 !important;",
+    "    margin-bottom: 1px !important;",
+    "  }",
+    "  .form-control, .form-select, .selectize-input, textarea, select, input {",
+    "    font-size: 8pt !important;",
+    "    padding: 2px 5px !important;",
+    "    min-height: 0 !important;",
+    "    height: auto !important;",
+    "    border: 1px solid #D0D0D0 !important;",
+    "    background: #fff !important;",
+    "    color: #222 !important;",
+    "  }",
+    "  .form-group, .shiny-input-container { margin-bottom: 4px !important; }",
+    "  .btn {",
+    "    font-size: 8pt !important;",
+    "    padding: 2px 7px !important;",
+    "    min-height: 0 !important;",
+    "    line-height: 1.25 !important;",
+    "    border-radius: 3px !important;",
+    "  }",
+    "  .btn-primary, .btn.btn-primary, .btn-success {",
+    "    background: #CEB888 !important;",
+    "    border-color: #B89D5D !important;",
+    "    color: #111 !important;",
+    "  }",
+    "",
+    "  /* Tables */",
+    "  table.dataTable, table {",
+    "    font-size: 7.5pt !important;",
+    "    width: 100% !important;",
+    "    border-collapse: collapse !important;",
+    "  }",
+    "  table.dataTable th, table th {",
+    "    background: #F5ECD7 !important;",
+    "    border-bottom: 1px solid #CFB991 !important;",
+    "    padding: 2px 4px !important;",
+    "    font-weight: 700 !important;",
+    "  }",
+    "  table.dataTable td, table td {",
+    "    padding: 2px 4px !important;",
+    "    border-bottom: 1px solid #EEE !important;",
+    "  }",
+    "  .dataTables_wrapper { max-height: 145mm !important; overflow: hidden !important; }",
+    "",
+    "  /* Plots / widgets */",
+    "  .js-plotly-plot, .plotly, .shiny-plot-output, .vis-network,",
+    "  .html-widget.plotly, .html-widget.visNetwork {",
+    "    max-height: 145mm !important;",
+    "    width: 100% !important;",
+    "    overflow: hidden !important;",
+    "    border: 1px solid #E6D9B8 !important;",
+    "    border-radius: 3px !important;",
+    "  }",
+    "  #param_editor {",
+    "    min-height: 120mm !important;",
+    "    max-height: 150mm !important;",
+    "    font-size: 8pt !important;",
+    "    border: 1px solid #D0D0D0 !important;",
+    "    background: #FAFAFA !important;",
+    "  }",
+    "",
+    "  /* Studio shell */",
+    "  .navbar {",
+    "    padding: 4px 10px !important;",
+    "    min-height: 0 !important;",
+    "    border-bottom: 2px solid #CFB991 !important;",
+    "    background: #fff !important;",
+    "  }",
+    "  .navbar .nav-link {",
+    "    padding: 3px 8px !important;",
+    "    font-size: 9pt !important;",
+    "    font-weight: 700 !important;",
+    "  }",
+    "  .navbar .nav-link.active { border-bottom: 2px solid #CEB888 !important; }",
+    "  .hero { padding: 10px 14px !important; border-bottom: 1.5px solid #CFB991 !important; }",
+    "  .hero h1 { font-size: 16pt !important; margin: 4px 0 !important; }",
+    "  .hero .subhead { font-size: 9pt !important; }",
+    "  .suite-iframe-wrap, .suite-iframe-wrap iframe,",
+    "  iframe {",
+    "    height: 175mm !important;",
+    "    max-height: 175mm !important;",
+    "    border: none !important;",
+    "  }",
+    "}",
+    ""
+  ), collapse = "\n")
 }

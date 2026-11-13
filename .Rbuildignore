@@ -24,6 +24,12 @@
 ^BUILD\.md$
 ^INSTALL\.md$
 ^PUBLISH\.md$
+^OPTIMIZATION_PLAN\.md$
+^P0_P1_IMPLEMENTATION\.md$
+^HOSTING\.md$
+^validation$
+^\.claude$
+^inst/.*/.*\.log$
 ^paper/
 
 # Note: Development files are now only in inst/

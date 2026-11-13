@@ -33,6 +33,8 @@ run_easybreedeR_Studio <- function() {
 
   # server logic
   server <- function(input, output, session) {
+    suite_language <- shiny::reactiveVal("English")
+    suite_lang_timestamp <- shiny::reactiveVal(as.numeric(Sys.time()))
     requested_child <- get_requested_child(session)
     if (!is.null(requested_child)) {
       child_runner <- tryCatch(load_child_runner(requested_child), error = function(e) e)
@@ -47,7 +49,7 @@ run_easybreedeR_Studio <- function() {
     if (!all(diag$child_dirs_exist)) issues <- c(issues, paste0("Missing child app directories: ", paste(names(diag$child_dirs_exist)[!diag$child_dirs_exist], collapse = ", ")))
     if (!all(diag$child_appR_exist)) issues <- c(issues, paste0("Missing app.R: ", paste(names(diag$child_appR_exist)[!diag$child_appR_exist], collapse = ", ")))
     # Always show a brief startup notification with log location
-    log_hint <- tryCatch(get("suite_log_path", envir = as.environment("package:base")), error = function(e) NULL)
+    log_hint <- tryCatch(get("suite_log_path", inherits = TRUE), error = function(e) NULL)
     # If above fails, construct from runtime env
     if (is.null(log_hint)) {
       log_hint <- tryCatch(normalizePath(file.path(dirname(get("APP_DIR", inherits = TRUE)), "suite_diagnostics.log"), winslash = "/", mustWork = FALSE), error = function(e) "suite_diagnostics.log")
@@ -123,7 +125,6 @@ run_easybreedeR_Studio <- function() {
       lang_code <- tryCatch(language_code(lang), error = function(e) "en")
       tagList(
         div(class = "hero",
-            span(class = "kicker", suite_safe_get_label("hero_kicker", lang_code)),
             tags$h1(suite_safe_get_label("hero_title", lang_code)),
             div(class = "subhead", suite_safe_get_label("hero_subhead", lang_code))
         )
@@ -156,42 +157,35 @@ run_easybreedeR_Studio <- function() {
       code <- tryCatch(language_code(lang), error = function(e) "en")
       shiny::tags$span(suite_safe_get_label("easyblup_app_name", code))
     })
+    output$tab_xmosome <- shiny::renderUI({
+      lang <- suite_language()
+      code <- tryCatch(language_code(lang), error = function(e) "en")
+      shiny::tags$span(suite_safe_get_label("xmosome_app_name", code))
+    })
     # Home page cards and sections (multi-language)
     output$home_page_content <- shiny::renderUI({
       lang <- suite_language()
       code <- tryCatch(language_code(lang), error = function(e) "en")
       l <- function(key) suite_safe_get_label(key, code)
-      make_dep_rows <- function(specs, ncol = 4L) {
-        if (length(specs) == 0) return(NULL)
-        width <- as.integer(12L / ncol)
-        groups <- split(specs, ceiling(seq_along(specs) / ncol))
-        shiny::tagList(lapply(groups, function(group) {
-          cols <- lapply(group, function(spec) {
-            label <- if (!is.null(spec$label) && nzchar(spec$label)) spec$label else spec$name
-            href <- if (!is.null(spec$href) && nzchar(spec$href)) spec$href else NULL
-            item <- if (!is.null(href) && nzchar(href)) {
-              shiny::tags$a(
-                href = href,
-                target = "_blank",
-                class = "dependency-link",
-                shiny::tags$span(class = "dependency-name", label)
-              )
-            } else {
-              shiny::tags$div(
-                class = "dependency-item-no-link",
-                shiny::tags$span(class = "dependency-name", label)
-              )
-            }
-            shiny::column(width, div(class = "dependency-item", item))
-          })
-          do.call(shiny::fluidRow, cols)
-        }))
+      make_dep_list <- function(title, specs) {
+        div(class = "deps-group",
+          shiny::tags$h4(title),
+          div(class = "deps-chips",
+            lapply(specs, function(spec) {
+              label <- if (!is.null(spec$label) && nzchar(spec$label)) spec$label else spec$name
+              if (!is.null(spec$href) && nzchar(spec$href)) {
+                shiny::tags$a(href = spec$href, target = "_blank", class = "deps-chip", label)
+              } else {
+                shiny::tags$span(class = "deps-chip", label)
+              }
+            })
+          )
+        )
       }
-
       required_dep_specs <- list(
         list(name = "shiny", label = "shiny (>= 1.7.0)", href = "https://github.com/rstudio/shiny"),
         list(name = "data.table", label = "data.table", href = "https://github.com/Rdatatable/data.table"),
-        list(name = "bslib", label = "bslib (>= 0.4.0)", href = "https://github.com/rstudio/bslib"),
+        list(name = "bslib", label = "bslib (>= 0.5.0)", href = "https://github.com/rstudio/bslib"),
         list(name = "shinyjs", label = "shinyjs", href = "https://github.com/daattali/shinyjs"),
         list(name = "dplyr", label = "dplyr", href = "https://github.com/tidyverse/dplyr"),
         list(name = "DT", label = "DT (>= 0.20)", href = "https://github.com/rstudio/DT"),
@@ -201,7 +195,12 @@ run_easybreedeR_Studio <- function() {
         list(name = "htmltools", label = "htmltools", href = "https://github.com/rstudio/htmltools"),
         list(name = "httpuv", label = "httpuv", href = "https://github.com/rstudio/httpuv"),
         list(name = "Rcpp", label = "Rcpp", href = "https://github.com/RcppCore/Rcpp"),
-        list(name = "plotly", label = "plotly", href = "https://github.com/ropensci/plotly")
+        list(name = "plotly", label = "plotly", href = "https://github.com/ropensci/plotly"),
+        list(name = "tidyr", label = "tidyr", href = "https://github.com/tidyverse/tidyr"),
+        list(name = "readr", label = "readr", href = "https://github.com/tidyverse/readr"),
+        list(name = "readxl", label = "readxl", href = "https://github.com/tidyverse/readxl"),
+        list(name = "ggplot2", label = "ggplot2", href = "https://github.com/tidyverse/ggplot2"),
+        list(name = "magrittr", label = "magrittr", href = "https://github.com/tidyverse/magrittr")
       )
 
       optional_dep_specs <- list(
@@ -211,9 +210,15 @@ run_easybreedeR_Studio <- function() {
         list(name = "snpStats", label = "snpStats", href = "https://bioconductor.org/packages/snpStats/"),
         list(name = "gdata", label = "gdata", href = "https://cran.r-project.org/package=gdata"),
         list(name = "pedigreeTools", label = "pedigreeTools", href = "https://github.com/Rpedigree/pedigreeTools"),
-        list(name = "readxl", label = "readxl", href = "https://github.com/tidyverse/readxl"),
         list(name = "curl", label = "curl", href = "https://github.com/jeroen/curl"),
-        list(name = "testthat", label = "testthat (>= 3.0.0)", href = "https://github.com/r-lib/testthat")
+        list(name = "httr2", label = "httr2", href = "https://github.com/r-lib/httr2"),
+        list(name = "httr", label = "httr", href = "https://github.com/r-lib/httr"),
+        list(name = "withr", label = "withr", href = "https://github.com/r-lib/withr"),
+        list(name = "gridExtra", label = "gridExtra", href = "https://cran.r-project.org/package=gridExtra"),
+        list(name = "cowplot", label = "cowplot", href = "https://cran.r-project.org/package=cowplot"),
+        list(name = "markdown", label = "markdown", href = "https://cran.r-project.org/package=markdown"),
+        list(name = "R.utils", label = "R.utils", href = "https://cran.r-project.org/package=R.utils"),
+        list(name = "testthat", label = "testthat (>= 3.2.0)", href = "https://github.com/r-lib/testthat")
       )
 
       shiny::tagList(
@@ -224,62 +229,66 @@ run_easybreedeR_Studio <- function() {
               l("suite_interactive_modules")
             )
           ),
-          shiny::fluidRow(
-            shiny::column(3,
-              div(class = "app-card",
-                div(class = "app-card-header",
-                  div(class = "app-card-icon blue",
-                    shiny::tags$span(class = "material-symbols-outlined blue", "bar_chart")
-                  ),
-                  div(class = "app-card-title-wrapper",
-                    shiny::h3(l("dataviewer_app_name")),
-                    shiny::p(l("suite_dataviewer_desc"))
-                  )
+          div(class = "cards-grid cards-grid--modules",
+            div(class = "app-card app-card--launch",
+              div(class = "app-card-header",
+                div(class = "app-card-icon blue",
+                  shiny::tags$span(class = "material-symbols-outlined blue", "bar_chart")
                 ),
-                shiny::actionButton("open_dataviewR", l("suite_launch"), class = "btn-primary")
-              )
+                div(class = "app-card-title-wrapper",
+                  shiny::h3(l("dataviewer_app_name")),
+                  shiny::p(l("suite_dataviewer_desc"))
+                )
+              ),
+              shiny::actionButton("open_dataviewR", l("suite_launch"), class = "btn-primary")
             ),
-            shiny::column(3,
-              div(class = "app-card",
-                div(class = "app-card-header",
-                  div(class = "app-card-icon green",
-                    shiny::tags$span(class = "material-symbols-outlined green", "account_tree")
-                  ),
-                  div(class = "app-card-title-wrapper",
-                    shiny::h3(l("pediviewer_app_name")),
-                    shiny::p(l("suite_pediviewer_desc"))
-                  )
+            div(class = "app-card app-card--launch",
+              div(class = "app-card-header",
+                div(class = "app-card-icon green",
+                  shiny::tags$span(class = "material-symbols-outlined green", "account_tree")
                 ),
-                shiny::actionButton("open_pediviewer", l("suite_launch"), class = "btn-primary")
-              )
+                div(class = "app-card-title-wrapper",
+                  shiny::h3(l("pediviewer_app_name")),
+                  shiny::p(l("suite_pediviewer_desc"))
+                )
+              ),
+              shiny::actionButton("open_pediviewer", l("suite_launch"), class = "btn-primary")
             ),
-            shiny::column(3,
-              div(class = "app-card",
-                div(class = "app-card-header",
-                  div(class = "app-card-icon orange",
-                    shiny::tags$span(class = "material-symbols-outlined orange", "scatter_plot")
-                  ),
-                  div(class = "app-card-title-wrapper",
-                    shiny::h3(l("genoviewer_app_name")),
-                    shiny::p(l("suite_genoviewer_desc"))
-                  )
+            div(class = "app-card app-card--launch",
+              div(class = "app-card-header",
+                div(class = "app-card-icon orange",
+                  shiny::tags$span(class = "material-symbols-outlined orange", "scatter_plot")
                 ),
-                shiny::actionButton("open_genoviewer", l("suite_launch"), class = "btn-primary")
-              )
+                div(class = "app-card-title-wrapper",
+                  shiny::h3(l("genoviewer_app_name")),
+                  shiny::p(l("suite_genoviewer_desc"))
+                )
+              ),
+              shiny::actionButton("open_genoviewer", l("suite_launch"), class = "btn-primary")
             ),
-            shiny::column(3,
-              div(class = "app-card",
-                div(class = "app-card-header",
-                  div(class = "app-card-icon red",
-                    shiny::tags$span(class = "material-symbols-outlined red", "show_chart")
-                  ),
-                  div(class = "app-card-title-wrapper",
-                    shiny::h3(l("easyblup_app_name")),
-                    shiny::p(l("suite_easyblup_desc"))
-                  )
+            div(class = "app-card app-card--launch",
+              div(class = "app-card-header",
+                div(class = "app-card-icon red",
+                  shiny::tags$span(class = "material-symbols-outlined red", "show_chart")
                 ),
-                shiny::actionButton("open_easyblup", l("suite_launch"), class = "btn-primary")
-              )
+                div(class = "app-card-title-wrapper",
+                  shiny::h3(l("easyblup_app_name")),
+                  shiny::p(l("suite_easyblup_desc"))
+                )
+              ),
+              shiny::actionButton("open_easyblup", l("suite_launch"), class = "btn-primary")
+            ),
+            div(class = "app-card app-card--launch",
+              div(class = "app-card-header",
+                div(class = "app-card-icon gold",
+                  shiny::tags$span(class = "material-symbols-outlined gold", "tune")
+                ),
+                div(class = "app-card-title-wrapper",
+                  shiny::h3(l("xmosome_app_name")),
+                  shiny::p(l("suite_xmosome_desc"))
+                )
+              ),
+              shiny::actionButton("open_xmosome", l("suite_launch"), class = "btn-primary")
             )
           ),
           div(class = "section-title", style = "margin-top: 48px;",
@@ -288,85 +297,54 @@ run_easybreedeR_Studio <- function() {
               l("suite_optional_dependencies")
             )
           ),
-          shiny::fluidRow(
-            shiny::column(6,
-              div(class = "app-card dependency-card",
-                div(class = "app-card-header",
-                  div(class = "app-card-icon purple",
-                    shiny::tags$span(class = "material-symbols-outlined purple", "code")
-                  ),
-                  div(class = "app-card-title-wrapper",
-                    shiny::h3("plinkR"),
-                    shiny::p(l("suite_plinkr_desc"))
-                  )
+          div(class = "cards-grid cards-grid--deps",
+            div(class = "app-card dependency-card",
+              div(class = "app-card-header",
+                div(class = "app-card-icon purple",
+                  shiny::tags$span(class = "material-symbols-outlined purple", "code")
                 ),
-                shiny::tags$a(
-                  href = "https://github.com/Thymine2001/plinkR",
-                  target = "_blank",
-                  class = "btn btn-primary",
-                  style = "width: 100%; padding: 14px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; text-decoration: none; display: block; text-align: center;",
-                  l("suite_view_on_github")
+                div(class = "app-card-title-wrapper",
+                  shiny::h3("plinkR"),
+                  shiny::p(l("suite_plinkr_desc"))
                 )
+              ),
+              shiny::tags$a(
+                href = "https://github.com/Thymine2001/plinkR",
+                target = "_blank",
+                class = "btn btn-secondary",
+                l("suite_view_on_github")
               )
             ),
-            shiny::column(6,
-              div(class = "app-card dependency-card",
-                div(class = "app-card-header",
-                  div(class = "app-card-icon teal",
-                    shiny::tags$span(class = "material-symbols-outlined teal", "settings")
-                  ),
-                  div(class = "app-card-title-wrapper",
-                    shiny::h3("linkbreedeR"),
-                    shiny::p(l("suite_linkbreedeR_desc"))
-                  )
+            div(class = "app-card dependency-card",
+              div(class = "app-card-header",
+                div(class = "app-card-icon teal",
+                  shiny::tags$span(class = "material-symbols-outlined teal", "settings")
                 ),
-                shiny::tags$a(
-                  href = "https://github.com/Thymine2001/linkbreedeR",
-                  target = "_blank",
-                  class = "btn btn-primary",
-                  style = "width: 100%; padding: 14px 24px; font-size: 16px; font-weight: 600; border-radius: 6px; text-decoration: none; display: block; text-align: center;",
-                  l("suite_view_on_github")
+                div(class = "app-card-title-wrapper",
+                  shiny::h3("linkbreedeR"),
+                  shiny::p(l("suite_linkbreedeR_desc"))
                 )
+              ),
+              shiny::tags$a(
+                href = "https://github.com/Thymine2001/linkbreedeR",
+                target = "_blank",
+                class = "btn btn-secondary",
+                l("suite_view_on_github")
               )
             )
           ),
-          make_dep_rows(optional_dep_specs),
-          shiny::div(
-            style = "margin-top: 8px; color: #666; font-size: 13px;",
-            if (identical(code, "zh")) {
-              "以上为当前项目 DESCRIPTION 中的可选 R 包依赖（Suggests）。"
-            } else if (identical(code, "pt")) {
-              "Acima estao as dependencias opcionais (Suggests) atuais no DESCRIPTION do projeto."
-            } else {
-              "The packages above are the current optional R dependencies (Suggests) in the project DESCRIPTION."
-            }
-          ),
-          div(class = "section-title", style = "margin-top: 48px;",
-            shiny::h2(
-              shiny::tags$span(class = "material-symbols-outlined", "library_books"),
-              l("suite_required_dependencies")
-            )
-          ),
-          make_dep_rows(required_dep_specs),
-          shiny::div(
-            style = "margin-top: 8px; color: #666; font-size: 13px;",
-            if (identical(code, "zh")) {
-              "以上为当前项目 DESCRIPTION 中的必需 R 包依赖（Imports）。"
-            } else if (identical(code, "pt")) {
-              "Acima estao as dependencias obrigatorias (Imports) atuais no DESCRIPTION do projeto."
-            } else {
-              "The packages above are the current required R dependencies (Imports) in the project DESCRIPTION."
-            }
-          ),
-          div(class = "section-title", style = "margin-top: 48px;",
-            shiny::h2(
-              shiny::tags$span(class = "material-symbols-outlined", "computer"),
-              l("suite_related_software")
-            )
-          ),
-          shiny::fluidRow(
-            shiny::column(6, div(class = "dependency-item", shiny::tags$a(href = "https://www.cog-genomics.org/plink/", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "PLINK")))),
-            shiny::column(6, div(class = "dependency-item", shiny::tags$a(href = "http://nce.ads.uga.edu/wiki/doku.php?id=readme.blupf90", target = "_blank", class = "dependency-link", shiny::tags$span(class = "dependency-name", "BLUPF90"))))
+          shiny::tags$details(class = "deps-disclosure",
+            shiny::tags$summary(
+              if (identical(code, "zh")) "R 包依赖与相关软件"
+              else if (identical(code, "pt")) "Dependências R e software relacionado"
+              else "R package dependencies & related software"
+            ),
+            make_dep_list(l("suite_required_dependencies"), required_dep_specs),
+            make_dep_list(l("suite_optional_dependencies"), optional_dep_specs),
+            make_dep_list(l("suite_related_software"), list(
+              list(name = "PLINK", href = "https://www.cog-genomics.org/plink/"),
+              list(name = "BLUPF90", href = "http://nce.ads.uga.edu/wiki/doku.php?id=readme.blupf90")
+            ))
           )
         )
       )
@@ -491,6 +469,9 @@ run_easybreedeR_Studio <- function() {
     shiny::observeEvent(input$open_easyblup, ignoreInit = TRUE, {
       shiny::updateNavbarPage(session, "main_nav", selected = "easyblup")
     })
+    shiny::observeEvent(input$open_xmosome, ignoreInit = TRUE, {
+      shiny::updateNavbarPage(session, "main_nav", selected = "xmosome")
+    })
     # Remove old modal-based language selection (replaced by gear button)
 
     # Render iframes with selected language as query param.
@@ -517,6 +498,50 @@ run_easybreedeR_Studio <- function() {
     output$frame_pediviewer   <- render_child_iframe("pediviewer")
     output$frame_genoviewer   <- render_child_iframe("genoviewer")
     output$frame_easyblup     <- render_child_iframe("easyblupf90")
+
+    # Xmosome: run as its own Shiny process (original layout/CSS), iframe only.
+    # Do not source-embed it under Studio child rules / shared chrome.
+    output$frame_xmosome <- shiny::renderUI({
+      cfg <- child_runtime_config[["xmosome"]]
+      path <- child_paths[["xmosome"]]
+      remote_url <- if (!is.null(cfg) && !is.null(cfg$remote_url)) as.character(cfg$remote_url) else ""
+      mode <- if (!is.null(cfg) && !is.null(cfg$mode)) as.character(cfg$mode) else ""
+
+      if (identical(mode, "remote") && nzchar(remote_url)) {
+        return(iframe_panel(remote_url))
+      }
+
+      # Hosted single-process deploy: fall back to embedded child route
+      if (identical(suite_deploy_mode, "hosted") || identical(mode, "embedded")) {
+        shiny::req(lang_code())
+        url <- build_self_child_url("xmosome", session, lang = lang_code(), timestamp = suite_lang_timestamp())
+        if (!nzchar(url)) {
+          shiny::invalidateLater(1200)
+          return(tags$div(
+            style = "height:30vh; display:flex; align-items:center; justify-content:center; color:#666;",
+            tags$div("Preparing Xmosome_blupf90kit ...")
+          ))
+        }
+        return(iframe_panel(url))
+      }
+
+      port <- as.integer(if (!is.null(cfg) && !is.null(cfg$port)) cfg$port else 8006L)
+      url <- sprintf("http://127.0.0.1:%d", port)
+      if (!isTRUE(is_alive(url))) {
+        if (dir.exists(path)) {
+          start_child(path, port)
+        }
+        shiny::invalidateLater(900)
+        return(tags$div(
+          style = "height:30vh; display:flex; align-items:center; justify-content:center; color:#666;",
+          tags$div(
+            tags$div(tags$strong("Starting Xmosome_blupf90kit ...")),
+            tags$div(style = "font-size:12px; margin-top:6px;", url)
+          )
+        ))
+      }
+      iframe_panel(url)
+    })
 
   }
 

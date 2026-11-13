@@ -1,3 +1,12 @@
+# Shared runtime limits and session storage (installed or source layout).
+.runtime_candidates <- c(file.path("..", "Runtime.R"), "Runtime.R",
+                         file.path("inst", "Runtime.R"),
+                         system.file("Runtime.R", package = "easybreedeR"))
+.runtime_file <- .runtime_candidates[file.exists(.runtime_candidates)][1L]
+if (is.na(.runtime_file)) stop("Missing Runtime.R; include shared runtime helpers in the deployment.")
+source(.runtime_file, local = TRUE)
+eb_configure_uploads()
+
 # ============================================================================
 # LIBRARIES
 # ============================================================================
@@ -196,31 +205,19 @@ if (use_rcpp_stats) {
   message("Rcpp backend unavailable; local non-PLINK statistics are disabled")
 }
 
-# Suppress SASS color contrast warnings from bslib
-options(bslib.color_contrast_warnings = FALSE)
-
-# Disable PDF device to prevent Rplots.pdf generation
-# In Shiny apps, we use renderPlot which handles graphics devices automatically
-options(device = "png")
-pdf(NULL)  # Close any default PDF device
-
-purdue_theme <- bs_theme(
-  version = 5,
-  bg = "#ffffff",
-  fg = "#333333",
-  primary = "#CEB888",
-  base_font = font_google("Crimson Text")
-)
+# Shiny renderPlot manages its own graphics devices. Opening pdf(NULL) here
+# would leak a device every time the suite sources this app for a new session.
 
 # ============================================================================
 # USER INTERFACE
 # ============================================================================
 ui <- page_fillable(
-  theme = purdue_theme,
+  theme = bs_theme(version = 5),
   shinyjs::useShinyjs(),
   
   # Custom CSS
   tags$head(
+    if (exists("eb_chrome_css_tag", mode = "function")) eb_chrome_css_tag(),
     tags$style(HTML("
       html, body {
         height: 100%;
@@ -230,49 +227,25 @@ ui <- page_fillable(
       }
       
       .page-fillable {
-        height: 100vh;
+        height: 100%;
         overflow: hidden;
         display: flex;
         flex-direction: column;
       }
       
-      /* Title bar */
-      .title-bar {
-        background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%);
-        padding: 15px 20px;
-        text-align: center;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        border-bottom: 3px solid #CFB991;
-        flex-shrink: 0;
-      }
-      
-      .title-bar h1 {
-        margin: 0;
-        font-size: clamp(1.5rem, 3vw, 2.5rem);
-        font-weight: 700;
-        color: #000000;
-        font-family: 'Crimson Text', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Heiti SC', 'SimSun', 'Noto Sans', Arial, sans-serif;
-      }
-      
-      .title-bar p {
-        margin: 5px 0 0 0;
-        font-size: 1rem;
-        color: #000000;
-        opacity: .9;
-        font-family: 'Crimson Text', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Heiti SC', 'SimSun', 'Noto Sans', Arial, sans-serif;
-      }
-      
-      /* Button styles */
+      /* title-bar styled by easybreedeR-chrome.css */
+/* Button styles */
       .btn-primary, .btn.btn-primary {
-        background-color: #CEB888 !important;
-        border-color: #CEB888 !important;
-        color: #000000 !important;
+        background-color: #CFB991 !important;
+        border-color: #CFB991 !important;
+        color: #1a1a1a !important;
         font-weight: 600;
       }
       
       .btn-primary:hover, .btn.btn-primary:hover {
-        background-color: #B89D5D !important;
-        border-color: #B89D5D !important;
+        background-color: #8E6F3E !important;
+        border-color: #8E6F3E !important;
+        color: #1a1a1a !important;
       }
       
       /* Three-panel container */
@@ -289,7 +262,7 @@ ui <- page_fillable(
         overflow-y: auto;
         overflow-x: hidden;
         background-color: #FEFEFE;
-        border-right: 2px solid #CFB991;
+        border-right: 2px solid #b6c9e0;
         transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         padding: 20px;
         flex-shrink: 0;
@@ -307,7 +280,7 @@ ui <- page_fillable(
         overflow-y: auto;
         overflow-x: hidden;
         background-color: #FEFEFE;
-        border-left: 2px solid #CFB991;
+        border-left: 2px solid #b6c9e0;
         transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         padding: 20px;
         flex-shrink: 0;
@@ -344,8 +317,8 @@ ui <- page_fillable(
         height: 64px;
         padding: 0;
         border-radius: 8px;
-        border: 2px solid #CFB991;
-        background-color: #CEB888;
+        border: 2px solid #b6c9e0;
+        background-color: #CFB991;
         color: #000000;
         box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         display: flex;
@@ -357,7 +330,7 @@ ui <- page_fillable(
       }
       
       .toggle-btn-left .btn:hover, .toggle-btn-right .btn:hover {
-        background-color: #B89D5D;
+        background-color: #8E6F3E;
         box-shadow: 0 6px 16px rgba(0,0,0,0.3);
         transform: translateY(-1px);
       }
@@ -365,11 +338,11 @@ ui <- page_fillable(
       /* Panel sections */
       .panel-section {
         background: linear-gradient(135deg, #FFFFFF 0%, #F8F9FA 100%);
-        border: 2px solid #CFB991;
+        border: 2px solid #b6c9e0;
         border-radius: 8px;
         padding: 15px;
         margin-bottom: 20px;
-        box-shadow: 0 2px 8px rgba(206, 184, 136, 0.15);
+        box-shadow: 0 2px 8px rgba(207, 185, 145, 0.15);
       }
       
       .section-title {
@@ -379,9 +352,12 @@ ui <- page_fillable(
         margin-top: 0;
         margin-bottom: 12px;
         padding-bottom: 8px;
-        border-bottom: 2px solid #CEB888;
+        border-bottom: 2px solid #CFB991;
       }
-    "))
+    ")),
+    if (exists("easybreedeR_a4_layout_css", mode = "function")) {
+      tags$style(HTML(easybreedeR_a4_layout_css()))
+    }
   ),
   
   # Title Bar (localized)
@@ -408,35 +384,24 @@ ui <- page_fillable(
                          ),
                          selected = "plink"),
               numericInput("max_chromosome", "Chromosome", value = 18, min = 1, max = 100, step = 1),
-              p(style = "font-size: 0.8rem; color: #888; margin-top: -10px; margin-bottom: 10px;",
-                "Maximum chromosome number to include (1 to selected number). Only chromosomes 1 to selected number will be included in analysis"),
               br(),
               
               # PLINK Format File Uploads (2 files)
               conditionalPanel(
                 condition = "input.geno_format == 'plink_ped'",
                 div(
-                  div(style = "margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; border-left: 3px solid #CEB888;",
-                      tags$strong("📋 PLINK Format: Upload 2 files"),
-                      tags$ul(style = "margin: 8px 0 0 0; padding-left: 20px; font-size: 0.9rem;",
-                              tags$li(tags$code(".ped"), " file - genotype data"),
-                              tags$li(tags$code(".map"), " file - marker map information")
-                      )
-                  ),
-                  fileInput("plink_ped_file", 
-                           label = tags$span("📄 Upload .ped File", 
+                  fileInput("plink_ped_file",
+                           label = tags$span("Upload .ped File",
                                             style = "font-weight: 600;"),
                            accept = c(".ped"),
                            buttonLabel = "Browse...",
                            placeholder = "No .ped file selected"),
-                  fileInput("plink_map_file", 
-                           label = tags$span("📄 Upload .map File", 
+                  fileInput("plink_map_file",
+                           label = tags$span("Upload .map File",
                                             style = "font-weight: 600;"),
                            accept = c(".map"),
                            buttonLabel = "Browse...",
-                           placeholder = "No .map file selected"),
-                  div(style = "margin-top: 8px; font-size: 0.85rem; color: #666;",
-                      "💡 Both files should have the same prefix (e.g., data.ped and data.map)")
+                           placeholder = "No .map file selected")
                 )
               ),
               
@@ -444,28 +409,20 @@ ui <- page_fillable(
               conditionalPanel(
                 condition = "input.geno_format == 'plink_bed'",
                 div(
-                  div(style = "margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; border-left: 3px solid #CEB888;",
-                      tags$strong("📋 PLINK BED Format: Upload 3 files"),
-                      tags$ul(style = "margin: 8px 0 0 0; padding-left: 20px; font-size: 0.9rem;",
-                              tags$li(tags$code(".bed"), " file - binary genotype data"),
-                              tags$li(tags$code(".bim"), " file - marker information"),
-                              tags$li(tags$code(".fam"), " file - sample information")
-                      )
-                  ),
-                  fileInput("plink_bed_file", 
-                           label = tags$span("📄 Upload .bed File", 
+                  fileInput("plink_bed_file",
+                           label = tags$span("Upload .bed File",
                                             style = "font-weight: 600;"),
                            accept = c(".bed"),
                            buttonLabel = "Browse...",
                            placeholder = "No .bed file selected"),
-                  fileInput("plink_bim_file", 
-                           label = tags$span("📄 Upload .bim File", 
+                  fileInput("plink_bim_file",
+                           label = tags$span("Upload .bim File",
                                             style = "font-weight: 600;"),
                            accept = c(".bim"),
                            buttonLabel = "Browse...",
                            placeholder = "No .bim file selected"),
-                  fileInput("plink_fam_file", 
-                           label = tags$span("📄 Upload .fam File", 
+                  fileInput("plink_fam_file",
+                           label = tags$span("Upload .fam File",
                                             style = "font-weight: 600;"),
                            accept = c(".fam"),
                            buttonLabel = "Browse...",
@@ -477,14 +434,8 @@ ui <- page_fillable(
               conditionalPanel(
                 condition = "input.geno_format == 'vcf'",
                 div(
-                  div(style = "margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; border-left: 3px solid #CEB888;",
-                      tags$strong("📋 VCF Format: Upload 1 file"),
-                      tags$ul(style = "margin: 8px 0 0 0; padding-left: 20px; font-size: 0.9rem;",
-                              tags$li(tags$code(".vcf"), " or ", tags$code(".vcf.gz"), " file")
-                      )
-                  ),
-                  fileInput("vcf_file", 
-                           label = tags$span("📄 Upload .vcf File", 
+                  fileInput("vcf_file",
+                           label = tags$span("Upload .vcf File",
                                             style = "font-weight: 600;"),
                            accept = c(".vcf", ".vcf.gz"),
                            buttonLabel = "Browse...",
@@ -496,21 +447,14 @@ ui <- page_fillable(
               conditionalPanel(
                 condition = "input.geno_format == 'blupf90_txt'",
                 div(
-                  div(style = "margin-bottom: 10px; padding: 10px; background-color: #f8f9fa; border-radius: 5px; border-left: 3px solid #CEB888;",
-                      tags$strong("📋 BLUPF90 TXT Format: Upload 2 files"),
-                      tags$ul(style = "margin: 8px 0 0 0; padding-left: 20px; font-size: 0.9rem;",
-                              tags$li(tags$code(".txt"), " file - genotype data"),
-                              tags$li(tags$code(".map"), " file - marker map information")
-                      )
-                  ),
-                  fileInput("blupf90_txt_file", 
-                           label = tags$span("📄 Upload .txt File", 
+                  fileInput("blupf90_txt_file",
+                           label = tags$span("Upload .txt File",
                                             style = "font-weight: 600;"),
                            accept = c(".txt"),
                            buttonLabel = "Browse...",
                            placeholder = "No .txt file selected"),
-                  fileInput("blupf90_map_file", 
-                           label = tags$span("📄 Upload .map File", 
+                  fileInput("blupf90_map_file",
+                           label = tags$span("Upload .map File",
                                             style = "font-weight: 600;"),
                            accept = c(".map"),
                            buttonLabel = "Browse...",
@@ -521,34 +465,21 @@ ui <- page_fillable(
               br(),
               div(style = "margin-top: 15px;",
                   uiOutput("show_summary_btn"),
-                  uiOutput("show_summary_help"),
                   div(style = "margin-top: 10px;",
                       checkboxInput(
                         "summary_fast_mode",
                         "Core summary statistics (base)",
                         value = TRUE
                       ),
-                      p(
-                        style = "font-size: 0.8rem; color: #888; margin-top: -8px;",
-                        "Runs core summary statistics (--missing, --freq, --hardy, --het). You can additionally enable PCA and/or relatedness below."
-                      ),
                       checkboxInput(
                         "enable_pca",
                         "Enable PCA analysis (--pca)",
                         value = FALSE
                       ),
-                      p(
-                        style = "font-size: 0.8rem; color: #888; margin-top: -8px;",
-                        "PCA runs when this option is checked."
-                      ),
                       checkboxInput(
                         "enable_relatedness",
                         "Enable sample relatedness analysis (--genome, slower)",
                         value = FALSE
-                      ),
-                      p(
-                        style = "font-size: 0.8rem; color: #888; margin-top: -8px;",
-                        "Relatedness runs when this option is checked."
                       )
                   )
               ),
@@ -558,19 +489,10 @@ ui <- page_fillable(
           # QC Options Section (for quality control only, localized)
           div(class = "panel-section",
               uiOutput("qc_section_title"),
-              uiOutput("qc_intro_text"),
               numericInput("geno_threshold", "--geno (SNP missing rate)", value = 0.1, min = 0, max = 1, step = 0.01),
-              p(style = "font-size: 0.8rem; color: #888; margin-top: -10px; margin-bottom: 10px;",
-                "Exclude SNPs with missing rate > threshold"),
               numericInput("mind_threshold", "--mind (Sample missing rate)", value = 0.1, min = 0, max = 1, step = 0.01),
-              p(style = "font-size: 0.8rem; color: #888; margin-top: -10px; margin-bottom: 10px;",
-                "Exclude samples with missing rate > threshold"),
               numericInput("maf_threshold", "--maf (Minor allele frequency)", value = 0.01, min = 0, max = 0.5, step = 0.01),
-              p(style = "font-size: 0.8rem; color: #888; margin-top: -10px; margin-bottom: 10px;",
-                "Exclude SNPs with MAF < threshold"),
               numericInput("hwe_threshold", "--hwe (HWE p-value)", value = 1e-5, min = 0, max = 1, step = 1e-6),
-              p(style = "font-size: 0.8rem; color: #888; margin-top: -10px; margin-bottom: 10px;",
-                "Exclude SNPs with HWE p-value < threshold"),
               br(),
               uiOutput("run_qc_btn")
           )
@@ -583,11 +505,11 @@ ui <- page_fillable(
             nav_panel(
               textOutput("tab_data_preview_title"),
               value = "preview",
-              div(style = "margin-top: 20px;",
-                  h4("Genotype Data Summary"),
+              div(style = "margin-top: 12px;",
+                  h4("Genotype Data Summary", class = "section-title"),
                   verbatimTextOutput("data_summary"),
                   br(),
-                  h4("Data Table"),
+                  h4("Data Table", class = "section-title"),
                   DTOutput("geno_table")
               )
             ),
@@ -602,13 +524,13 @@ ui <- page_fillable(
                     tagList(
                       div(style = "margin-bottom: 30px;",
                           h5("Sample Missing Rate Distribution"),
-                          plotlyOutput("per_individual_plot_missing", height = "400px")
+                          plotlyOutput("per_individual_plot_missing", height = "320px")
                       ),
                       conditionalPanel(
                         condition = "input.enable_relatedness",
                         div(style = "margin-bottom: 30px;",
                             h5("Sample Relatedness Distribution"),
-                            plotlyOutput("per_individual_plot_relatedness", height = "400px")
+                            plotlyOutput("per_individual_plot_relatedness", height = "320px")
                         )
                       )
                     )
@@ -616,13 +538,13 @@ ui <- page_fillable(
                     tagList(
                       div(style = "margin-bottom: 30px;",
                           h5("Sample Missing Rate Distribution"),
-                          plotOutput("per_individual_plot_missing", height = "400px")
+                          plotOutput("per_individual_plot_missing", height = "320px")
                       ),
                       conditionalPanel(
                         condition = "input.enable_relatedness",
                         div(style = "margin-bottom: 30px;",
                             h5("Sample Relatedness Distribution"),
-                            plotOutput("per_individual_plot_relatedness", height = "400px")
+                            plotOutput("per_individual_plot_relatedness", height = "320px")
                         )
                       )
                     )
@@ -643,30 +565,30 @@ ui <- page_fillable(
                     tagList(
                       div(style = "margin-bottom: 30px;",
                           h5("SNP Missing Rate Distribution"),
-                          plotlyOutput("per_marker_plot_missing", height = "400px")
+                          plotlyOutput("per_marker_plot_missing", height = "320px")
                       ),
                       div(style = "margin-bottom: 30px;",
                           h5("Minor Allele Frequency (MAF) Distribution"),
-                          plotlyOutput("per_marker_plot_maf", height = "400px")
+                          plotlyOutput("per_marker_plot_maf", height = "320px")
                       ),
                       div(style = "margin-bottom: 30px;",
                           h5("Hardy-Weinberg Equilibrium (HWE) Distribution"),
-                          plotlyOutput("per_marker_plot_hwe", height = "400px")
+                          plotlyOutput("per_marker_plot_hwe", height = "320px")
                       )
                     )
                   } else {
                     tagList(
                       div(style = "margin-bottom: 30px;",
                           h5("SNP Missing Rate Distribution"),
-                          plotOutput("per_marker_plot_missing", height = "400px")
+                          plotOutput("per_marker_plot_missing", height = "320px")
                       ),
                       div(style = "margin-bottom: 30px;",
                           h5("Minor Allele Frequency (MAF) Distribution"),
-                          plotOutput("per_marker_plot_maf", height = "400px")
+                          plotOutput("per_marker_plot_maf", height = "320px")
                       ),
                       div(style = "margin-bottom: 30px;",
                           h5("Hardy-Weinberg Equilibrium (HWE) Distribution"),
-                          plotOutput("per_marker_plot_hwe", height = "400px")
+                          plotOutput("per_marker_plot_hwe", height = "320px")
                       )
                     )
                   },
@@ -688,7 +610,7 @@ ui <- page_fillable(
                                  selected = "2d",
                                  inline = TRUE)
                   ),
-                  div(style = "margin-bottom: 15px; padding: 10px; border: 1px solid #CFB991; border-radius: 6px; background: #FAFAF5;",
+                  div(style = "margin-bottom: 15px; padding: 10px; border: 1px solid #b6c9e0; border-radius: 6px; background: #FAFAF5;",
                       tags$p(style = "margin: 0 0 8px 0; font-size: 0.9rem;",
                              "PCA point coloring: click points to select, or use box/lasso (2D) to select multiple points."),
                       div(style = "display: flex; gap: 8px; align-items: center; flex-wrap: wrap;",
@@ -707,7 +629,7 @@ ui <- page_fillable(
                           textOutput("pca_selection_status", inline = TRUE))
                   ),
                   if (use_plotly) {
-                    plotlyOutput("pca_plots", height = "800px")
+                    plotlyOutput("pca_plots", height = "520px")
                   } else {
                     div(class = "alert alert-warning",
                         p("plotly package is required for PCA visualization. Please install it:"),
@@ -745,8 +667,8 @@ ui <- page_fillable(
           
           # Export Options
           div(class = "panel-section",
-              h4("Export Options", class = "section-title"),
-              downloadButton("download_qc_report", "Download QC Report", 
+              uiOutput("export_section_title"),
+              downloadButton("download_qc_report", "Download QC Report",
                            class = "btn btn-primary", style = "width: 100%; margin-bottom: 10px;"),
               downloadButton("download_filtered_data", "Download Filtered Data",
                            class = "btn btn-primary", style = "width: 100%;")
@@ -785,7 +707,7 @@ ui <- page_fillable(
 # SERVER
 # ============================================================================
 server <- function(input, output, session) {
-  options(shiny.maxRequestSize = 10 * 1024^3)
+  # Upload limit is configured once when the app is loaded.
   
   # Reactive values
   geno_data <- reactiveVal(NULL)
@@ -833,7 +755,15 @@ server <- function(input, output, session) {
   })
   output$data_upload_title <- renderUI({
     lang <- current_lang()
-    h4(get_label_local("data_upload", lang), class = "section-title")
+    tip <- if (exists("eb_with_tip", mode = "function")) eb_with_tip else function(label, ...) label
+    h4(class = "section-title",
+       tip(get_label_local("data_upload", lang),
+           tags$div(tags$b("PLINK PED/MAP:"), " upload matching .ped + .map"),
+           tags$div(tags$b("PLINK BED:"), " upload matching .bed + .bim + .fam"),
+           tags$div(tags$b("BLUPF90:"), " upload .txt genotype + .map"),
+           tags$div(tags$b("Chromosome:"), get_label_local("chromosome_help", lang)),
+           tags$div(get_label_local("show_summary_help", lang)),
+           tags$div("Optional: enable PCA (--pca) and/or relatedness (--genome).")))
   })
   output$geno_format_label <- renderUI({
     lang <- current_lang()
@@ -848,19 +778,22 @@ server <- function(input, output, session) {
     actionButton("show_summary", get_label_local("show_summary_plots", lang),
                  class = "btn btn-primary", style = "width: 100%; font-weight: 600;")
   })
-  output$show_summary_help <- renderUI({
-    lang <- current_lang()
-    helpText(style = "margin-top: 8px; font-size: 0.85rem; color: #666; text-align: center;",
-             get_label_local("show_summary_help", lang))
-  })
   output$qc_section_title <- renderUI({
     lang <- current_lang()
-    h4(get_label_local("quality_control", lang), class = "section-title")
+    tip <- if (exists("eb_with_tip", mode = "function")) eb_with_tip else function(label, ...) label
+    h4(class = "section-title",
+       tip(get_label_local("quality_control", lang),
+           get_label_local("qc_intro", lang),
+           tags$div(tags$b("--geno:"), " exclude SNPs with missing rate > threshold"),
+           tags$div(tags$b("--mind:"), " exclude samples with missing rate > threshold"),
+           tags$div(tags$b("--maf:"), " exclude SNPs with MAF < threshold"),
+           tags$div(tags$b("--hwe:"), " exclude SNPs with HWE p-value < threshold")))
   })
-  output$qc_intro_text <- renderUI({
-    lang <- current_lang()
-    p(style = "font-size: 0.9rem; color: #666; margin-bottom: 15px;",
-      get_label_local("qc_intro", lang))
+  output$export_section_title <- renderUI({
+    tip <- if (exists("eb_with_tip", mode = "function")) eb_with_tip else function(label, ...) label
+    h4(class = "section-title",
+       tip("Export Options",
+           "Download the QC report and filtered genotype data after QC completes."))
   })
   output$run_qc_btn <- renderUI({
     lang <- current_lang()
@@ -1833,7 +1766,7 @@ server <- function(input, output, session) {
         p_miss <- plot_ly() %>%
           add_histogram(data = miss_df, x = ~MissingRate, 
                        nbinsx = 30,
-                       marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
+                       marker = list(color = "#CFB991", line = list(color = "white", width = 1)),
                        name = "Missing Rate") %>%
           layout(title = list(text = "Sample Missing Rate Distribution", font = list(size = 16)),
                 xaxis = list(title = list(text = "Missing Rate", font = list(size = 14))),
@@ -1886,7 +1819,7 @@ server <- function(input, output, session) {
         plot_ly() %>%
           add_histogram(data = relatedness_df, x = ~PI_HAT,
                         nbinsx = 50,
-                        marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
+                        marker = list(color = "#CFB991", line = list(color = "white", width = 1)),
                         name = "Relatedness") %>%
           layout(title = list(text = "Sample Relatedness Distribution", font = list(size = 16)),
                  xaxis = list(title = list(text = "PI_HAT (Proportion IBD)", font = list(size = 14))),
@@ -1932,7 +1865,7 @@ server <- function(input, output, session) {
         }
         miss_df <- data.frame(MissingRate = miss_vals)
         ggplot(miss_df, aes(x = MissingRate)) +
-          geom_histogram(bins = 30, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+          geom_histogram(bins = 30, fill = "#CFB991", alpha = 0.7, color = "white", boundary = 0) +
           labs(title = "Sample Missing Rate Distribution",
                x = "Missing Rate",
                y = "Number of Samples") +
@@ -1982,7 +1915,7 @@ server <- function(input, output, session) {
                    theme_void())
         }
         ggplot(rel_df, aes(x = PI_HAT)) +
-          geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+          geom_histogram(bins = 50, fill = "#CFB991", alpha = 0.7, color = "white", boundary = 0) +
           labs(title = "Sample Relatedness Distribution",
                x = "PI_HAT (Proportion IBD)",
                y = "Number of Sample Pairs") +
@@ -2032,7 +1965,7 @@ server <- function(input, output, session) {
         p_miss <- plot_ly() %>%
           add_histogram(data = miss_df, x = ~MissingRate,
                        nbinsx = 50,
-                       marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
+                       marker = list(color = "#CFB991", line = list(color = "white", width = 1)),
                        name = "SNP Missing Rate") %>%
           layout(title = list(text = "SNP Missing Rate Distribution", font = list(size = 16)),
                 xaxis = list(title = list(text = "Missing Rate", font = list(size = 14))),
@@ -2052,7 +1985,7 @@ server <- function(input, output, session) {
         p_miss <- plot_ly() %>%
           add_histogram(data = miss_df, x = ~MissingRate,
                        nbinsx = 50,
-                       marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
+                       marker = list(color = "#CFB991", line = list(color = "white", width = 1)),
                        name = "SNP Missing Rate") %>%
           layout(title = list(text = "SNP Missing Rate Distribution", font = list(size = 16)),
                 xaxis = list(title = list(text = "Missing Rate", font = list(size = 14))),
@@ -2100,7 +2033,7 @@ server <- function(input, output, session) {
         p_maf <- plot_ly() %>%
           add_histogram(data = maf_df, x = ~MAF,
                       nbinsx = 50,
-                      marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
+                      marker = list(color = "#CFB991", line = list(color = "white", width = 1)),
                       name = "MAF") %>%
           layout(title = list(text = "Minor Allele Frequency (MAF) Distribution", font = list(size = 16)),
                 xaxis = list(title = list(text = "Minor Allele Frequency", font = list(size = 14))),
@@ -2172,7 +2105,7 @@ server <- function(input, output, session) {
               p_hwe <- plot_ly() %>%
                 add_histogram(data = hwe_df, x = ~minus_log10_p,
                             nbinsx = 50,
-                            marker = list(color = "#CEB888", line = list(color = "white", width = 1)),
+                            marker = list(color = "#CFB991", line = list(color = "white", width = 1)),
                             name = "HWE") %>%
                 add_lines(x = rep(hwe_threshold_log10, 2), y = c(0, y_max),
                          line = list(dash = "dash", color = "red", width = 2),
@@ -2242,7 +2175,7 @@ Please run Summary or QC first",
         }
         miss_df <- data.frame(MissingRate = miss_vals)
         ggplot(miss_df, aes(x = MissingRate)) +
-          geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+          geom_histogram(bins = 50, fill = "#CFB991", alpha = 0.7, color = "white", boundary = 0) +
           labs(title = "SNP Missing Rate Distribution",
                x = "Missing Rate",
                y = "Number of SNPs") +
@@ -2258,7 +2191,7 @@ Please run Summary or QC first",
         }
         miss_df <- data.frame(MissingRate = marker_miss)
         ggplot(miss_df, aes(x = MissingRate)) +
-          geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+          geom_histogram(bins = 50, fill = "#CFB991", alpha = 0.7, color = "white", boundary = 0) +
           labs(title = "SNP Missing Rate Distribution",
                x = "Missing Rate",
                y = "Number of SNPs") +
@@ -2302,7 +2235,7 @@ Please run Summary or QC first",
         }
         maf_df <- data.frame(MAF = maf_vals)
         p_maf <- ggplot(maf_df, aes(x = MAF)) +
-          geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+          geom_histogram(bins = 50, fill = "#CFB991", alpha = 0.7, color = "white", boundary = 0) +
           labs(title = "Minor Allele Frequency (MAF) Distribution",
                x = "Minor Allele Frequency",
                y = "Number of SNPs") +
@@ -2358,7 +2291,7 @@ Please run Summary or QC first",
               hwe_threshold_log10 <- -log10(hwe_threshold)
               
               ggplot(hwe_df, aes(x = minus_log10_p)) +
-                geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+                geom_histogram(bins = 50, fill = "#CFB991", alpha = 0.7, color = "white", boundary = 0) +
                 labs(title = "Hardy-Weinberg Equilibrium (HWE) Distribution",
                      x = expression(-log[10](HWE~exact~test~p-value)),
                      y = "Number of SNPs") +
@@ -2405,7 +2338,7 @@ Please run Summary or QC first", size = 4) +
   pca_point_colors <- reactiveVal(setNames(character(0), character(0)))
   pca_selected_samples <- reactiveVal(character(0))
   pca_last_hover_sample <- reactiveVal(NULL)
-  pca_default_point_color <- "#CEB888"
+  pca_default_point_color <- "#CFB991"
   # Default number of PCs to match PLINK 2 (--pca typically outputs 20)
   pca_default_n_components <- 20L
 
@@ -2459,6 +2392,16 @@ Please run Summary or QC first", size = 4) +
     if (!isTRUE(use_rcpp_stats)) {
       return(NULL)
     }
+    # Guard before creating dosage and standardized copies.
+    raw_genotypes <- geno_data$genotypes
+    budget_error <- tryCatch({
+      eb_check_pca_budget(nrow(raw_genotypes), ncol(raw_genotypes))
+      NULL
+    }, error = function(e) conditionMessage(e))
+    if (!is.null(budget_error)) {
+      showNotification(budget_error, type = "error", duration = NULL)
+      return(NULL)
+    }
     geno_matrix <- get_plink_aligned_numeric_genotypes(geno_data)
     if (is.null(geno_matrix)) {
       geno_matrix <- get_numeric_genotype_matrix(geno_data)
@@ -2474,7 +2417,10 @@ Please run Summary or QC first", size = 4) +
           n_components = as.integer(pca_default_n_components),
           max_markers = as.integer(0L)
         ),
-        error = function(e) NULL
+        error = function(e) {
+          showNotification(conditionMessage(e), type = "error", duration = NULL)
+          NULL
+        }
       )
       if (is.list(pca_cpp) &&
           is.matrix(pca_cpp$scores) &&
@@ -3207,7 +3153,7 @@ Please run Summary or QC first", size = 4) +
         if (length(miss_vals) > 0) {
           miss_df <- data.frame(MissingRate = miss_vals)
           p_miss <- ggplot(miss_df, aes(x = MissingRate)) +
-          geom_histogram(bins = 30, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+          geom_histogram(bins = 30, fill = "#CFB991", alpha = 0.7, color = "white", boundary = 0) +
           labs(title = "Sample Missing Rate Distribution",
                x = "Missing Rate",
                y = "Number of Samples") +
@@ -3225,7 +3171,7 @@ Please run Summary or QC first", size = 4) +
         rel_df <- rel_df[is.finite(rel_df$PI_HAT), , drop = FALSE]
         if (nrow(rel_df) > 0) {
           p_rel <- ggplot(rel_df, aes(x = PI_HAT)) +
-            geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+            geom_histogram(bins = 50, fill = "#CFB991", alpha = 0.7, color = "white", boundary = 0) +
             labs(title = "Sample Relatedness Distribution",
                  x = "PI_HAT (Proportion IBD)",
                  y = "Number of Sample Pairs") +
@@ -3270,7 +3216,7 @@ Please run Summary or QC first", size = 4) +
         if (length(miss_vals) > 0) {
           miss_df <- data.frame(MissingRate = miss_vals)
           p_miss <- ggplot(miss_df, aes(x = MissingRate)) +
-            geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+            geom_histogram(bins = 50, fill = "#CFB991", alpha = 0.7, color = "white", boundary = 0) +
             labs(title = "SNP Missing Rate Distribution",
                  x = "Missing Rate",
                  y = "Number of SNPs") +
@@ -3285,7 +3231,7 @@ Please run Summary or QC first", size = 4) +
         if (length(marker_miss) > 0) {
           miss_df <- data.frame(MissingRate = marker_miss)
           p_miss <- ggplot(miss_df, aes(x = MissingRate)) +
-            geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+            geom_histogram(bins = 50, fill = "#CFB991", alpha = 0.7, color = "white", boundary = 0) +
             labs(title = "SNP Missing Rate Distribution",
                  x = "Missing Rate",
                  y = "Number of SNPs") +
@@ -3302,7 +3248,7 @@ Please run Summary or QC first", size = 4) +
         if (length(maf_vals) > 0) {
           maf_df <- data.frame(MAF = maf_vals)
           p_maf <- ggplot(maf_df, aes(x = MAF)) +
-            geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+            geom_histogram(bins = 50, fill = "#CFB991", alpha = 0.7, color = "white", boundary = 0) +
             labs(title = "Minor Allele Frequency (MAF) Distribution",
                  x = "Minor Allele Frequency",
                  y = "Number of SNPs") +
@@ -3337,7 +3283,7 @@ Please run Summary or QC first", size = 4) +
               
               # Plot HWE histogram with -log10(p-value) on x-axis
               p_hwe <- ggplot(hwe_df, aes(x = minus_log10_p)) +
-                geom_histogram(bins = 50, fill = "#CEB888", alpha = 0.7, color = "white", boundary = 0) +
+                geom_histogram(bins = 50, fill = "#CFB991", alpha = 0.7, color = "white", boundary = 0) +
                 labs(title = "Hardy-Weinberg Equilibrium (HWE) Distribution",
                      x = expression(-log[10](HWE~exact~test~p-value)),
                      y = "Number of SNPs") +

@@ -1,3 +1,13 @@
+# Quiet shiny::devmode() notices before loading shiny/bslib.
+options(
+  shiny.autoreload = TRUE,
+  shiny.autoreload.legacy_warning = FALSE,
+  shiny.minified = TRUE,
+  sass.cache = TRUE,
+  bslib.precompiled = TRUE,
+  bslib.color_contrast_warnings = FALSE
+)
+
 suppressPackageStartupMessages({
   library(shiny)
   library(bslib)
@@ -34,20 +44,65 @@ try({
   }
 }, silent = TRUE)
 
-# Resolve the application directory reliably whether run via Rscript or runApp
+# Resolve the application directory reliably whether run via Rscript,
+# shiny::runApp(dir), or Cursor/Posit "Run Shiny App" (runShinyApp.R <app.R> <port>).
 .resolve_app_dir <- function() {
-  # Try sys.frames (Rscript)
-  p <- tryCatch(normalizePath(sys.frames()[[1]]$ofile), error = function(e) NA)
-  if (!is.na(p) && file.exists(p)) return(dirname(p))
-  # Try commandArgs --file
-  ca <- commandArgs(trailingOnly = FALSE)
-  m <- grep("--file=", ca, value = TRUE)
-  if (length(m) > 0) {
-    p <- sub("--file=", "", m[[1]])
-    p <- tryCatch(normalizePath(p), error = function(e) NA)
-    if (!is.na(p) && file.exists(p)) return(dirname(p))
+  # 1) Cursor / Posit runner: first trailing arg is often the app.R path
+  ta <- commandArgs(trailingOnly = TRUE)
+  if (length(ta) >= 1) {
+    p <- ta[[1]]
+    if (is.character(p) && grepl("\\.[Rr]$", p)) {
+      p <- tryCatch(normalizePath(p, winslash = "/", mustWork = FALSE), error = function(e) NA_character_)
+      if (!is.na(p) && file.exists(p)) {
+        d <- dirname(p)
+        if (file.exists(file.path(d, "R", "Global.R"))) return(d)
+      }
+    }
   }
-  # Fallback to working directory
+
+  # 2) Walk the call stack for a sourced app.R that owns R/Global.R
+  n <- sys.nframe()
+  if (n >= 1) {
+    for (i in seq_len(n)) {
+      ofile <- tryCatch(sys.frame(i)$ofile, error = function(e) NULL)
+      if (is.null(ofile) || !is.character(ofile) || length(ofile) != 1) next
+      p <- tryCatch(normalizePath(ofile, winslash = "/", mustWork = FALSE), error = function(e) NA_character_)
+      if (is.na(p) || !file.exists(p)) next
+      d <- dirname(p)
+      if (identical(basename(p), "app.R") && file.exists(file.path(d, "R", "Global.R"))) return(d)
+    }
+  }
+
+  # 3) commandArgs --file=...
+  ca <- commandArgs(trailingOnly = FALSE)
+  m <- grep("^--file=", ca, value = TRUE)
+  if (length(m) > 0) {
+    p <- sub("^--file=", "", m[[1]])
+    p <- tryCatch(normalizePath(p, winslash = "/", mustWork = FALSE), error = function(e) NA_character_)
+    if (!is.na(p) && file.exists(p)) {
+      d <- dirname(p)
+      if (file.exists(file.path(d, "R", "Global.R"))) return(d)
+    }
+  }
+
+  # 4) Search upward from getwd() for inst/easybreedeR_Studio
+  cur <- tryCatch(normalizePath(getwd(), winslash = "/", mustWork = FALSE), error = function(e) getwd())
+  for (i in 0:6) {
+    candidates <- c(
+      file.path(cur, "inst", "easybreedeR_Studio"),
+      file.path(cur, "easybreedeR_Studio"),
+      cur
+    )
+    for (d in candidates) {
+      if (dir.exists(d) && file.exists(file.path(d, "R", "Global.R"))) {
+        return(normalizePath(d, winslash = "/", mustWork = FALSE))
+      }
+    }
+    parent <- dirname(cur)
+    if (identical(parent, cur)) break
+    cur <- parent
+  }
+
   getwd()
 }
 
@@ -66,6 +121,19 @@ APP_DIR <- .resolve_app_dir()
   normalizePath(app_dir, winslash = "/", mustWork = FALSE)
 }
 SUITE_DIR <- .resolve_suite_dir(APP_DIR)
+
+# Fail fast with a clear message if Studio sources are missing
+.global_r <- file.path(SUITE_DIR, "R", "Global.R")
+if (!file.exists(.global_r)) {
+  stop(
+    "Cannot locate easybreedeR Studio sources (R/Global.R).\n",
+    "  APP_DIR   = ", APP_DIR, "\n",
+    "  SUITE_DIR = ", SUITE_DIR, "\n",
+    "  getwd()   = ", getwd(), "\n",
+    "Run the app folder (inst/easybreedeR_Studio) rather than a random working directory.",
+    call. = FALSE
+  )
+}
 
 # Ensure LAN access is enabled by default
 # This ensures the app listens on 0.0.0.0 even if .Rprofile is not loaded

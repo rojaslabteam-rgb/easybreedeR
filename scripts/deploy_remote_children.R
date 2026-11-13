@@ -88,7 +88,11 @@ suite_spec <- list(
     "inst/datavieweR",
     "inst/pedivieweR",
     "inst/genovieweR",
-    "inst/easyblup"
+    "inst/easyblup",
+    "inst/Xmosome_blupf90kit",
+    "inst/www",
+    "inst/Runtime.R",
+    "inst/Language.R"
   )
 )
 
@@ -100,7 +104,7 @@ suite_spec <- list(
 }
 
 .resolve_app_files <- function(files) {
-  candidates <- unique(c("inst/Language.R", files))
+  candidates <- unique(c("inst/Language.R", "inst/Runtime.R", files))
   exists_flag <- vapply(
     candidates,
     function(p) {

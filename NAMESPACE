@@ -29,44 +29,61 @@ export(run_easyblup)
 export(run_easybreedeR)
 export(run_genovieweR)
 export(run_pedivieweR)
-importFrom(DT,DTOutput)
-importFrom(DT,datatable)
-importFrom(DT,renderDT)
+importFrom(DT,
+  DTOutput,
+  datatable,
+  renderDT
+)
 importFrom(Rcpp,evalCpp)
-importFrom(bslib,bs_theme)
-importFrom(bslib,font_google)
+importFrom(bslib,
+  bs_theme,
+  font_google
+)
 importFrom(data.table,fread)
 importFrom(digest,digest)
-importFrom(dplyr,arrange)
-importFrom(dplyr,case_when)
-importFrom(dplyr,distinct)
-importFrom(dplyr,filter)
-importFrom(dplyr,group_by)
-importFrom(dplyr,left_join)
-importFrom(dplyr,mutate)
-importFrom(dplyr,select)
-importFrom(dplyr,summarise)
-importFrom(dplyr,transmute)
+importFrom(dplyr,
+  arrange,
+  case_when,
+  distinct,
+  filter,
+  group_by,
+  left_join,
+  mutate,
+  select,
+  summarise,
+  transmute
+)
+importFrom(ggplot2,ggplot)
 importFrom(htmltools,tags)
-importFrom(igraph,cluster_louvain)
-importFrom(igraph,cluster_walktrap)
-importFrom(igraph,components)
-importFrom(igraph,graph_from_data_frame)
-importFrom(igraph,laplacian_matrix)
-importFrom(igraph,layout_with_fr)
-importFrom(igraph,layout_with_kk)
-importFrom(igraph,layout_with_lgl)
-importFrom(igraph,membership)
-importFrom(igraph,vcount)
+importFrom(igraph,
+  cluster_louvain,
+  cluster_walktrap,
+  components,
+  graph_from_data_frame,
+  laplacian_matrix,
+  layout_with_fr,
+  layout_with_kk,
+  layout_with_lgl,
+  membership,
+  vcount
+)
+importFrom(magrittr,"%>%")
 importFrom(plotly,plotlyOutput)
-importFrom(shinyjs,reset)
-importFrom(shinyjs,useShinyjs)
-importFrom(visNetwork,visEdges)
-importFrom(visNetwork,visEvents)
-importFrom(visNetwork,visGroups)
-importFrom(visNetwork,visInteraction)
-importFrom(visNetwork,visNetwork)
-importFrom(visNetwork,visNetworkOutput)
-importFrom(visNetwork,visNodes)
-importFrom(visNetwork,visOptions)
+importFrom(readr,read_delim)
+importFrom(readxl,read_excel)
+importFrom(shinyjs,
+  reset,
+  useShinyjs
+)
+importFrom(tidyr,pivot_longer)
+importFrom(visNetwork,
+  visEdges,
+  visEvents,
+  visGroups,
+  visInteraction,
+  visNetwork,
+  visNetworkOutput,
+  visNodes,
+  visOptions
+)
 useDynLib(easybreedeR, .registration = TRUE)

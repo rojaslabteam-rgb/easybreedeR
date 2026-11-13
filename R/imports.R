@@ -11,6 +11,11 @@
 #' @importFrom visNetwork visNetwork visNodes visEdges visGroups visOptions visInteraction visEvents
 #' @importFrom visNetwork visNetworkOutput
 #' @importFrom plotly plotlyOutput
+#' @importFrom ggplot2 ggplot
+#' @importFrom tidyr pivot_longer
+#' @importFrom readr read_delim
+#' @importFrom readxl read_excel
+#' @importFrom magrittr %>%
 #' @useDynLib easybreedeR, .registration = TRUE
 #' @importFrom Rcpp evalCpp
 #' @importFrom htmltools tags

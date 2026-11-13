@@ -1,0 +1,95 @@
+{
+  "manifest_version": 2,
+  "id": "dev.xmosome.blupf90kit",
+  "name": "Xmosome_blupf90kit",
+  "version": "0.1.0",
+  "description": "BLUPF90 / renumf90 parameter-card builder with progressive OPTIONS, Auto/Manual editing, and header-only phenotype mapping. Hosted as an embedded Shiny GUI inside easybreedeR (plugin-compatible layout and tokens).",
+  "license": "MIT",
+  "api_version": "1",
+  "command": "blupf90kit",
+  "icon": "icon.svg",
+  "entry": "Sources/GUI/index.html",
+  "host": {
+    "type": "shiny",
+    "entry": "app.R",
+    "run_fn": "run_Xmosome_blupf90kit_app",
+    "notes": "This kit ships as a Shiny app that embeds the Xmosome plugin visual language (GenoKit/PedigreeKit tokens). Native WASI runtime can be added later without changing the GUI chrome."
+  },
+  "capabilities": {
+    "gui": true,
+    "cli": false
+  },
+  "agent": {
+    "enabled": true,
+    "primary_operation": "build_par",
+    "input_profile": "tabular_text",
+    "file_globs": ["*.csv", "*.tsv", "*.txt", "*.dat", "*.xlsx", "*.xls", "*.ped", "*.bed", "*.bim", "*.fam"],
+    "default_parameters": {
+      "method": "VCE",
+      "template": "animal",
+      "edit_mode": "auto"
+    },
+    "aliases": ["blupf90kit", "blupf90-kit", "renumf90", "easyblup"],
+    "compact_outputs": true,
+    "pick_mode": "text"
+  },
+  "permissions": [
+    "read_input_files",
+    "write_output_files"
+  ],
+  "hostSymbol": "doc.text.magnifyingglass",
+  "commands": [
+    {
+      "id": "goal",
+      "title": "Goal & template",
+      "kind": "gui_action"
+    },
+    {
+      "id": "import",
+      "title": "Files & mapping",
+      "kind": "gui_action"
+    },
+    {
+      "id": "options",
+      "title": "OPTIONS",
+      "kind": "gui_action"
+    },
+    {
+      "id": "card",
+      "title": "Parameter card",
+      "kind": "view"
+    }
+  ],
+  "operations": [
+    {
+      "id": "build_par",
+      "description": "Build a renumf90 instruction file from phenotype headers, pedigree/genotype paths, model mapping and OPTIONS.",
+      "permissions": [
+        "read_input_files",
+        "write_output_files"
+      ],
+      "required_inputs": [
+        "pheno"
+      ],
+      "input_schema": {
+        "type": "object",
+        "properties": {
+          "method": { "type": "string" },
+          "template": { "type": "string" },
+          "traits": { "type": "array", "items": { "type": "string" } },
+          "fixed": { "type": "array", "items": { "type": "string" } },
+          "animal": { "type": "string" },
+          "random": { "type": "array", "items": { "type": "string" } }
+        }
+      },
+      "output_schema": {
+        "type": "object",
+        "properties": {
+          "status": { "type": "string" },
+          "parameter_card": { "type": "string" }
+        },
+        "required": ["status"]
+      }
+    }
+  ]
+}

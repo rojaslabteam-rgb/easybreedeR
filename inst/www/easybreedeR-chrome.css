@@ -1,0 +1,757 @@
+/* easybreedeR shared chrome — Purdue Boilermaker Gold brand accent */
+:root {
+  color-scheme: light dark;
+  --ink: #202124;
+  --muted: #6e7178;
+  --line: rgba(0, 0, 0, 0.10);
+  --line-soft: rgba(0, 0, 0, 0.06);
+  --surface: rgba(255, 255, 255, 0.72);
+  --surface-solid: #f7f5f1;
+  --control: #ffffff;
+  --card: #ffffff;
+  --card-raised: #ffffff;
+  /* Boilermaker Gold #CFB991; Aged #8E6F3E for text/hover on light bg */
+  --accent: #CFB991;
+  --accent-deep: #8E6F3E;
+  --accent-soft: rgba(207, 185, 145, 0.22);
+  --warn: #9a5b16;
+  --bad: #b4232d;
+  --good: #28734e;
+  --font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "Helvetica Neue", "PingFang SC", "Noto Sans SC", sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, monospace;
+  --radius: 12px;
+  --gap: 10px;
+  --control-h: 32px;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --ink: #ededee;
+    --muted: #9b9da3;
+    --line: rgba(255, 255, 255, 0.12);
+    --line-soft: rgba(255, 255, 255, 0.07);
+    --surface: rgba(35, 36, 39, 0.78);
+    --surface-solid: #1c1d20;
+    --control: rgba(255, 255, 255, 0.06);
+    --card: #26272b;
+    --card-raised: #2e3034;
+    --accent: #CFB991;
+    --accent-deep: #E0C9A0;
+    --accent-soft: rgba(207, 185, 145, 0.18);
+    --warn: #e4a55e;
+    --bad: #ff787f;
+    --good: #67bd8e;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body, .page-fillable, .bslib-page-fill {
+  height: 100% !important;
+  max-height: 100dvh !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  color: var(--ink) !important;
+  background: var(--surface-solid) !important;
+  font: 13px/1.4 var(--font) !important;
+  -webkit-font-smoothing: antialiased;
+}
+
+.page-fillable {
+  display: flex !important;
+  flex-direction: column !important;
+  overflow: hidden !important;
+  min-height: 0 !important;
+}
+
+/* ── Header (plugin-header + legacy title-bar alias) ── */
+.plugin-header,
+.title-bar {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 48px;
+  padding: 8px 14px;
+  border-bottom: 1px solid var(--line);
+  background: color-mix(in srgb, var(--card) 78%, transparent) !important;
+  backdrop-filter: blur(18px) saturate(160%);
+  -webkit-backdrop-filter: blur(18px) saturate(160%);
+  box-shadow: none !important;
+  text-align: left;
+  border-bottom: 1px solid var(--line) !important;
+}
+
+/* Legacy title-bar was centered gradient; keep children readable as plugin header */
+.title-bar {
+  flex-direction: column;
+  align-items: flex-start;
+  justify-content: center;
+  gap: 0;
+}
+
+.plugin-mark {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  display: grid;
+  place-items: center;
+  flex: none;
+}
+
+.plugin-header-text {
+  min-width: 0;
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.eyebrow {
+  margin: 0 !important;
+  font-size: 9px !important;
+  font-weight: 650 !important;
+  letter-spacing: 0.09em !important;
+  text-transform: uppercase !important;
+  color: var(--accent-deep) !important;
+  line-height: 1.2 !important;
+}
+
+.plugin-header h1,
+.title-bar h1 {
+  margin: 0 !important;
+  font-size: 14px !important;
+  font-weight: 650 !important;
+  letter-spacing: -0.015em !important;
+  color: var(--ink) !important;
+  line-height: 1.25 !important;
+  font-family: var(--font) !important;
+}
+
+.plugin-header .muted,
+.plugin-header p,
+.title-bar p {
+  margin: 0 !important;
+  color: var(--muted) !important;
+  font-size: 11px !important;
+  line-height: 1.25 !important;
+  font-family: var(--font) !important;
+  opacity: 1 !important;
+}
+
+.plugin-badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  background: var(--card);
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ── Buttons ── */
+.btn, .btn-sm, .btn-primary, .btn-secondary, .btn-success, .btn.btn-primary {
+  min-height: 28px !important;
+  padding: 3px 10px !important;
+  border: 1px solid var(--line) !important;
+  border-radius: 7px !important;
+  background: var(--card) !important;
+  color: var(--ink) !important;
+  font: inherit !important;
+  font-size: 12px !important;
+  font-weight: 550 !important;
+  box-shadow: none !important;
+  line-height: 1.3 !important;
+}
+.btn:hover, .btn-secondary:hover {
+  background: var(--surface-solid) !important;
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line)) !important;
+  color: var(--ink) !important;
+}
+.btn-primary, .btn.btn-primary, .btn-success {
+  border-color: var(--accent-deep) !important;
+  background: var(--accent) !important;
+  color: #1a1a1a !important;
+  font-weight: 600 !important;
+}
+/* Secondary = quiet outline; only the primary action is filled gold */
+.btn-secondary, .btn.btn-secondary {
+  background: var(--card) !important;
+  border-color: var(--line) !important;
+  color: var(--ink) !important;
+}
+.btn-secondary:hover, .btn.btn-secondary:hover {
+  background: var(--surface-solid) !important;
+  border-color: color-mix(in srgb, var(--accent) 35%, var(--line)) !important;
+  color: var(--ink) !important;
+}
+.btn-primary:hover, .btn.btn-primary:hover, .btn-success:hover {
+  background: color-mix(in srgb, var(--accent) 70%, var(--accent-deep)) !important;
+  border-color: var(--accent-deep) !important;
+  color: #1a1a1a !important;
+}
+
+/* Palette swatches: keep the chosen color (shared .btn !important would wash them out). */
+.color-grid .btn,
+.color-grid .btn:hover,
+.color-grid .btn:focus,
+.color-grid .btn:active,
+.color-grid .btn:focus-visible {
+  background: var(--swatch, #ddd) !important;
+  background-color: var(--swatch, #ddd) !important;
+  color: transparent !important;
+  border-color: color-mix(in srgb, var(--swatch, #ddd) 55%, #202124) !important;
+  box-shadow: none !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+}
+
+/* ── Tabs ── */
+.nav-tabs { border-bottom: none !important; }
+.nav-tabs .nav-link {
+  font-weight: 600 !important;
+  color: var(--muted) !important;
+  border: none !important;
+  border-bottom: 2px solid transparent !important;
+  background: transparent !important;
+  padding: 8px 14px !important;
+  font-size: 12.5px !important;
+}
+.nav-tabs .nav-link:hover {
+  border-bottom-color: color-mix(in srgb, var(--accent) 40%, transparent) !important;
+  color: var(--ink) !important;
+  background: transparent !important;
+}
+.nav-tabs .nav-link.active {
+  color: var(--accent-deep) !important;
+  background: var(--card) !important;
+  border: 1px solid var(--line) !important;
+  border-bottom: 0 !important;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+  box-shadow: none !important;
+}
+.tab-content {
+  border-top: 1px solid var(--line) !important;
+}
+.nav-underline .nav-link {
+  font-weight: 600 !important;
+  color: var(--muted) !important;
+}
+.nav-underline .nav-link.active {
+  color: var(--accent-deep) !important;
+  border-bottom: 2px solid var(--accent) !important;
+}
+
+/* ── Three-panel workspace (Xmosome-style, fluid + ratio-aware) ── */
+.three-panel-container {
+  /* Keep side panels wide enough for file inputs + radios */
+  --side: clamp(260px, 24vw, 320px);
+  flex: 1 1 auto !important;
+  display: grid !important;
+  grid-template-columns: var(--side) minmax(0, 1fr) var(--side) !important;
+  grid-template-rows: minmax(0, 1fr) !important;
+  gap: var(--gap, 10px) !important;
+  min-height: 0 !important;
+  height: auto !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  padding: 10px 12px 12px !important;
+  overflow: hidden !important;
+  position: relative !important;
+  background: transparent !important;
+}
+
+.three-panel-container > .left-panel,
+.three-panel-container > .right-panel,
+.three-panel-container > .center-panel {
+  min-width: 0 !important;
+  min-height: 0 !important;
+  height: 100% !important;
+  width: auto !important;
+  max-width: none !important;
+  flex: none !important;
+  overflow-x: hidden !important;
+  overflow-y: auto !important;
+  padding: 10px !important;
+  border: none !important;
+  background: transparent !important;
+  box-sizing: border-box !important;
+}
+
+/* Clearance for fixed edge toggles so they don't cover cards */
+.three-panel-container > .left-panel {
+  padding-left: 26px !important;
+}
+.three-panel-container > .right-panel {
+  padding-right: 26px !important;
+}
+
+.three-panel-container > .left-panel,
+.three-panel-container > .right-panel {
+  background-color: transparent !important;
+}
+
+.three-panel-container > .center-panel {
+  display: flex !important;
+  flex-direction: column !important;
+  gap: 8px !important;
+}
+
+/* Panel collapse (desktop / wide) */
+.three-panel-container:has(> .left-panel.hidden):has(> .right-panel.hidden) {
+  grid-template-columns: minmax(0, 1fr) !important;
+}
+.three-panel-container:has(> .left-panel.hidden):not(:has(> .right-panel.hidden)) {
+  grid-template-columns: minmax(0, 1fr) var(--side) !important;
+}
+.three-panel-container:has(> .right-panel.hidden):not(:has(> .left-panel.hidden)) {
+  grid-template-columns: var(--side) minmax(0, 1fr) !important;
+}
+.three-panel-container > .left-panel.hidden,
+.three-panel-container > .right-panel.hidden {
+  display: none !important;
+}
+
+.panel-section {
+  border: 1px solid var(--line) !important;
+  border-radius: var(--radius) !important;
+  background: var(--card) !important;
+  box-shadow: 0 1px 2px rgba(20, 32, 55, 0.04) !important;
+  overflow: visible !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+  padding: 10px 12px 12px !important;
+  margin: 0 0 10px 0 !important;
+}
+
+.section-title,
+h4.section-title {
+  color: var(--ink) !important;
+  border-bottom: 1px solid var(--line-soft) !important;
+  font-family: var(--font) !important;
+  margin: 0 0 10px 0 !important;
+  padding: 0 0 8px 0 !important;
+  font-size: 13px !important;
+  font-weight: 650 !important;
+}
+
+/* Contain every control inside side panels */
+.left-panel .shiny-input-container,
+.right-panel .shiny-input-container,
+.left-panel .form-group,
+.right-panel .form-group,
+.left-panel .btn,
+.right-panel .btn,
+.panel-section .shiny-input-container,
+.panel-section .btn,
+.panel-section .btn-block {
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+
+.left-panel .btn:not(.btn-block):not(.btn-sm),
+.right-panel .btn:not(.btn-block):not(.btn-sm) {
+  width: auto !important; /* allow compact buttons where intentional */
+  max-width: 100% !important;
+}
+.left-panel .btn.btn-secondary,
+.left-panel .btn.btn-primary,
+.left-panel .btn.btn-success,
+.left-panel .btn.btn-block,
+.right-panel .btn.btn-secondary,
+.right-panel .btn.btn-primary,
+.right-panel .btn.btn-success,
+.right-panel .btn.btn-block,
+.panel-section > .btn,
+.panel-section .btn-block {
+  width: 100% !important;
+  max-width: 100% !important;
+}
+
+/* Form controls */
+.form-control, .form-select, .selectize-input {
+  border-color: var(--line) !important;
+  border-radius: 8px !important;
+  background: var(--control) !important;
+  color: var(--ink) !important;
+  font: inherit !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
+}
+.form-control:focus, .form-select:focus, .selectize-input.focus {
+  border-color: color-mix(in srgb, var(--accent) 50%, var(--line)) !important;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent) !important;
+}
+
+input[type="checkbox"], input[type="radio"] {
+  accent-color: var(--accent);
+}
+
+.control-label, .form-label, label {
+  font-size: 11.5px !important;
+  font-weight: 550 !important;
+  color: var(--muted) !important;
+  margin-bottom: 3px !important;
+  word-break: break-word;
+}
+
+.shiny-input-container { margin-bottom: 8px !important; max-width: 100% !important; }
+
+/* Radios / checkboxes — never clip label text under the control */
+.shiny-options-group {
+  display: flex !important;
+  flex-direction: column !important;
+  align-items: stretch !important;
+  gap: 4px !important;
+  max-width: 100% !important;
+}
+/* Inline groups may wrap, but keep readable padding for the glyph */
+.shiny-options-group:has(.radio-inline),
+.shiny-options-group:has(.checkbox-inline),
+.shiny-options-group:has(.form-check-inline) {
+  flex-direction: row !important;
+  flex-wrap: wrap !important;
+  gap: 6px 12px !important;
+}
+.radio, .checkbox,
+.radio-inline, .checkbox-inline,
+.form-check, .form-check-inline,
+.shiny-options-group .radio,
+.shiny-options-group .checkbox,
+.shiny-options-group .radio-inline,
+.shiny-options-group .checkbox-inline,
+.shiny-options-group .form-check {
+  display: flex !important;
+  align-items: center !important;
+  gap: 6px !important;
+  margin: 0 !important;
+  padding-left: 0 !important;
+  min-height: 1.4em !important;
+  max-width: 100% !important;
+  overflow: visible !important;
+  white-space: normal !important;
+}
+.radio label, .checkbox label,
+.radio-inline label, .checkbox-inline label,
+.form-check-label,
+.shiny-options-group label {
+  display: inline !important;
+  padding-left: 0 !important;
+  margin: 0 !important;
+  overflow: visible !important;
+  text-overflow: unset !important;
+  white-space: normal !important;
+  color: var(--ink) !important;
+  font-size: 12px !important;
+  font-weight: 500 !important;
+}
+.radio input[type="radio"],
+.checkbox input[type="checkbox"],
+.radio-inline input[type="radio"],
+.checkbox-inline input[type="checkbox"],
+.form-check-input {
+  flex: none !important;
+  position: static !important;
+  margin: 0 !important;
+  float: none !important;
+}
+/* Checked state uses the brand accent, not the stock BS5 blue */
+input[type="checkbox"]:checked,
+input[type="radio"]:checked {
+  background-color: var(--accent-deep) !important;
+  border-color: var(--accent-deep) !important;
+}
+input[type="checkbox"]:focus-visible,
+input[type="radio"]:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent) !important;
+}
+
+/* Selectize text matches the other controls */
+.selectize-input,
+.selectize-input input,
+.selectize-input .item,
+.selectize-dropdown {
+  font-size: 12.5px !important;
+}
+
+/* ionRangeSlider (shiny skin) */
+.irs--shiny .irs-bar {
+  background: var(--accent) !important;
+  border-color: var(--accent) !important;
+}
+.irs--shiny .irs-handle {
+  border-color: var(--accent-deep) !important;
+  background: var(--accent-deep) !important;
+}
+.irs--shiny .irs-single,
+.irs--shiny .irs-from,
+.irs--shiny .irs-to {
+  background: var(--accent-deep) !important;
+}
+.irs--shiny .irs-min,
+.irs--shiny .irs-max {
+  background: var(--line-soft) !important;
+  color: var(--muted) !important;
+}
+
+/* File inputs — single row Browse | filename when possible */
+.shiny-input-container .input-group {
+  display: flex !important;
+  flex-wrap: nowrap !important;
+  align-items: stretch !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  border: 1px dashed color-mix(in srgb, var(--accent) 28%, var(--line)) !important;
+  border-radius: 8px !important;
+  overflow: hidden !important;
+  background: color-mix(in srgb, var(--accent-soft) 45%, var(--card)) !important;
+  box-sizing: border-box !important;
+}
+.shiny-input-container .input-group .form-control {
+  flex: 1 1 auto !important;
+  min-width: 0 !important;
+  width: auto !important;
+  border: none !important;
+  background: transparent !important;
+  background-image: none !important;
+  font-size: 11.5px !important;
+  color: var(--muted) !important;
+  overflow: hidden !important;
+  text-overflow: ellipsis !important;
+  white-space: nowrap !important;
+}
+.shiny-input-container .input-group-btn,
+.shiny-input-container .input-group > .input-group-btn {
+  flex: 0 0 auto !important;
+  width: auto !important;
+  order: -1; /* Browse first, then filename — BS3 puts btn after control */
+}
+.shiny-input-container .input-group-btn .btn,
+.shiny-input-container .btn-file {
+  border: none !important;
+  border-right: 1px solid var(--line-soft) !important;
+  border-left: none !important;
+  border-radius: 0 !important;
+  background: var(--card) !important;
+  color: var(--accent) !important;
+  font-weight: 600 !important;
+  font-size: 12px !important;
+  width: auto !important;
+  max-width: none !important;
+  white-space: nowrap !important;
+}
+
+/* File-upload progress (shown while Shiny transfers the file) */
+.shiny-file-input-progress {
+  display: block !important;
+  width: 100% !important;
+  margin: 6px 0 2px !important;
+  height: auto !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  border: none !important;
+}
+.shiny-file-input-progress .progress {
+  display: block !important;
+  height: 6px !important;
+  margin: 0 !important;
+  overflow: hidden !important;
+  background: color-mix(in srgb, var(--accent, #CFB991) 14%, #f3f1ec) !important;
+  border: 1px solid color-mix(in srgb, var(--accent, #CFB991) 28%, transparent) !important;
+  border-radius: 999px !important;
+  box-shadow: none !important;
+}
+.shiny-file-input-progress .progress-bar {
+  background: linear-gradient(90deg, var(--accent, #CFB991), color-mix(in srgb, var(--accent, #CFB991) 70%, #8a6d3b)) !important;
+  box-shadow: none !important;
+  font-size: 0 !important;
+  line-height: 6px !important;
+  transition: width 0.2s ease !important;
+}
+.shiny-file-input-progress[style*="visibility: hidden"],
+.shiny-file-input-progress[style*="visibility:hidden"] {
+  display: none !important;
+  margin: 0 !important;
+  height: 0 !important;
+}
+
+/* Floating panel toggles: keep off card content */
+.toggle-btn-left, .toggle-btn-right {
+  z-index: 1050 !important;
+}
+.toggle-btn-left { left: 4px !important; }
+.toggle-btn-right { right: 4px !important; }
+.toggle-btn-left .btn, .toggle-btn-right .btn {
+  width: 18px !important;
+  min-width: 18px !important;
+  max-width: 18px !important;
+  height: 48px !important;
+  padding: 0 !important;
+  border-radius: 6px !important;
+  border: 1px solid var(--line) !important;
+  background: var(--card) !important;
+  color: var(--accent) !important;
+  box-shadow: 0 1px 4px rgba(20, 32, 55, 0.08) !important;
+}
+
+/* DT / misc brand accents */
+.dataTables_wrapper .dataTables_paginate .paginate_button.current {
+  background: var(--accent) !important;
+  border-color: var(--accent-deep) !important;
+  color: #1a1a1a !important;
+}
+
+/* Mid desktop / laptop */
+@media (max-width: 1200px) and (min-width: 981px) {
+  .three-panel-container {
+    --side: clamp(240px, 22vw, 280px);
+    padding: 8px 10px 10px !important;
+    gap: 8px !important;
+  }
+}
+
+/* Narrow width OR portrait / square aspect → stack like Xmosome workbench */
+@media (max-width: 980px), (max-aspect-ratio: 1 / 1) {
+  .three-panel-container,
+  .three-panel-container:has(> .left-panel.hidden),
+  .three-panel-container:has(> .right-panel.hidden) {
+    display: flex !important;
+    flex-direction: column !important;
+    overflow-x: hidden !important;
+    overflow-y: auto !important;
+    height: auto !important;
+    min-height: 0 !important;
+    padding: 10px 12px 16px !important;
+    gap: 12px !important;
+  }
+  .three-panel-container > .left-panel,
+  .three-panel-container > .right-panel,
+  .three-panel-container > .center-panel {
+    flex: 0 0 auto !important;
+    width: 100% !important;
+    height: auto !important;
+    max-height: none !important;
+    overflow: visible !important;
+    padding: 0 !important;
+  }
+  .three-panel-container > .left-panel { order: 1; }
+  .three-panel-container > .center-panel { order: 2; min-height: min(70vh, 640px); }
+  .three-panel-container > .right-panel { order: 3; }
+  /* On stacked layouts keep side panels available */
+  .three-panel-container > .left-panel.hidden,
+  .three-panel-container > .right-panel.hidden {
+    display: block !important;
+  }
+  .toggle-btn-left,
+  .toggle-btn-right {
+    display: none !important;
+  }
+  .plugin-header,
+  .title-bar {
+    padding: 8px 12px !important;
+  }
+}
+
+/* Ultrawide: keep readable center column */
+@media (min-aspect-ratio: 21 / 9) and (min-width: 1400px) {
+  .three-panel-container {
+    --side: clamp(280px, 18vw, 340px);
+    max-width: 1760px;
+    margin-inline: auto;
+  }
+}
+
+/* Short landscape (e.g. laptop half-height / browser chrome) */
+@media (max-height: 700px) and (min-aspect-ratio: 4 / 3) and (min-width: 981px) {
+  .plugin-header,
+  .title-bar {
+    min-height: 40px !important;
+    padding: 4px 12px !important;
+  }
+  .three-panel-container {
+    padding: 6px 8px 8px !important;
+    gap: 6px !important;
+  }
+  .three-panel-container > .left-panel,
+  .three-panel-container > .right-panel,
+  .three-panel-container > .center-panel {
+    padding: 8px !important;
+  }
+}
+
+@media (pointer: coarse) {
+  .btn, .form-control, .form-select, .selectize-input {
+    min-height: 44px !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    scroll-behavior: auto !important;
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ── Title hover tips (explanations live here, not as inline alerts) ── */
+:root {
+  --tip-bg: #26282c;
+  --tip-ink: #f4f5f6;
+  --tip-strong: #ffffff;
+  --tip-line: transparent;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --tip-bg: #3a3c42;
+    --tip-ink: #ededee;
+    --tip-strong: #ffffff;
+    --tip-line: rgba(255, 255, 255, 0.14);
+  }
+}
+.tooltip {
+  --bs-tooltip-max-width: 280px;
+  --bs-tooltip-bg: var(--tip-bg);
+  --bs-tooltip-color: var(--tip-ink);
+  --bs-tooltip-opacity: 1;
+}
+.tooltip .tooltip-inner {
+  background: var(--tip-bg) !important;
+  color: var(--tip-ink) !important;
+  border: 1px solid var(--tip-line);
+  text-align: left !important;
+  font-size: 12px !important;
+  line-height: 1.45 !important;
+  padding: 8px 10px !important;
+}
+.tooltip .tooltip-inner b,
+.tooltip .tooltip-inner strong { color: var(--tip-strong); font-weight: 650; }
+.tooltip .tooltip-inner > div + div { margin-top: 4px; }
+.tip-text {
+  cursor: help;
+  text-decoration: underline dotted;
+  text-decoration-color: color-mix(in srgb, var(--muted) 55%, transparent);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  border-radius: 3px;
+}
+.tip-text:hover,
+.tip-text:focus-visible {
+  text-decoration-color: var(--accent);
+  outline: none;
+}
+.section-title .tip-text { font: inherit; font-weight: inherit; color: inherit; }
+
+/* Quiet helper line under a field (format notes, detection hints) */
+.field-hint {
+  margin: -4px 0 8px !important;
+  font-size: 11.5px !important;
+  line-height: 1.4 !important;
+  color: var(--muted) !important;
+}

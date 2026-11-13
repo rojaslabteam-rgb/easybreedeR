@@ -38,3 +38,8 @@ Thumbs.db
 !.github/workflows/
 !.github/workflows/**
 .Rproj.user
+
+# Optional author AI secrets for shinyapps (never commit)
+ai_author_env.local.R
+**/ai_author_env.local.R
+inst/Xmosome_blupf90kit/ai_author_env.local.R

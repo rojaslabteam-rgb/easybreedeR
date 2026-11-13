@@ -1,3 +1,12 @@
+# Shared runtime limits and session storage (installed or source layout).
+.runtime_candidates <- c(file.path("..", "Runtime.R"), "Runtime.R",
+                         file.path("inst", "Runtime.R"),
+                         system.file("Runtime.R", package = "easybreedeR"))
+.runtime_file <- .runtime_candidates[file.exists(.runtime_candidates)][1L]
+if (is.na(.runtime_file)) stop("Missing Runtime.R; include shared runtime helpers in the deployment.")
+source(.runtime_file, local = TRUE)
+eb_configure_uploads()
+
 # ============================================================================
 # LIBRARIES
 # ============================================================================
@@ -107,13 +116,7 @@ convert_values_to_na <- function(data, missing_values) {
 # USER INTERFACE
 # ============================================================================
 ui <- page_fillable(
-  theme = bs_theme(
-    version = 5,
-    bg = "#ffffff",
-    fg = "#333333",
-    primary = "#CEB888",
-    base_font = font_google("Crimson Text")
-  ),
+  theme = bs_theme(version = 5),
   shinyjs::useShinyjs(),
   
   # JavaScript for CSV download
@@ -133,6 +136,7 @@ ui <- page_fillable(
   
   # Custom CSS for layout
   tags$head(
+    if (exists("eb_chrome_css_tag", mode = "function")) eb_chrome_css_tag(),
     tags$style(HTML("
       /* Page setup */
       html, body {
@@ -143,57 +147,14 @@ ui <- page_fillable(
       }
       
       .page-fillable {
-        height: 100vh;
+        height: 100%;
         overflow: hidden;
         display: flex;
         flex-direction: column;
       }
       
-      /* Title bar */
-      .title-bar {
-        background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%);
-        padding: 15px 20px;
-        text-align: center;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        border-bottom: 3px solid #CFB991;
-        flex-shrink: 0;
-      }
-      
-      .title-bar h1 {
-        margin: 0;
-        font-size: clamp(1.5rem, 3vw, 2.5rem);
-        font-weight: 700;
-        color: #000000;
-        font-family: 'Crimson Text', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Heiti SC', 'SimSun', 'Noto Sans', Arial, sans-serif;
-      }
-      .title-bar p { margin: 5px 0 0 0; font-size: 1rem; color: #000000; opacity: .9; 
-        font-family: 'Crimson Text', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Heiti SC', 'SimSun', 'Noto Sans', Arial, sans-serif; }
-      /* Button styles aligned with PedivieweR 2.0 */
-      .btn-primary, .btn.btn-primary { background-color:#CEB888 !important; border-color:#CEB888 !important; color:#000000 !important; font-weight:600; }
-      .btn-primary:hover, .btn.btn-primary:hover { background-color:#B89D5D !important; border-color:#B89D5D !important; }
-      .btn-secondary { background-color:#95A5A6 !important; border-color:#95A5A6 !important; color:#fff !important; }
-      .btn-secondary:hover { background-color:#7F8C8D !important; border-color:#7F8C8D !important; }
-      /* Tabs style aligned with PedivieweR navset */
-      .nav-tabs { border-bottom: none; }
-      .nav-tabs .nav-link {
-        font-weight:700; color:#000 !important;
-        border:none; border-bottom:3px solid transparent;
-        background:transparent !important; padding:10px 18px;
-      }
-      .nav-tabs .nav-link:hover { border-bottom-color:#B89D5D; background:transparent !important; }
-      .nav-tabs .nav-link.active {
-        color:#000 !important;
-        background:#FFFFFF !important;
-        border:2px solid #CEB888 !important;
-        border-bottom:0 !important;
-        border-top-left-radius:8px; border-top-right-radius:8px;
-        box-shadow:0 2px 6px rgba(0,0,0,0.06);
-      }
-      /* top separator below tabs to match card seam */
-      .tab-content { border-top:2px solid #CEB888; }
-      /* bslib nav-underline variant fallback */
-      .nav-underline .nav-link { font-weight:700; color:#000 !important; }
-      .nav-underline .nav-link.active { color:#000 !important; border-bottom:3px solid #CEB888; }
+      /* title-bar styled by easybreedeR-chrome.css */
+/* Buttons and tabs: easybreedeR-chrome.css */
       
       /* Three-panel container */
       .three-panel-container {
@@ -209,7 +170,7 @@ ui <- page_fillable(
         overflow-y: auto;
         overflow-x: hidden;
         background-color: #FEFEFE;
-        border-right: 2px solid #CFB991;
+        border-right: 2px solid #b6c9e0;
         transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         padding: 20px;
         flex-shrink: 0;
@@ -227,7 +188,7 @@ ui <- page_fillable(
         overflow-y: auto;
         overflow-x: hidden;
         background-color: #FEFEFE;
-        border-left: 2px solid #CFB991;
+        border-left: 2px solid #b6c9e0;
         transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         padding: 20px;
         flex-shrink: 0;
@@ -271,8 +232,8 @@ ui <- page_fillable(
         height: 64px;
         padding: 0;
         border-radius: 8px;
-        border: 2px solid #CFB991;
-        background-color: #CEB888;
+        border: 2px solid #b6c9e0;
+        background-color: #CFB991;
         color: #000000;
         box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         display: flex;
@@ -284,7 +245,7 @@ ui <- page_fillable(
       }
 
       .toggle-btn-left .btn:hover, .toggle-btn-right .btn:hover {
-        background-color: #B89D5D;
+        background-color: #8E6F3E;
         box-shadow: 0 6px 16px rgba(0,0,0,0.3);
         transform: translateY(-1px);
       }
@@ -292,11 +253,11 @@ ui <- page_fillable(
       /* Panel sections */
       .panel-section {
         background: linear-gradient(135deg, #FFFFFF 0%, #F8F9FA 100%);
-        border: 2px solid #CFB991;
+        border: 2px solid #b6c9e0;
         border-radius: 8px;
         padding: 15px;
         margin-bottom: 20px;
-        box-shadow: 0 2px 8px rgba(206, 184, 136, 0.15);
+        box-shadow: 0 2px 8px rgba(207, 185, 145, 0.15);
       }
       
       .section-title {
@@ -306,7 +267,7 @@ ui <- page_fillable(
         margin-top: 0;
         margin-bottom: 12px;
         padding-bottom: 8px;
-        border-bottom: 2px solid #CEB888;
+        border-bottom: 2px solid #CFB991;
       }
       
       .subsection-title {
@@ -319,31 +280,32 @@ ui <- page_fillable(
       
       /* Button styling */
       .btn-primary, .btn.btn-primary {
-        background-color: #CEB888 !important;
-        border-color: #CEB888 !important;
-        color: #000000 !important;
+        background-color: #CFB991 !important;
+        border-color: #CFB991 !important;
+        color: #1a1a1a !important;
         font-weight: 600;
       }
       
       .btn-primary:hover, .btn.btn-primary:hover {
-        background-color: #B89D5D !important;
-        border-color: #B89D5D !important;
-        color: #000000 !important;
+        background-color: #8E6F3E !important;
+        border-color: #8E6F3E !important;
+        color: #1a1a1a !important;
       }
       
       .btn-success {
-        background-color: #CEB888 !important;
-        border-color: #CEB888 !important;
-        color: #000000 !important;
+        background-color: #CFB991 !important;
+        border-color: #CFB991 !important;
+        color: #1a1a1a !important;
       }
       
       .btn-success:hover {
-        background-color: #B89D5D !important;
-        border-color: #B89D5D !important;
+        background-color: #8E6F3E !important;
+        border-color: #8E6F3E !important;
+        color: #1a1a1a !important;
       }
       
       .btn-outline-secondary {
-        border-color: #CFB991;
+        border-color: #b6c9e0;
         color: #34495e;
       }
       
@@ -354,9 +316,9 @@ ui <- page_fillable(
       
       /* Tab styling */
       .nav-tabs .nav-link.active {
-        background-color: #CEB888 !important;
-        border-color: #CEB888 !important;
-        color: #000000 !important;
+        background-color: #CFB991 !important;
+        border-color: #CFB991 !important;
+        color: #1a1a1a !important;
         font-weight: 600;
       }
       
@@ -365,19 +327,19 @@ ui <- page_fillable(
       }
       
       .nav-tabs .nav-link:hover {
-        background-color: #F5ECD7;
-        border-color: #CFB991;
+        background-color: var(--accent-soft);
+        border-color: #b6c9e0;
       }
       
       /* Form controls */
       .form-control, .form-select {
-        border-color: #CFB991;
+        border-color: #b6c9e0;
         font-size: 0.9rem;
       }
       
       .form-control:focus, .form-select:focus {
-        border-color: #CEB888;
-        box-shadow: 0 0 0 0.2rem rgba(206, 184, 136, 0.25);
+        border-color: #CFB991;
+        box-shadow: 0 0 0 0.2rem rgba(207, 185, 145, 0.25);
       }
       
       .control-label {
@@ -417,14 +379,20 @@ ui <- page_fillable(
         aspect-ratio: 1;
         padding: 0;
         min-height: 40px;
-        border: 2px solid #CFB991;
+        border: 2px solid #b6c9e0;
         transition: transform 0.2s;
+        /* --swatch set inline; beats shared chrome .btn background !important */
+        background: var(--swatch, #ddd) !important;
+        background-color: var(--swatch, #ddd) !important;
+        color: transparent !important;
       }
       
       .color-grid .btn:hover {
         transform: scale(1.1);
         border-color: #000000;
         box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+        background: var(--swatch, #ddd) !important;
+        background-color: var(--swatch, #ddd) !important;
       }
       
       /* Scrollbar styling */
@@ -444,14 +412,14 @@ ui <- page_fillable(
       .left-panel::-webkit-scrollbar-thumb,
       .right-panel::-webkit-scrollbar-thumb,
       .center-panel::-webkit-scrollbar-thumb {
-        background: #CEB888;
+        background: #CFB991;
         border-radius: 5px;
       }
       
       .left-panel::-webkit-scrollbar-thumb:hover,
       .right-panel::-webkit-scrollbar-thumb:hover,
       .center-panel::-webkit-scrollbar-thumb:hover {
-        background: #B89D5D;
+        background: #8E6F3E;
       }
       
       /* Help text */
@@ -510,7 +478,11 @@ ui <- page_fillable(
           grid-template-columns: repeat(2, 1fr);
         }
       }
-    "))
+    ")),
+    # Landscape A4 compact + print (shared)
+    if (exists("easybreedeR_a4_layout_css", mode = "function")) {
+      tags$style(HTML(easybreedeR_a4_layout_css()))
+    }
   ),
   
   # Title Bar
@@ -540,19 +512,19 @@ ui <- page_fillable(
           
           # File Upload Section
       div(class = "panel-section",
-        h4(textOutput("dataUploadTitle"), class = "section-title"),
+        uiOutput("dataUploadTitle"),
               uiOutput("fileUploadUI")
           ),
           
           # Column Selection (moved here from visualization)
       div(class = "panel-section",
-        h4(textOutput("columnSelectionTitle"), class = "section-title"),
+        uiOutput("columnSelectionTitle"),
               uiOutput("columnSelectionUI")
           ),
           
           # QC Filter Options
           div(class = "panel-section",
-              h4(textOutput("qcFilterTitle"), class = "section-title"),
+              uiOutput("qcFilterTitle"),
               uiOutput("qcModeUI"),
               conditionalPanel(
                 condition = "input.qcMode == 'uniform'",
@@ -602,14 +574,14 @@ ui <- page_fillable(
           
           # Chart Type & Settings
           div(class = "panel-section",
-              h4(textOutput("plotTypeTitle"), class = "section-title"),
+              uiOutput("plotTypeTitle"),
               uiOutput("plotTypeUI"),
               uiOutput("binsUI")
           ),
           
           # Color Customization
           div(class = "panel-section",
-              h4(textOutput("colorCustomizationTitle"), class = "section-title"),
+              uiOutput("colorCustomizationTitle"),
               div(style = "text-align: center; margin-bottom: 15px;",
                   actionButton("toggleColorOptions",
                               textOutput("showColorOptionsText", inline = TRUE),
@@ -669,7 +641,7 @@ ui <- page_fillable(
 # SERVER
 # ============================================================================
 server <- function(input, output, session) {
-  options(shiny.maxRequestSize = 10 * 1024^3)
+  # Upload limit is configured once when the app is loaded.
   
   # Color reactive values
   preFilterColor <- reactiveVal("#DB3124")
@@ -686,9 +658,42 @@ server <- function(input, output, session) {
   # App title (use unified translation keys)
   output$appTitle <- renderText({ get_label("dataviewer_app_name", current_lang()) })
   output$appSubtitle <- renderText({ get_label("dataviewer_app_subtitle", current_lang()) })
-  output$dataUploadTitle <- renderText({ get_label("data_upload", current_lang()) })
-  output$columnSelectionTitle <- renderText({ get_label("column_selection", current_lang()) })
   output$applyDownloadTitle <- renderText({ get_label("apply_download", current_lang()) })
+
+  tip <- function(label, ...) {
+    if (exists("eb_with_tip", mode = "function")) eb_with_tip(label, ...) else label
+  }
+  output$dataUploadTitle <- renderUI({
+    lang <- current_lang()
+    h4(class = "section-title",
+       tip(get_label("data_upload", lang),
+           HTML(get_label("supported_types", lang)),
+           get_label("missing_value_format_help", lang)))
+  })
+  output$columnSelectionTitle <- renderUI({
+    lang <- current_lang()
+    h4(class = "section-title",
+       tip(get_label("column_selection", lang),
+           get_label("select_columns", lang)))
+  })
+  output$qcFilterTitle <- renderUI({
+    lang <- current_lang()
+    h4(class = "section-title",
+       tip(get_label("qc_filter_options", lang),
+           "Apply uniform or per-column filters, then download the cleaned table."))
+  })
+  output$plotTypeTitle <- renderUI({
+    lang <- current_lang()
+    h4(class = "section-title",
+       tip(get_label("plot_type_title", lang),
+           "Choose histogram, boxplot, or QQ plot for selected columns."))
+  })
+  output$colorCustomizationTitle <- renderUI({
+    lang <- current_lang()
+    h4(class = "section-title",
+       tip(get_label("color_customization", lang),
+           "Customize pre-filter and post-filter plot colors."))
+  })
   
   # Read data
   data <- reactive({
@@ -755,51 +760,39 @@ server <- function(input, output, session) {
     updateSelectInput(session, "columns", choices = names(data()))
   })
   
-  # File Upload UI
+  # File Upload UI (tips live on the section title)
   output$fileUploadUI <- renderUI({
     lang <- current_lang()
     div(
-      fileInput("file", get_label("file_upload", lang), 
+      fileInput("file", get_label("file_upload", lang),
                accept = c(".csv", ".txt", ".tsv", ".xlsx", ".xls", ".rds")),
-      HTML(paste0("<span style='color: #444;'>", get_label("supported_types", lang), "</span>")),
-      br(),
       div(
-        style = "margin-top: 10px; padding: 10px; background-color: #f8f9fa; border: 1px solid #dee2e6; border-radius: 5px;",
-        h6(textOutput("missingValueFormatLabel"), style = "margin-bottom:6px; font-size:0.95rem;"),
-        div(style = "display:flex; align-items:center; gap:10px; flex-wrap:wrap; font-size:0.95rem;",
-            tagList(
-              checkboxGroupInput("missingValueOptions", 
-                                label = NULL,
-                                choices = list("NA" = "NA", "0" = "0", "-999" = "-999", "Empty" = ""),
-                                selected = "NA",
-                                inline = TRUE),
-              tags$style(HTML("#missingValueOptions .checkbox-inline{display:inline-block;width:calc(50% - 6px);margin-right:6px;}"))
-            ),
-            div(style="display:flex; align-items:center; gap:6px;",
-                span("Custom:"),
-                textInput("missingValueCustom", label = NULL, placeholder = "e.g. -1 or NULL",
-                          width = "120px"))
-        ),
-        helpText(textOutput("missingValueFormatHelp"), style = "margin-top:6px; font-size:0.92rem;")
+        style = "margin-top: 10px;",
+        tags$label(get_label("missing_value_format_label", lang), class = "control-label"),
+        checkboxGroupInput("missingValueOptions",
+                          label = NULL,
+                          choices = list("NA" = "NA", "0" = "0", "-999" = "-999", "Empty" = ""),
+                          selected = "NA",
+                          inline = TRUE),
+        div(style = "display:flex; align-items:center; gap:6px; margin-top:6px;",
+            span("Custom:"),
+            textInput("missingValueCustom", label = NULL, placeholder = "e.g. -1 or NULL",
+                      width = "100%"))
       )
     )
   })
   
-  output$missingValueFormatLabel <- renderText({ get_label("missing_value_format_label", current_lang()) })
-  output$missingValueFormatHelp <- renderText({ get_label("missing_value_format_help", current_lang()) })
-  
   # Column selection UI
   output$columnSelectionUI <- renderUI({
     lang <- current_lang()
-    selectInput("columns", HTML(paste0("🗂️ ", get_label("select_columns", lang))), 
+    selectInput("columns", HTML(paste0("", get_label("select_columns", lang))), 
                choices = NULL, multiple = TRUE)
   })
   
   # Plot type UI
-  output$plotTypeTitle <- renderText({ get_label("plot_type_title", current_lang()) })
   output$plotTypeUI <- renderUI({
     lang <- current_lang()
-    selectInput("plotType", HTML(paste0("📊 ", get_label("plot_type", lang))),
+    selectInput("plotType", HTML(paste0("", get_label("plot_type", lang))),
                choices = stats::setNames(
                  c("histogram", "boxplot", "qqplot"),
                  c(get_label("histogram", lang), get_label("boxplot", lang), get_label("qqplot", lang))
@@ -816,7 +809,6 @@ server <- function(input, output, session) {
   })
   
   # Color customization UI
-  output$colorCustomizationTitle <- renderText({ get_label("color_customization", current_lang()) })
   output$showColorOptionsText <- renderText({
     lang <- current_lang()
     if (is.null(input$toggleColorOptions) || input$toggleColorOptions %% 2 == 0) {
@@ -840,22 +832,22 @@ server <- function(input, output, session) {
           span(get_label("color_palette_label", lang), class = "color-palette-label")
         ),
         div(class = "color-grid",
-          actionButton("preFilterRed1", "", style = "background-color: #FFB3B3;"),
-          actionButton("preFilterGreen1", "", style = "background-color: #B3FFB3;"),
-          actionButton("preFilterBlue1", "", style = "background-color: #B3CCFF;"),
-          actionButton("preFilterYellow1", "", style = "background-color: #FFFFB3;"),
-          actionButton("preFilterRed2", "", style = "background-color: #FF6666;"),
-          actionButton("preFilterGreen2", "", style = "background-color: #66FF66;"),
-          actionButton("preFilterBlue2", "", style = "background-color: #6699FF;"),
-          actionButton("preFilterYellow2", "", style = "background-color: #FFFF66;"),
-          actionButton("preFilterRed3", "", style = "background-color: #FF0000;"),
-          actionButton("preFilterGreen3", "", style = "background-color: #00FF00;"),
-          actionButton("preFilterBlue3", "", style = "background-color: #0066FF;"),
-          actionButton("preFilterYellow3", "", style = "background-color: #FFFF00;"),
-          actionButton("preFilterRed4", "", style = "background-color: #CC0000;"),
-          actionButton("preFilterGreen4", "", style = "background-color: #00CC00;"),
-          actionButton("preFilterBlue4", "", style = "background-color: #0033CC;"),
-          actionButton("preFilterYellow4", "", style = "background-color: #CCCC00;")
+          actionButton("preFilterRed1", "", style = "--swatch: #FFB3B3;"),
+          actionButton("preFilterGreen1", "", style = "--swatch: #B3FFB3;"),
+          actionButton("preFilterBlue1", "", style = "--swatch: #B3CCFF;"),
+          actionButton("preFilterYellow1", "", style = "--swatch: #FFFFB3;"),
+          actionButton("preFilterRed2", "", style = "--swatch: #FF6666;"),
+          actionButton("preFilterGreen2", "", style = "--swatch: #66FF66;"),
+          actionButton("preFilterBlue2", "", style = "--swatch: #6699FF;"),
+          actionButton("preFilterYellow2", "", style = "--swatch: #FFFF66;"),
+          actionButton("preFilterRed3", "", style = "--swatch: #FF0000;"),
+          actionButton("preFilterGreen3", "", style = "--swatch: #00FF00;"),
+          actionButton("preFilterBlue3", "", style = "--swatch: #0066FF;"),
+          actionButton("preFilterYellow3", "", style = "--swatch: #FFFF00;"),
+          actionButton("preFilterRed4", "", style = "--swatch: #CC0000;"),
+          actionButton("preFilterGreen4", "", style = "--swatch: #00CC00;"),
+          actionButton("preFilterBlue4", "", style = "--swatch: #0033CC;"),
+          actionButton("preFilterYellow4", "", style = "--swatch: #CCCC00;")
         )
       ),
       
@@ -870,22 +862,22 @@ server <- function(input, output, session) {
           span(get_label("color_palette_label", lang), class = "color-palette-label")
         ),
         div(class = "color-grid",
-          actionButton("postFilterRed1", "", style = "background-color: #FFB3B3;"),
-          actionButton("postFilterGreen1", "", style = "background-color: #B3FFB3;"),
-          actionButton("postFilterBlue1", "", style = "background-color: #B3CCFF;"),
-          actionButton("postFilterYellow1", "", style = "background-color: #FFFFB3;"),
-          actionButton("postFilterRed2", "", style = "background-color: #FF6666;"),
-          actionButton("postFilterGreen2", "", style = "background-color: #66FF66;"),
-          actionButton("postFilterBlue2", "", style = "background-color: #6699FF;"),
-          actionButton("postFilterYellow2", "", style = "background-color: #FFFF66;"),
-          actionButton("postFilterRed3", "", style = "background-color: #FF0000;"),
-          actionButton("postFilterGreen3", "", style = "background-color: #00FF00;"),
-          actionButton("postFilterBlue3", "", style = "background-color: #0066FF;"),
-          actionButton("postFilterYellow3", "", style = "background-color: #FFFF00;"),
-          actionButton("postFilterRed4", "", style = "background-color: #CC0000;"),
-          actionButton("postFilterGreen4", "", style = "background-color: #00CC00;"),
-          actionButton("postFilterBlue4", "", style = "background-color: #0033CC;"),
-          actionButton("postFilterYellow4", "", style = "background-color: #CCCC00;")
+          actionButton("postFilterRed1", "", style = "--swatch: #FFB3B3;"),
+          actionButton("postFilterGreen1", "", style = "--swatch: #B3FFB3;"),
+          actionButton("postFilterBlue1", "", style = "--swatch: #B3CCFF;"),
+          actionButton("postFilterYellow1", "", style = "--swatch: #FFFFB3;"),
+          actionButton("postFilterRed2", "", style = "--swatch: #FF6666;"),
+          actionButton("postFilterGreen2", "", style = "--swatch: #66FF66;"),
+          actionButton("postFilterBlue2", "", style = "--swatch: #6699FF;"),
+          actionButton("postFilterYellow2", "", style = "--swatch: #FFFF66;"),
+          actionButton("postFilterRed3", "", style = "--swatch: #FF0000;"),
+          actionButton("postFilterGreen3", "", style = "--swatch: #00FF00;"),
+          actionButton("postFilterBlue3", "", style = "--swatch: #0066FF;"),
+          actionButton("postFilterYellow3", "", style = "--swatch: #FFFF00;"),
+          actionButton("postFilterRed4", "", style = "--swatch: #CC0000;"),
+          actionButton("postFilterGreen4", "", style = "--swatch: #00CC00;"),
+          actionButton("postFilterBlue4", "", style = "--swatch: #0033CC;"),
+          actionButton("postFilterYellow4", "", style = "--swatch: #CCCC00;")
         )
       ),
       
@@ -960,7 +952,6 @@ server <- function(input, output, session) {
   })
   
   # QC UI
-  output$qcFilterTitle <- renderText({ get_label("qc_filter_options", current_lang()) })
   output$qcModeUI <- renderUI({
     lang <- current_lang()
     radioButtons("qcMode", get_label("qc_mode", lang),
@@ -1200,7 +1191,7 @@ server <- function(input, output, session) {
         )
       }))
     } else {
-      plotOutput("preDistPlot", height = "500px")
+      plotOutput("preDistPlot", height = "400px")
     }
   })
   
@@ -1985,7 +1976,7 @@ server <- function(input, output, session) {
           }))
         }
       } else {
-        plotOutput("comparisonPlots", height = "600px")
+        plotOutput("comparisonPlots", height = "480px")
       }
     )
   })

@@ -1,9 +1,20 @@
+# Shared runtime limits and session storage (installed or source layout).
+.runtime_candidates <- c(file.path("..", "Runtime.R"), "Runtime.R",
+                         file.path("inst", "Runtime.R"),
+                         system.file("Runtime.R", package = "easybreedeR"))
+.runtime_file <- .runtime_candidates[file.exists(.runtime_candidates)][1L]
+if (is.na(.runtime_file)) stop("Missing Runtime.R; include shared runtime helpers in the deployment.")
+source(.runtime_file, local = TRUE)
+eb_configure_uploads()
+
 # ================================================
 # easyblup - Interactive BLUPF90 Parameter Generator  
 # ================================================
 
-library(shiny)
-library(bslib)
+suppressPackageStartupMessages({
+  library(shiny)
+  library(bslib)
+})
 
 # Declare externally provided helpers to silence lintr visibility warnings
 utils::globalVariables(c("resolve_suite_lang", "map_suite_lang_for_app"))
@@ -1007,34 +1018,15 @@ convert_plink_to_blupf90_plink_backend <- function(ped_path, map_path, out_prefi
 
 # ====== UI Definition ======
 ui <- page_fillable(
-  theme = bs_theme(
-    version = 5,
-    bg = "#ffffff",
-    fg = "#333333",
-    primary = "#CEB888",
-    base_font = font_google("Crimson Text")
-  ),
+  theme = bs_theme(version = 5),
   
   # Custom CSS
   tags$head(
+    if (exists("eb_chrome_css_tag", mode = "function")) eb_chrome_css_tag(),
     tags$style(HTML("
     html, body { height: 100%; margin: 0; padding: 0; }
-    .title-bar {
-      background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%);
-      padding: 15px 20px; text-align: center;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-      border-bottom: 3px solid #CFB991;
-      flex-shrink: 0;
-    }
-    .title-bar h1 {
-      margin: 0; color: #000; font-weight: 700;
-      font-size: clamp(1.5rem, 3vw, 2.5rem);
-      font-family: 'Crimson Text', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Heiti SC', 'SimSun', 'Noto Sans', Arial, sans-serif;
-    }
-    .title-bar p { margin: 5px 0 0 0; font-size: 1rem; color: #000; opacity: .9; 
-      font-family: 'Crimson Text', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Heiti SC', 'SimSun', 'Noto Sans', Arial, sans-serif; }
     .three-panel-container {
-      display: flex; height: calc(100vh - 72px);
+      display: flex; height: auto /* fluid: easybreedeR-chrome.css */;
       overflow: hidden; position: relative;
     }
     .left-panel, .right-panel {
@@ -1046,8 +1038,8 @@ ui <- page_fillable(
     /* hide scrollbars but keep scrolling */
     .left-panel, .right-panel { -ms-overflow-style: none; scrollbar-width: none; }
     .left-panel::-webkit-scrollbar, .right-panel::-webkit-scrollbar { display: none; }
-    .left-panel { border-right: 2px solid #CFB991; }
-    .right-panel { border-left: 2px solid #CFB991; }
+    .left-panel { border-right: 2px solid #b6c9e0; }
+    .right-panel { border-left: 2px solid #b6c9e0; }
     .left-panel.hidden, .right-panel.hidden { width: 0; padding: 0; overflow: hidden; }
 
     .center-panel {
@@ -1058,19 +1050,14 @@ ui <- page_fillable(
 
     .panel-section {
       background: linear-gradient(135deg,#FFFFFF 0%,#F8F9FA 100%);
-      border: 2px solid #CFB991; border-radius: 8px;
+      border: 2px solid #b6c9e0; border-radius: 8px;
       padding: 15px; margin-bottom: 20px;
-      box-shadow: 0 2px 8px rgba(206,184,136,.15);
+      box-shadow: 0 2px 8px rgba(207, 185, 145,.15);
     }
     /* Button styles aligned with PedivieweR 2.0 */
-    .btn-primary, .btn.btn-primary { background-color:#CEB888 !important; border-color:#CEB888 !important; color:#000000 !important; font-weight:600; }
-    .btn-primary:hover, .btn.btn-primary:hover { background-color:#B89D5D !important; border-color:#B89D5D !important; }
-    .btn-secondary { background-color:#95A5A6 !important; border-color:#95A5A6 !important; color:#fff !important; }
-    .btn-secondary:hover { background-color:#7F8C8D !important; border-color:#7F8C8D !important; }
-    .section-title {
-      font-size: 1.1rem; font-weight: 700; color: #2c3e50;
-      margin: 0 0 12px 0; padding-bottom: 8px; border-bottom: 2px solid #CEB888;
-    }
+    /* btn-primary: easybreedeR-chrome.css */
+    
+    /* btn-secondary, section-title: easybreedeR-chrome.css */
 
     /* Toggle buttons */
     .toggle-btn-left, .toggle-btn-right {
@@ -1081,27 +1068,27 @@ ui <- page_fillable(
     .toggle-btn-right { right: 8px; }
     .toggle-btn-left .btn, .toggle-btn-right .btn {
       width: 14px; height: 64px; padding: 0; line-height: 1;
-      border-radius: 8px; border: 2px solid #CFB991;
-      background-color: #CEB888; color: #000; font-weight: 700;
+      border-radius: 8px; border: 2px solid #b6c9e0;
+      background-color: #CFB991; color: #000; font-weight: 700;
       box-shadow: 0 4px 12px rgba(0,0,0,.2);
       display: flex; align-items: center; justify-content: center;
     }
     .toggle-btn-left .btn:hover, .toggle-btn-right .btn:hover {
-      background-color: #B89D5D;
+      background-color: #8E6F3E;
       box-shadow: 0 6px 16px rgba(0,0,0,.3);
       transform: translateY(-1px);
     }
 
     /* Button theme */
     .btn-primary, .btn.btn-primary {
-      background-color: #CEB888 !important;
-      border-color: #CEB888 !important;
-      color: #000 !important; font-weight: 600;
+      background-color: #CFB991 !important;
+      border-color: #CFB991 !important;
+      color: #1a1a1a !important; font-weight: 600;
     }
     .btn-primary:hover, .btn.btn-primary:hover {
-      background-color: #B89D5D !important;
-      border-color: #B89D5D !important;
-      color: #000 !important;
+      background-color: #8E6F3E !important;
+      border-color: #8E6F3E !important;
+      color: #1a1a1a !important;
     }
 
     /* Parameter editor */
@@ -1123,10 +1110,15 @@ ui <- page_fillable(
     @media (max-width: 768px) {
       .left-panel.hidden, .right-panel.hidden { display: none; }
     }
+    ")),
+    if (exists("easybreedeR_a4_layout_css", mode = "function")) {
+      tags$style(HTML(easybreedeR_a4_layout_css()))
+    },
+    tags$style(HTML("
     /* Genotype Format Helper Modal Styles */
     .geno-helper-modal .modal-header {
-      background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%);
-      border-bottom: 3px solid #CFB991;
+      background: rgba(207, 185, 145,0.10);
+      border-bottom: 3px solid #b6c9e0;
       padding: 20px 25px;
       border-radius: 8px 8px 0 0;
     }
@@ -1148,11 +1140,11 @@ ui <- page_fillable(
     }
     .geno-helper-info-box {
       background: linear-gradient(135deg, #FFF9F0 0%, #FFF5E6 100%);
-      border: 2px solid #CEB888;
+      border: 2px solid #CFB991;
       border-radius: 8px;
       padding: 15px 18px;
       margin-bottom: 20px;
-      box-shadow: 0 2px 6px rgba(206,184,136,.1);
+      box-shadow: 0 2px 6px rgba(207, 185, 145,.1);
     }
     .geno-helper-info-box p {
       margin: 0;
@@ -1174,8 +1166,8 @@ ui <- page_fillable(
       box-shadow: 0 2px 4px rgba(0,0,0,.05);
     }
     .geno-helper-direction-card:hover {
-      border-color: #CEB888;
-      box-shadow: 0 4px 12px rgba(206,184,136,.15);
+      border-color: #CFB991;
+      box-shadow: 0 4px 12px rgba(207, 185, 145,.15);
     }
     .geno-helper-direction-card h4 {
       color: #2c3e50;
@@ -1199,14 +1191,14 @@ ui <- page_fillable(
     }
     .geno-helper-file-input-wrapper {
       background: #F8F9FA;
-      border: 2px dashed #CFB991;
+      border: 2px dashed #b6c9e0;
       border-radius: 8px;
       padding: 15px;
       margin-bottom: 12px;
       transition: all 0.2s ease;
     }
     .geno-helper-file-input-wrapper:hover {
-      border-color: #CEB888;
+      border-color: #CFB991;
       background: #FFF9F0;
     }
     .geno-helper-file-input-wrapper label {
@@ -1255,15 +1247,15 @@ ui <- page_fillable(
       transition: all 0.2s ease;
     }
     .geno-helper-modal .btn-primary {
-      background-color: #CEB888 !important;
-      border-color: #CEB888 !important;
-      color: #000 !important;
+      background-color: #CFB991 !important;
+      border-color: #CFB991 !important;
+      color: #1a1a1a !important;
     }
     .geno-helper-modal .btn-primary:hover {
-      background-color: #B89D5D !important;
-      border-color: #B89D5D !important;
+      background-color: #8E6F3E !important;
+      border-color: #8E6F3E !important;
       transform: translateY(-1px);
-      box-shadow: 0 4px 8px rgba(206,184,136,.3);
+      box-shadow: 0 4px 8px rgba(207, 185, 145,.3);
     }
     .geno-helper-modal .btn-secondary {
       background-color: #95A5A6 !important;
@@ -1274,12 +1266,12 @@ ui <- page_fillable(
       border-color: #7F8C8D !important;
     }
     #download_blup_map {
-      background-color: rgba(206, 184, 136, 1) !important;
-      border-color: rgba(206, 184, 136, 1) !important;
+      background-color: rgba(207, 185, 145, 1) !important;
+      border-color: rgba(207, 185, 145, 1) !important;
     }
     #download_blup_txt {
-      background-color: rgba(206, 184, 136, 1) !important;
-      border-color: rgba(206, 184, 136, 1) !important;
+      background-color: rgba(207, 185, 145, 1) !important;
+      border-color: rgba(207, 185, 145, 1) !important;
       width: 212px;
     }
     /* Align heights for folder selection input */
@@ -1334,7 +1326,7 @@ ui <- page_fillable(
     .geno-helper-arrow {
       display: inline-block;
       margin: 0 8px;
-      color: #CEB888;
+      color: #CFB991;
       font-weight: bold;
       font-size: 1.2rem;
     }
@@ -1694,10 +1686,16 @@ server <- function(input, output, session) {
   })
   
   # ====== Right panel dynamic sections (language-aware) ======
+  tip <- function(label, ...) {
+    if (exists("eb_with_tip", mode = "function")) eb_with_tip(label, ...) else label
+  }
+
   output$right_basic_options_ui <- renderUI({
     l <- lang()
     div(class = "panel-section",
-      h4(get_label("basic_options", l), class = "section-title"),
+      h4(class = "section-title",
+         tip(get_label("basic_options", l),
+             "Missing-value handling and basic statistics for the parameter file.")),
       checkboxInput("opt_remove_all_missing", get_label("remove_all_missing", l), value = TRUE),
       checkboxInput("opt_missing_in_weights", get_label("missing_in_weights", l), value = FALSE),
       checkboxInput("opt_no_basic_statistics", get_label("no_basic_statistics", l), value = FALSE),
@@ -1708,7 +1706,9 @@ server <- function(input, output, session) {
   output$right_analysis_method_ui <- renderUI({
     l <- lang()
     div(class = "panel-section",
-      h4(get_label("analysis_method_options", l), class = "section-title"),
+      h4(class = "section-title",
+         tip(get_label("analysis_method_options", l),
+             "BLUP / VCE solver settings: convergence, REML rounds, YAMS, and residuals.")),
       selectInput("opt_method", get_label("method_label", l),
                  choices = c(setNames("BLUP", get_label("method_blup", l)),
                              setNames("VCE",  get_label("method_vce",  l))),
@@ -1735,7 +1735,9 @@ server <- function(input, output, session) {
   output$right_solution_output_ui <- renderUI({
     l <- lang()
     div(class = "panel-section",
-      h4(get_label("solution_output_options", l), class = "section-title"),
+      h4(class = "section-title",
+         tip(get_label("solution_output_options", l),
+             "Store solutions using original animal IDs.")),
       checkboxInput("opt_origID", get_label("origID_store_solutions", l), value = TRUE)
     )
   })
@@ -1743,7 +1745,9 @@ server <- function(input, output, session) {
   output$right_accuracy_ui <- renderUI({
     l <- lang()
     div(class = "panel-section",
-      h4(get_label("accuracy_reliability", l), class = "section-title"),
+      h4(class = "section-title",
+         tip(get_label("accuracy_reliability", l),
+             "Accuracy / reliability storage and inbreeding correction options.")),
       uiOutput("store_accuracy_ui"),
       uiOutput("store_accuracy_orig_ui"),
       selectInput("opt_acctype", get_label("acctype", l), choices = c("1.0", "0.5"), selected = "1.0", width = "120px"),
@@ -1754,7 +1758,9 @@ server <- function(input, output, session) {
   output$right_genomic_ui <- renderUI({
     l <- lang()
     div(class = "panel-section",
-      h4(get_label("genomic_ssgblup", l), class = "section-title"),
+      h4(class = "section-title",
+         tip(get_label("genomic_ssgblup", l),
+             "ssGBLUP options: SNP p-values, omit A-inverse, Tau/Omega and Alpha/Beta.")),
       checkboxInput("opt_snp_p_value", get_label("snp_p_value", l), value = FALSE),
       checkboxInput("opt_omit_ainv", get_label("omit_ainv", l), value = FALSE),
       textInput("opt_TauOmega", get_label("tauomega", l), value = "1.0 0.0", width = "200px"),
@@ -1765,7 +1771,9 @@ server <- function(input, output, session) {
   output$right_hetres_ui <- renderUI({
     l <- lang()
     div(class = "panel-section",
-      h4(get_label("het_res_weights", l), class = "section-title"),
+      h4(class = "section-title",
+         tip(get_label("het_res_weights", l),
+             "Heterogeneous residual positions and polynomial weight presets.")),
       selectInput("opt_hetres_pos", get_label("hetres_pos", l), choices = NULL, multiple = TRUE, width = "240px"),
       selectInput("opt_hetres_pol_preset", get_label("hetres_pol_preset_label", l),
                  choices = c(setNames("0.1", get_label("hetres_pol_constant", l)),
@@ -1777,7 +1785,9 @@ server <- function(input, output, session) {
 
   output$right_renumf90_ui <- renderUI({
     div(class = "panel-section",
-      h4("RENUMF90: Pedigree & Inbreeding", class = "section-title"),
+      h4(class = "section-title",
+         tip("RENUMF90: Pedigree & Inbreeding",
+             "Pedigree search depth and inbreeding method for renumf90.")),
       checkboxInput("opt_ped_search_complete", "OPTION ped_search complete", value = FALSE),
       checkboxInput("opt_use_ped_depth", "Use PED_DEPTH", value = FALSE),
       conditionalPanel(
@@ -1809,7 +1819,18 @@ server <- function(input, output, session) {
   
   # Left Panel - Upload section
   output$upload_title_ui <- renderUI({
-    h4(get_label("upload_data", lang()), class = "section-title")
+    tip <- if (exists("eb_with_tip", mode = "function")) eb_with_tip else function(label, ...) label
+    fmt <- input$geno_format %||% "plink"
+    geno_tip <- if (identical(fmt, "blupf90")) {
+      "Accepted genotype: .txt (BLUPF90)."
+    } else {
+      "Accepted genotype: .bed + .bim + .fam (PLINK)."
+    }
+    h4(class = "section-title",
+       tip(get_label("upload_data", lang()),
+           "Upload phenotype (required), pedigree and genotype (optional).",
+           geno_tip,
+           "Hover the ? next to Genotype Format for PLINK → BLUPF90 conversion help."))
   })
   
   output$pheno_label_ui <- renderUI({
@@ -1868,19 +1889,7 @@ server <- function(input, output, session) {
     )
   })
   
-  output$geno_accept_ui <- renderUI({
-    # Hidden helper to update file input accept attribute dynamically
-    format <- input$geno_format %||% "plink"
-    # Note: Shiny's fileInput doesn't support dynamic accept, so we validate on server side
-    # This is a UI message to guide users
-    if (format == "blupf90") {
-      div(style = "font-size: 0.85rem; color: #666; margin-top: 5px;",
-          "📝 ", "Accepted format: .txt files")
-    } else {
-      div(style = "font-size: 0.85rem; color: #666; margin-top: 5px;",
-          "📝 ", "Accepted formats: .bed, .bim and .fam files")
-    }
-  })
+  output$geno_accept_ui <- renderUI({ NULL })
   
   output$clear_all_btn_ui <- renderUI({
     actionButton("clear_all", get_label("clear_all", lang()), 
@@ -1890,7 +1899,10 @@ server <- function(input, output, session) {
   
   # Left Panel - Model Builder section
   output$model_builder_title_ui <- renderUI({
-    h4(get_label("model_builder", lang()), class = "section-title")
+    tip <- if (exists("eb_with_tip", mode = "function")) eb_with_tip else function(label, ...) label
+    h4(class = "section-title",
+       tip(get_label("model_builder", lang()),
+           "Map phenotype columns to traits, fixed effects, animal ID, and random effects."))
   })
   
   output$traits_label_ui <- renderUI({
@@ -1911,7 +1923,10 @@ server <- function(input, output, session) {
   
   # Left Panel - Optional Effects section
   output$optional_title_ui <- renderUI({
-    h4(get_label("optional_effects", lang()), class = "section-title")
+    tip <- if (exists("eb_with_tip", mode = "function")) eb_with_tip else function(label, ...) label
+    h4(class = "section-title",
+       tip(get_label("optional_effects", lang()),
+           "PE = permanent environment; MAT = maternal; MPE = maternal permanent environment."))
   })
   
   output$pe_label_ui <- renderUI({
@@ -1928,12 +1943,12 @@ server <- function(input, output, session) {
   
   # Center Panel - Parameter file section
   output$param_title_ui <- renderUI({
-    h2(get_label("parameter_file", lang()), style = "text-align: center; margin-bottom: 20px;")
+    h4(get_label("parameter_file", lang()), class = "section-title")
   })
   
   output$reset_btn_ui <- renderUI({
     actionButton("reset_param", get_label("reset_param", lang()), 
-                class = "btn-primary", style = "flex: 1;")
+                class = "btn-secondary", style = "flex: 1;")
   })
   
   output$download_btn_ui <- renderUI({
@@ -1944,7 +1959,7 @@ server <- function(input, output, session) {
   # ====== End Dynamic UI ======
   
   # Set file size limit
-  options(shiny.maxRequestSize = 10 * 1024^3)
+  # Upload limit is configured once when the app is loaded.
   
   # Reactive values for selected variables
   values <- reactiveValues(
@@ -2865,7 +2880,7 @@ OPTION out_se_covar_function
                       if (tolower(lang()) == "zh") "关闭" else "Close", 
                       class = "btn-secondary"),
           actionButton("geno_convert_run", 
-                      if (tolower(lang()) == "zh") "🚀 运行转换" else "🚀 Run Conversion", 
+                      if (tolower(lang()) == "zh") "运行转换" else "Run Conversion", 
                       class = "btn-primary",
                       icon = NULL)
         ),
@@ -2881,7 +2896,7 @@ OPTION out_se_covar_function
           
           div(style = "margin-bottom: 20px;",
             h5(style = "font-weight: 700; color: #2c3e50; margin-bottom: 12px;",
-               if (tolower(lang()) == "zh") "📋 转换方向" else "📋 Conversion Direction"),
+               if (tolower(lang()) == "zh") "转换方向" else "Conversion Direction"),
             p(style = "margin: 0; color: #555;",
               if (tolower(lang()) == "zh") {
                 "PLINK (.bed/.bim/.fam) → BLUPF90 (.txt/.map/.bim)"
@@ -2900,21 +2915,21 @@ OPTION out_se_covar_function
               
               div(class = "geno-helper-file-input-wrapper",
                 fileInput("geno_help_plink_bed", 
-                         label = tags$strong("📄 PLINK .bed 文件"), 
+                         label = tags$strong("PLINK .bed 文件"), 
                          accept = c(".bed"),
                          buttonLabel = if (tolower(lang()) == "zh") "选择文件" else "Choose File",
                          placeholder = if (tolower(lang()) == "zh") "未选择文件" else "No file selected")
               ),
               div(class = "geno-helper-file-input-wrapper",
                 fileInput("geno_help_plink_bim", 
-                         label = tags$strong("📄 PLINK .bim 文件"), 
+                         label = tags$strong("PLINK .bim 文件"), 
                          accept = c(".bim"),
                          buttonLabel = if (tolower(lang()) == "zh") "选择文件" else "Choose File",
                          placeholder = if (tolower(lang()) == "zh") "未选择文件" else "No file selected")
               ),
               div(class = "geno-helper-file-input-wrapper",
                 fileInput("geno_help_plink_fam", 
-                         label = tags$strong("📄 PLINK .fam 文件"), 
+                         label = tags$strong("PLINK .fam 文件"), 
                          accept = c(".fam"),
                          buttonLabel = if (tolower(lang()) == "zh") "选择文件" else "Choose File",
                          placeholder = if (tolower(lang()) == "zh") "未选择文件" else "No file selected")
@@ -2923,9 +2938,9 @@ OPTION out_se_covar_function
               div(class = "geno-helper-file-input-wrapper",
                 p(style = "font-size: 0.85rem; color: #666; margin-top: 8px; margin-bottom: 0;",
                   if (tolower(lang()) == "zh") {
-                    "💡 提示：转换完成后请使用下方按钮下载 BLUPF90 文件。"
+                    "提示：转换完成后请使用下方按钮下载 BLUPF90 文件。"
                   } else {
-                    "💡 Tip: Use the buttons below to download BLUPF90 files after conversion."
+                    "Tip: Use the buttons below to download BLUPF90 files after conversion."
                   }),
                 uiOutput("blup_download_ui")
               )

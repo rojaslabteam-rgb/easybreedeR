@@ -18,7 +18,7 @@ Depends:
 Imports:
     shiny (>= 1.7.0),
     data.table,
-    bslib (>= 0.4.0),
+    bslib (>= 0.5.0),
     shinyjs,
     dplyr,
     DT (>= 0.20),
@@ -28,20 +28,31 @@ Imports:
     htmltools,
     httpuv,
     Rcpp,
-    plotly
+    plotly,
+    tidyr,
+    readr,
+    readxl,
+    ggplot2,
+    magrittr,
+    jsonlite (>= 1.8.0),
+    httr2,
+    curl
 LinkingTo:
     Rcpp
 Suggests:
-    jsonlite (>= 1.8.0),
     shinyFiles,
     fs,
     plinkR,
     snpStats,
     gdata,
     pedigreeTools,
-    readxl,
-    curl,
-    testthat (>= 3.0.0)
-RoxygenNote: 7.3.3
+    httr,
+    withr,
+    gridExtra,
+    cowplot,
+    markdown,
+    R.utils,
+    testthat (>= 3.2.0)
 Roxygen: list(markdown = TRUE)
 Config/testthat/edition: 3
+Config/roxygen2/version: 8.1.0

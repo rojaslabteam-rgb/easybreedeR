@@ -1,0 +1,166 @@
+/* Workbench refinement. Loaded after shared plugin styles to keep the suite theme intact. */
+:root { --radius: 14px; --control-h: 36px; --muted: #596779; --surface-solid: #edf1f7; }
+.plugin-header { min-height: 76px; padding: 14px 24px; gap: 14px; background: var(--card); }
+.plugin-mark { width: 40px; height: 40px; border-radius: 12px; }
+.plugin-mark svg { width: 26px; height: 26px; }
+.plugin-header h1 { font-size: 19px !important; line-height: 1.4 !important; }
+.plugin-header .eyebrow { font-size: 10px !important; }
+.plugin-header p:not(.eyebrow) { font-size: 12px !important; line-height: 1.5 !important; }
+.plugin-badge { padding: 6px 10px; font-size: 10px; color: var(--accent); background: var(--accent-soft); }
+.three-panel-container { grid-template-columns: 290px minmax(0, 1fr) 285px !important; padding: 18px 22px !important; gap: 16px !important; }
+.three-panel-container > .zone { background: transparent !important; border: none !important; }
+.zone-head { background: var(--surface-solid); padding-block: 12px; margin-bottom: 12px; box-shadow: none; }
+.zone-num { border-radius: 8px; width: 28px; height: 28px; box-shadow: none; }
+.zone-title { font-size: 14px; }
+.zone .panel-section, .zone .accordion-item, .zone .workspace-card { border-color: var(--line) !important; box-shadow: 0 4px 16px rgba(24, 44, 78, .04) !important; }
+.panel-section { margin-bottom: 14px !important; }
+.panel-body { padding: 14px !important; }
+.panel-section > .section-title, .panel-section > h4.section-title { padding: 12px 14px !important; font-size: 13px !important; border-radius: 14px 14px 0 0; }
+.field-hint { font-size: 12px !important; line-height: 1.55 !important; }
+.form-control, .form-select, .selectize-input { border-color: #8492a5 !important; border-radius: 8px !important; }
+.btn { min-height: 34px; border-radius: 8px !important; }
+.btn-primary { box-shadow: 0 2px 5px rgba(207, 185, 145,.16); }
+.workspace-head { padding: 16px; }
+.param-toolbar { padding: 12px 16px !important; gap: 8px !important; }
+.editor-wrap { padding: 16px; }
+#param_editor { padding: 20px !important; font-size: 13px !important; line-height: 1.7 !important; background: var(--card) !important; border-color: #8492a5 !important; tab-size: 2; }
+#param_editor::placeholder { line-height: 1.8; }
+#model_summary_ui, .model-summary { height: auto; min-height: 76px; }
+.model-summary { padding: 10px 12px !important; }
+.model-meta { height: auto; min-height: 18px; flex-wrap: wrap; white-space: normal; }
+.meta-hint { overflow: visible; }
+:where(button, a, input, select, textarea, [tabindex]):focus-visible { outline: 3px solid var(--accent) !important; outline-offset: 3px !important; }
+.selectize-input.focus { outline: 3px solid var(--accent); outline-offset: 2px; }
+.toggle-btn-left, .toggle-btn-right { top: 88px; }
+@media (prefers-color-scheme: dark) {
+  :root { --muted: #acb9cb; --surface-solid: #171e29; --card: #222c3a; --card-raised: #2a3646; }
+  .form-control, .form-select, .selectize-input, #param_editor { border-color: #71839a !important; }
+}
+@media (max-width: 1200px) and (min-width: 981px) {
+  .three-panel-container { grid-template-columns: 250px minmax(0,1fr) 250px !important; padding: 12px !important; gap: 10px !important; }
+}
+@media (max-width: 980px) {
+  .three-panel-container, .three-panel-container:has(.left-panel.hidden), .three-panel-container:has(.right-panel.hidden) { display: flex !important; flex-direction: column; overflow-y: auto !important; padding: 12px !important; }
+  .three-panel-container > .zone { flex: 0 0 auto !important; height: auto !important; overflow: visible !important; padding: 0 !important; }
+  .three-panel-container > .zone-1 { order: 1; }
+  .three-panel-container > .center-panel.zone { order: 3; }
+  .three-panel-container > .right-panel.zone { order: 2; }
+  .three-panel-container > .left-panel.hidden, .three-panel-container > .right-panel.hidden { display: block !important; }
+  .zone-head { position: static; margin: 0 0 10px; border-radius: 10px; }
+  .workspace-card { flex: none; min-height: 560px; }
+  #param_editor { min-height: 320px !important; resize: vertical !important; }
+  .toggle-btn-left, .toggle-btn-right { display: none !important; }
+  .plugin-header { padding: 12px 16px; }
+  .plugin-badge { display: none; }
+}
+@media (pointer: coarse) {
+  .btn, .form-control, .form-select, .selectize-input, .accordion-button { min-height: 48px !important; }
+  .form-control, .form-select, .selectize-input input { font-size: 16px !important; }
+}
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; }
+}
+
+/* The export controls belong to the preview, above its editable content. */
+.parameter-preview { display: flex; flex-direction: column; flex: 1 1 auto; min-height: 0; min-width: 0; border: 1px solid #8492a5; border-radius: 12px; overflow: hidden; background: var(--card); }
+.parameter-filebar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 10px 12px;
+  background: var(--surface-solid);
+  border-bottom: 1px solid var(--line);
+  flex: none;
+}
+.parameter-filebar .par-filename,
+.parameter-filebar #download_btn_ui {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  min-height: 32px;
+}
+.parameter-filebar .par-filename { flex: 0 1 160px; }
+.parameter-filebar #download_btn_ui { flex: 0 0 auto; }
+.parameter-filebar .par-filename .shiny-input-container {
+  margin: 0 !important;
+  padding: 0 !important;
+  width: 100% !important;
+  max-width: 160px;
+}
+.parameter-filebar .par-filename label,
+.parameter-filebar .par-filename .control-label {
+  display: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  height: 0 !important;
+  overflow: hidden !important;
+}
+.parameter-filebar .par-filename input {
+  height: 32px !important;
+  min-height: 32px !important;
+  margin: 0 !important;
+  box-sizing: border-box !important;
+  line-height: 1.2 !important;
+  font-family: var(--mono) !important;
+  font-size: 11.5px !important;
+}
+.parameter-filebar #download_btn_ui .btn {
+  height: 32px;
+  min-height: 32px;
+  margin: 0;
+  padding: 0 12px;
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  line-height: 1.2;
+}
+@media (max-width: 480px) {
+  .parameter-filebar .par-filename,
+  .parameter-filebar #download_btn_ui { flex: 1 1 100%; }
+  .parameter-filebar .par-filename .shiny-input-container { max-width: none; }
+  .parameter-filebar #download_btn_ui .btn { width: 100%; }
+}
+.parameter-preview #param_editor { border: 0 !important; border-radius: 0 !important; height: auto !important; }
+.parameter-preview #param_editor:focus-visible { outline-offset: -3px !important; }
+@media (min-width: 981px) {
+  .three-panel-container > .zone-1 { order: 1; }
+  .three-panel-container > .center-panel.zone { order: 2; }
+  .three-panel-container > .right-panel.zone { order: 3; }
+}
+@media (prefers-color-scheme: dark) { .parameter-preview { border-color: #71839a; } }
+
+/* Panel switches remain reachable even when either sidebar is hidden. */
+.panel-switches { display: flex; gap: 6px; flex: none; padding: 4px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface-solid); }
+.panel-switches .panel-switch { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 6px 12px; font-size: 12px; color: var(--muted); border: 1px solid transparent; background: transparent; }
+.panel-switch::before { content: ''; width: 14px; height: 14px; border: 1.5px solid currentColor; border-radius: 3px; background: linear-gradient(to right, currentColor 0 4px, transparent 4px); }
+#toggleRightPanel::before { transform: scaleX(-1); }
+.panel-switches .panel-switch[aria-expanded="true"] { color: var(--accent); background: var(--card); border-color: var(--line); box-shadow: 0 1px 3px rgba(24,44,78,.06); }
+.panel-switches .panel-switch:hover { color: var(--accent); border-color: var(--accent); }
+.kit-workflow-help { margin-top: 8px; font-size: 12px; color: var(--muted); line-height: 1.5; }
+.kit-workflow-help summary { cursor: pointer; color: var(--ink); padding: 4px 0; }
+.kit-workflow-help p { margin: 8px 0; }
+@media (max-width: 980px) { .panel-switches { display: none; } }
+/* Hidden sidebars must release their named grid tracks despite the desktop override. */
+@media (min-width: 981px) {
+  .three-panel-container:has(.left-panel.hidden):not(:has(.right-panel.hidden)) {
+    grid-template-columns: minmax(0, 1fr) 285px !important;
+    grid-template-areas: "center right" !important;
+  }
+  .three-panel-container:has(.right-panel.hidden):not(:has(.left-panel.hidden)) {
+    grid-template-columns: 290px minmax(0, 1fr) !important;
+    grid-template-areas: "left center" !important;
+  }
+  .three-panel-container:has(.left-panel.hidden):has(.right-panel.hidden) {
+    grid-template-columns: minmax(0, 1fr) !important;
+    grid-template-areas: "center" !important;
+  }
+  .three-panel-container:has(.left-panel.hidden):has(.right-panel.hidden) > .center-panel {
+    max-width: 1100px;
+    width: 100%;
+    margin-inline: auto;
+  }
+}

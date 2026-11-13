@@ -1,6 +1,18 @@
-library(shiny)
-library(bslib)
-library(shinyjs)
+# Shared runtime limits and session storage (installed or source layout).
+.runtime_candidates <- c(file.path("..", "Runtime.R"), "Runtime.R",
+                         file.path("inst", "Runtime.R"),
+                         system.file("Runtime.R", package = "easybreedeR"))
+.runtime_file <- .runtime_candidates[file.exists(.runtime_candidates)][1L]
+if (is.na(.runtime_file)) stop("Missing Runtime.R; include shared runtime helpers in the deployment.")
+source(.runtime_file, local = TRUE)
+eb_configure_uploads()
+
+suppressPackageStartupMessages({
+  library(shiny)
+  library(bslib)
+  library(shinyjs)
+  library(dplyr)
+})
 ## Load shared translations and helpers (if available)
 try({
   # Path assumed relative to app directory: easybreedeR/Language.R
@@ -18,20 +30,22 @@ get_label_local <- function(key, lang = NULL) {
     prefixed
   }
 }
-library(dplyr)
-library(DT)
-pedigreeTools_available <- requireNamespace("pedigreeTools", quietly = TRUE)
-if (pedigreeTools_available) {
-  library(pedigreeTools)
-}
-library(visNetwork)
-library(igraph)
-library(digest)
-## Optional: used for interactive trend plot (hover tooltips)
-## Kept optional to avoid hard dependency at install time.
-if (requireNamespace("plotly", quietly = TRUE)) {
-  library(plotly)
-}
+suppressPackageStartupMessages({
+  library(dplyr)
+  library(DT)
+  pedigreeTools_available <- requireNamespace("pedigreeTools", quietly = TRUE)
+  if (pedigreeTools_available) {
+    library(pedigreeTools)
+  }
+  library(visNetwork)
+  library(igraph)
+  library(digest)
+  ## Optional: used for interactive trend plot (hover tooltips)
+  ## Kept optional to avoid hard dependency at install time.
+  if (requireNamespace("plotly", quietly = TRUE)) {
+    library(plotly)
+  }
+})
 
 # Check if linkbreedeR is available for faster inbreeding calculation
 use_linkbreedeR <- FALSE
@@ -164,25 +178,16 @@ if ("fast_top_contrib_cpp" %in% loaded) {
   message("fast_top_contrib_cpp not found - Top 5 contributors disabled")
 }
 
-# Suppress SASS color contrast warnings from bslib
-# Set option to disable color contrast warnings (bslib >= 0.2.4)
-options(bslib.color_contrast_warnings = FALSE)
-
-purdue_theme <- bs_theme(
-  version = 5,
-  bg = "#ffffff",
-  fg = "#333333",
-  primary = "#CEB888",
-  base_font = font_google("Crimson Text")
-)
+purdue_theme <- NULL  # legacy name; chrome via shared CSS + stock BS5
 
 # ====== UI Definition ======
 ui <- page_fillable(
-  theme = purdue_theme,
+  theme = bs_theme(version = 5),
   shinyjs::useShinyjs(),
   
   # Custom CSS 
   tags$head(
+    if (exists("eb_chrome_css_tag", mode = "function")) eb_chrome_css_tag(),
     tags$style(HTML("
       html, body {
         height: 100%;
@@ -191,34 +196,13 @@ ui <- page_fillable(
         overflow: hidden;
       }
       .page-fillable {
-        height: 100vh;
+        height: 100%;
         overflow: hidden;
         display: flex;
         flex-direction: column;
       }
-      .title-bar {
-        background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%);
-        padding: 15px 20px;
-        text-align: center;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        border-bottom: 3px solid #CFB991;
-        flex-shrink: 0;
-      }
-      .title-bar h1 {
-        margin: 0;
-        font-size: clamp(1.5rem, 3vw, 2.5rem);
-        font-weight: 700;
-        color: #000000;
-        font-family: 'Crimson Text', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Heiti SC', 'SimSun', 'Noto Sans', Arial, sans-serif;
-      }
-      .title-bar p {
-        margin: 5px 0 0 0;
-        font-size: 1rem;
-        color: #000000;
-        opacity: 0.9;
-        font-family: 'Crimson Text', 'Noto Sans SC', 'PingFang SC', 'Microsoft YaHei', 'Heiti SC', 'SimSun', 'Noto Sans', Arial, sans-serif;
-      }
-      .three-panel-container {
+      /* title-bar styled by easybreedeR-chrome.css */
+.three-panel-container {
         display: flex;
         flex: 1;
         overflow: hidden;
@@ -229,7 +213,7 @@ ui <- page_fillable(
         overflow-y: auto;
         overflow-x: hidden;
         background-color: #FEFEFE;
-        border-right: 2px solid #CFB991;
+        border-right: 2px solid #b6c9e0;
         transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         padding: 20px;
         flex-shrink: 0;
@@ -244,7 +228,7 @@ ui <- page_fillable(
         overflow-y: auto;
         overflow-x: hidden;
         background-color: #FEFEFE;
-        border-left: 2px solid #CFB991;
+        border-left: 2px solid #b6c9e0;
         transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
         padding: 20px;
         flex-shrink: 0;
@@ -277,8 +261,8 @@ ui <- page_fillable(
         height: 64px;
         padding: 0;
         border-radius: 8px;
-        border: 2px solid #CFB991;
-        background-color: #CEB888;
+        border: 2px solid #b6c9e0;
+        background-color: #CFB991;
         color: #000000;
         box-shadow: 0 4px 12px rgba(0,0,0,0.2);
         display: flex;
@@ -289,17 +273,17 @@ ui <- page_fillable(
         font-weight: 700;
       }
       .toggle-btn-left .btn:hover, .toggle-btn-right .btn:hover {
-        background-color: #B89D5D;
+        background-color: #8E6F3E;
         box-shadow: 0 6px 16px rgba(0,0,0,0.3);
         transform: translateY(-1px);
       }
       .panel-section {
         background: linear-gradient(135deg, #FFFFFF 0%, #F8F9FA 100%);
-        border: 2px solid #CFB991;
+        border: 2px solid #b6c9e0;
         border-radius: 8px;
         padding: 15px;
         margin-bottom: 20px;
-        box-shadow: 0 2px 8px rgba(206, 184, 136, 0.15);
+        box-shadow: 0 2px 8px rgba(207, 185, 145, 0.15);
       }
       /* Right panel tables: contain overflow, center and truncate long IDs with ellipsis */
       .right-panel .panel-section .dataTables_wrapper {
@@ -318,55 +302,9 @@ ui <- page_fillable(
         white-space: nowrap;
         text-align: center;
       }
-      .section-title {
-        font-size: 1.1rem;
-        font-weight: 700;
-        color: #2c3e50;
-        margin-top: 0;
-        margin-bottom: 12px;
-        padding-bottom: 8px;
-        border-bottom: 2px solid #CEB888;
-      }
-      /* 统一按钮样式 - 字号和高度（排除侧边栏按钮） */
-      .btn {
-        font-size: 1rem !important;
-        padding: 10px 16px !important;
-        height: auto !important;
-        min-height: 40px !important;
-        line-height: 1.4 !important;
-      }
-      .btn-sm {
-        font-size: 0.875rem !important;
-        padding: 6px 12px !important;
-        min-height: 32px !important;
-      }
-      /* 侧边栏按钮保持原有样式 */
-      .toggle-btn-left .btn,
-      .toggle-btn-right .btn {
-        font-size: 1.1rem !important;
-        padding: 0 !important;
-        min-height: 64px !important;
-        height: 64px !important;
-      }
-      .btn-primary, .btn.btn-primary {
-        background-color: #CEB888 !important;
-        border-color: #CEB888 !important;
-        color: #000000 !important;
-        font-weight: 600;
-      }
-      .btn-primary:hover, .btn.btn-primary:hover {
-        background-color: #B89D5D !important;
-        border-color: #B89D5D !important;
-      }
-      .btn-secondary {
-        background-color: #95A5A6 !important;
-        border-color: #95A5A6 !important;
-      }
-      .btn-secondary:hover {
-        background-color: #7F8C8D !important;
-      }
+      /* Buttons and section titles come from easybreedeR-chrome.css */
       .vis-network {
-        border: 2px solid #CEB888;
+        border: 2px solid #CFB991;
         border-radius: 8px;
       }
       .left-panel::-webkit-scrollbar, 
@@ -377,10 +315,13 @@ ui <- page_fillable(
       .left-panel::-webkit-scrollbar-thumb,
       .right-panel::-webkit-scrollbar-thumb,
       .center-panel::-webkit-scrollbar-thumb {
-        background: #CEB888;
+        background: #CFB991;
         border-radius: 5px;
       }
-    "))
+    ")),
+    if (exists("easybreedeR_a4_layout_css", mode = "function")) {
+      tags$style(HTML(easybreedeR_a4_layout_css()))
+    }
   ),
   
   # Title Bar
@@ -402,32 +343,22 @@ ui <- page_fillable(
           div(class = "panel-section",
               uiOutput("left_upload_title"),
               uiOutput("file_upload_input"),
-              div(
-                style = "display: flex; gap: 10px; margin-top: 10px;",
-                div(style = "flex: 1;", 
-              uiOutput("sep_selector"))
-              ),
-              hr(),
-              uiOutput("auto_process_checkbox"),
-              uiOutput("auto_process_help")
+              uiOutput("sep_selector"),
+              # Keep checkbox in DOM (drives auto_process) but hide the chrome
+              uiOutput("auto_process_checkbox")
           ),
           
           div(class = "panel-section",
-              h4(textOutput("column_mapping_title"), class = "section-title"),
+              uiOutput("column_mapping_title_ui"),
               uiOutput("col_mapping_ui"),
               conditionalPanel(
                 condition = "false",
                 uiOutput("data_validation_status_ui")
               ),
-              hr(),
               uiOutput("start_analysis_button"),
               conditionalPanel(
                 condition = "!input.auto_process",
                 uiOutput("process_data_button")
-              ),
-              conditionalPanel(
-                condition = "input.auto_process",
-                uiOutput("auto_processing_enabled_msg")
               )
           ),
           
@@ -451,17 +382,17 @@ ui <- page_fillable(
                   # Legend for node colors and sizes
                   uiOutput("network_legend_ui"),
                   
-                  visNetworkOutput("pedigree_network", height = "600px"),
+                  visNetworkOutput("pedigree_network", height = "480px"),
                   
                   # Custom right-click context menu (draggable)
                   tags$div(
                     id = "contextMenu",
-                    style = "display:none; position:absolute; background:white; border:2px solid #B89D5D; 
+                    style = "display:none; position:absolute; background:white; border:2px solid #8E6F3E; 
                              box-shadow: 3px 3px 12px rgba(0,0,0,0.3); z-index:9999; border-radius:6px;
                              min-width:220px;",
                     tags$div(
-                      style = "padding:10px 14px; cursor:move; border-bottom:2px solid #CEB888;
-                               background:linear-gradient(135deg, #CEB888, #B89D5D); 
+                      style = "padding:10px 14px; cursor:move; border-bottom:2px solid #CFB991;
+                               background:rgba(207, 185, 145,0.10); 
                                font-weight:700; color:#fff; border-radius:4px 4px 0 0;
                                text-shadow: 1px 1px 2px rgba(0,0,0,0.2);
                                display:flex; justify-content:space-between; align-items:center;",
@@ -484,61 +415,61 @@ ui <- page_fillable(
                                border-bottom:1px solid #eee;",
                       onmouseover = "this.style.background='#f0f0f0'; this.style.paddingLeft='18px';",
                       onmouseout = "this.style.background='white'; this.style.paddingLeft='14px';",
-                      tags$span(style = "font-size:18px;", "📥"),
+                      tags$span(style = "font-size:18px;", ""),
                       tags$span("Download Relatives")
                     ),
                     tags$div(
                       style = "padding:10px 14px; font-size:13px; color:#555;",
                       tags$div(
                         style = "margin-bottom:5px; font-weight:600;",
-                        "🔍 Highlight Generations:"
+                        "Highlight Generations:"
                       ),
                       tags$div(
                         style = "display:flex; gap:5px; flex-wrap:wrap;",
                         tags$button(
                           class = "gen-btn",
                           `data-gen` = "1",
-                          style = "padding:4px 10px; border:1px solid #CEB888; background:white; 
+                          style = "padding:4px 10px; border:1px solid #CFB991; background:white; 
                                    border-radius:3px; cursor:pointer; font-size:12px; transition:all 0.2s;",
-                          onmouseover = "this.style.background='#CEB888'; this.style.color='white';",
+                          onmouseover = "this.style.background='#CFB991'; this.style.color='white';",
                           onmouseout = "this.style.background='white'; this.style.color='black';",
                           "1"
                         ),
                         tags$button(
                           class = "gen-btn",
                           `data-gen` = "2",
-                          style = "padding:4px 10px; border:1px solid #CEB888; background:white; 
+                          style = "padding:4px 10px; border:1px solid #CFB991; background:white; 
                                    border-radius:3px; cursor:pointer; font-size:12px; transition:all 0.2s;",
-                          onmouseover = "this.style.background='#CEB888'; this.style.color='white';",
+                          onmouseover = "this.style.background='#CFB991'; this.style.color='white';",
                           onmouseout = "this.style.background='white'; this.style.color='black';",
                           "2"
                         ),
                         tags$button(
                           class = "gen-btn",
                           `data-gen` = "3",
-                          style = "padding:4px 10px; border:1px solid #CEB888; background:white; 
+                          style = "padding:4px 10px; border:1px solid #CFB991; background:white; 
                                    border-radius:3px; cursor:pointer; font-size:12px; transition:all 0.2s;",
-                          onmouseover = "this.style.background='#CEB888'; this.style.color='white';",
+                          onmouseover = "this.style.background='#CFB991'; this.style.color='white';",
                           onmouseout = "this.style.background='white'; this.style.color='black';",
                           "3"
                         ),
                         tags$button(
                           class = "gen-btn",
                           `data-gen` = "5",
-                          style = "padding:4px 10px; border:1px solid #CEB888; background:white; 
+                          style = "padding:4px 10px; border:1px solid #CFB991; background:white; 
                                    border-radius:3px; cursor:pointer; font-size:12px; transition:all 0.2s;",
-                          onmouseover = "this.style.background='#CEB888'; this.style.color='white';",
+                          onmouseover = "this.style.background='#CFB991'; this.style.color='white';",
                           onmouseout = "this.style.background='white'; this.style.color='black';",
                           "5"
                         ),
                         tags$button(
                           class = "gen-btn",
                           `data-gen` = "10",
-                          style = "padding:4px 10px; border:1px solid #B89D5D; background:#CEB888; color:white;
+                          style = "padding:4px 10px; border:1px solid #8E6F3E; background:#CFB991; color:white;
                                    border-radius:3px; cursor:pointer; font-size:12px; font-weight:600;
                                    transition:all 0.2s;",
-                          onmouseover = "this.style.background='#B89D5D';",
-                          onmouseout = "this.style.background='#CEB888';",
+                          onmouseover = "this.style.background='#8E6F3E';",
+                          onmouseout = "this.style.background='#CFB991';",
                           "ALL"
                         )
                       )
@@ -552,14 +483,14 @@ ui <- page_fillable(
               div(style = "margin-top: 10px;",
                   uiOutput("inb_trend_controls"),
                   uiOutput("inb_trend_hint_ui"),
-                  plotlyOutput("inb_trend_plot", height = "832px")
+                  plotlyOutput("inb_trend_plot", height = "520px")
               )
             ),
             nav_panel(
               textOutput("tab_data_title"),
               value = "data",
               div(style = "margin-top: 10px;",
-                  downloadButton("download_pedigree_with_inbreeding", "📥 Download pedigree with inbreeding",
+                  downloadButton("download_pedigree_with_inbreeding", "Download pedigree with inbreeding",
                                  class = "btn btn-primary btn-sm mb-2"),
                   DTOutput("data_preview")
               )
@@ -583,9 +514,9 @@ ui <- page_fillable(
                   uiOutput("qc_report_tables_ui")
                 ),
                 div(style = "margin-top:10px; display: flex; gap: 10px;",
-                    downloadButton("download_qc_full_report", "📥 Download QC Report",
+                    downloadButton("download_qc_full_report", "Download QC Report",
                                    class = "btn btn-info btn-sm"),
-                    downloadButton("download_fixed_pedigree", "📥 Download Fixed Pedigree",
+                    downloadButton("download_fixed_pedigree", "Download Fixed Pedigree",
                                    class = "btn btn-primary btn-sm")
                 )
               )
@@ -609,7 +540,7 @@ ui <- page_fillable(
                   uiOutput("pedigree_structure_tables_ui")
                 ),
                 div(style = "margin-top:10px; display: flex; gap: 10px;",
-                    downloadButton("download_structure_report", "📥 Download Structure Report",
+                    downloadButton("download_structure_report", "Download Structure Report",
                                    class = "btn btn-info btn-sm")
                 )
               )
@@ -626,40 +557,30 @@ ui <- page_fillable(
                 condition = "!input.auto_process",
                 uiOutput("calc_f_btn")
               ),
-              conditionalPanel(
-                condition = "input.auto_process",
-                uiOutput("auto_calc_enabled_msg")
-              ),
               # Progress bar for inbreeding calculation
               uiOutput("f_calculation_progress"),
-              hr(),
               verbatimTextOutput("f_summary"),
-              hr(),
               h5(textOutput("top10_inbred_title"), style = "font-size: 0.95rem; font-weight: 600;"),
               DTOutput("f_table_top"),
               uiOutput("download_all_f_button"),
-              hr(),
               h5(textOutput("top10_sire_title"), style = "font-size: 0.95rem; font-weight: 600;"),
               DTOutput("sire_top_table"),
               uiOutput("download_sire_btn"),
-              hr(),
               h5(textOutput("top10_dam_title"), style = "font-size: 0.95rem; font-weight: 600;"),
               DTOutput("dam_top_table"),
               uiOutput("download_dam_btn")
           ),
           
           div(class = "panel-section",
-              h4(textOutput("selected_animal_export_title"), class = "section-title"),
+              uiOutput("selected_animal_export_title_ui"),
               uiOutput("selected_node_info"),
-              uiOutput("download_selected_range_button"),
-              uiOutput("export_scope_help")
+              uiOutput("download_selected_range_button")
           ),
           
           conditionalPanel(
             condition = "false",
             div(class = "panel-section",
                 h4(textOutput("smart_visualization_title"), class = "section-title"),
-                hr(),
                 uiOutput("node_size_slider"),
                 uiOutput("show_labels_checkbox")
             )
@@ -808,17 +729,17 @@ ui <- page_fillable(
           var btnGen = parseInt($(this).attr('data-gen'));
           if (btnGen === selectedGen) {
             $(this).css({
-              'background': '#CEB888',
+              'background': '#CFB991',
               'color': 'white',
               'font-weight': '600',
-              'border': '1px solid #B89D5D'
+              'border': '1px solid #8E6F3E'
             });
           } else {
             $(this).css({
               'background': 'white',
               'color': 'black',
               'font-weight': 'normal',
-              'border': '1px solid #CEB888'
+              'border': '1px solid #CFB991'
             });
           }
         });
@@ -917,7 +838,7 @@ output$app_title_ui <- renderUI({
     title_text,
     style = "margin:0; color:#000; font-weight:700; 
              font-size:clamp(1.5rem, 3vw, 2.5rem); 
-             font-family:'Crimson Text','Noto Sans SC','PingFang SC','Microsoft YaHei','Heiti SC','SimSun','Noto Sans',Arial,sans-serif;"
+             font-family: -apple-system, BlinkMacSystemFont,'Noto Sans SC','PingFang SC','Microsoft YaHei','Heiti SC','SimSun','Noto Sans',Arial,sans-serif;"
   )
 })
 
@@ -943,15 +864,15 @@ output$app_subtitle_ui <- renderUI({
 
   output$sep_selector <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
-    div(
+    div(class = "sep-clear-stack",
       radioButtons("sep", get_label_local("separator", lang),
                    choices = c(Comma = ",", Tab = "\t", Space = " "),
-                   selected = ",", inline = TRUE),
+                   selected = ",", inline = FALSE),
       actionButton(
         "clear_all",
         get_label_local("clear_all", lang),
-        class = "btn btn-secondary btn-sm",
-        style = "margin: 6.5px auto 0; width: 245px; display: block;"
+        class = "btn btn-secondary btn-sm btn-block",
+        style = "margin-top: 8px; width: 100%; max-width: 100%; display: block; box-sizing: border-box;"
       )
     )
   })
@@ -978,22 +899,11 @@ output$app_subtitle_ui <- renderUI({
       return(NULL)
     }
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
-    div(
-      style = "margin-top: 15px;",
-      actionButton("start_analysis", get_label_local("start_analysis", lang),
-                   class = "btn-primary w-100", 
-                   style = "font-weight: bold;"),
-      tags$small(
-        get_label_local("start_analysis_help", lang),
-        style = "display: block; margin-top: 8px; color: #666; font-style: italic;"
-      )
-    )
+    actionButton("start_analysis", get_label_local("start_analysis", lang),
+                 class = "btn-primary w-100",
+                 style = "font-weight: 650; margin-top: 10px;")
   })
-  output$auto_processing_enabled_msg <- renderUI({
-    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
-    div(class = "alert alert-info mt-2", style = "padding: 8px; font-size: 0.9rem;",
-        get_label_local("auto_processing_enabled", lang))
-  })
+  output$auto_processing_enabled_msg <- renderUI({ NULL })
 
   output$process_data_button <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
@@ -1017,28 +927,29 @@ output$app_subtitle_ui <- renderUI({
 
   output$network_legend_ui <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
-    div(style = "margin-bottom: 15px; padding: 10px; background: #f8f8f8; border-radius: 5px; border: 1px solid #ddd;",
-      h5(get_label_local("network_legend", lang), style = "margin-top: 0; color: #B89D5D; font-weight: bold;"),
-      div(style = "display: flex; flex-wrap: wrap; gap: 15px;",
+    tip <- if (exists("eb_with_tip", mode = "function")) eb_with_tip else function(label, ...) label
+    div(style = "margin-bottom: 12px; padding: 10px; background: var(--card, #fff); border-radius: 8px; border: 1px solid var(--line, #ddd);",
+      h5(class = "section-title", style = "margin-top: 0;",
+         tip(get_label_local("network_legend", lang),
+             get_label_local("legend_hint", lang))),
+      div(style = "display: flex; flex-wrap: wrap; gap: 12px;",
         div(style = "display: flex; align-items: center; gap: 5px;",
-            div(style = "width: 20px; height: 20px; background: #87CEEB; border: 2px solid #4682B4; border-radius: 50%;"),
-            span(get_label_local("legend_male", lang), style = "font-size: 14px;")
+            div(style = "width: 16px; height: 16px; background: #87CEEB; border: 2px solid #4682B4; border-radius: 50%;"),
+            span(get_label_local("legend_male", lang), style = "font-size: 12px;")
         ),
         div(style = "display: flex; align-items: center; gap: 5px;",
-            div(style = "width: 20px; height: 20px; background: #FFB6C1; border: 2px solid #DC143C; border-radius: 50%;"),
-            span(get_label_local("legend_female", lang), style = "font-size: 14px;")
+            div(style = "width: 16px; height: 16px; background: #FFB6C1; border: 2px solid #DC143C; border-radius: 50%;"),
+            span(get_label_local("legend_female", lang), style = "font-size: 12px;")
         ),
         div(style = "display: flex; align-items: center; gap: 5px;",
-            div(style = "width: 20px; height: 20px; background: #D3D3D3; border: 2px solid #696969; border-radius: 50%;"),
-            span(get_label_local("legend_unknown", lang), style = "font-size: 14px;")
+            div(style = "width: 16px; height: 16px; background: #D3D3D3; border: 2px solid #696969; border-radius: 50%;"),
+            span(get_label_local("legend_unknown", lang), style = "font-size: 12px;")
         ),
         div(style = "display: flex; align-items: center; gap: 5px;",
-            div(style = "width: 20px; height: 20px; background: #FF0000; border: 2px solid #FF0000; clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);"),
-            span(get_label_local("legend_target", lang), style = "font-size: 14px;")
+            div(style = "width: 16px; height: 16px; background: #FF0000; border: 2px solid #FF0000; clip-path: polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%);"),
+            span(get_label_local("legend_target", lang), style = "font-size: 12px;")
         )
-      ),
-      div(style = "margin-top: 10px; font-size: 14px; color: #666;",
-          get_label_local("legend_hint", lang))
+      )
     )
   })
 
@@ -1064,6 +975,8 @@ output$top10_dam_title <- renderText({
 })
 
   output$download_all_f_button <- renderUI({
+    f_tbl <- f_values_cache()
+    if (is.null(f_tbl) || nrow(f_tbl) == 0) return(NULL)
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
     downloadButton("download_f", get_label_local("download_all_f", lang), class = "btn-sm btn-secondary mt-2 w-100")
   })
@@ -1074,13 +987,22 @@ output$top10_dam_title <- renderText({
   })
 
   output$download_selected_range_button <- renderUI({
+    tid <- selected_individual()
+    if (is.null(tid) || !nzchar(as.character(tid))) return(NULL)
+    ped <- tryCatch(ped_data(), error = function(e) NULL)
+    if (is.null(ped) || nrow(ped) == 0) return(NULL)
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
     downloadButton("download_relatives", get_label_local("download_selected_range", lang), class = "btn-primary w-100 mt-2")
   })
 
-  output$export_scope_help <- renderUI({
+  output$export_scope_help <- renderUI({ NULL })
+
+  output$selected_animal_export_title_ui <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
-    helpText(get_label_local("export_scope_help", lang))
+    tip <- if (exists("eb_with_tip", mode = "function")) eb_with_tip else function(label, ...) label
+    h4(class = "section-title",
+       tip(get_label_local("selected_animal_export", lang),
+           get_label_local("export_scope_help", lang)))
   })
 
   output$smart_visualization_title <- renderText({
@@ -1098,8 +1020,7 @@ output$top10_dam_title <- renderText({
     checkboxInput("show_labels", get_label_local("show_labels", lang), value = TRUE)
   })
   
-  # Set maximum upload size to 10GB
-  options(shiny.maxRequestSize = 10 * 1024^3)
+  # Upload limit is configured once when the app is loaded.
   
   # Storage for fixed/updated raw data
   raw_data_storage <- reactiveVal(NULL)
@@ -1114,6 +1035,12 @@ output$top10_dam_title <- renderText({
   pending_data <- reactiveVal(NULL)
   qc_fix_summary <- reactiveVal(NULL)
   
+  session_workspace <- eb_session_workspace(session)
+  uploaded_file_hash <- reactive({
+    req(input$file)
+    digest::digest(file = input$file$datapath, algo = "sha256")
+  })
+
   # Read raw data
   raw_data <- reactive({
     # If we have stored (fixed) data, use it
@@ -1125,28 +1052,12 @@ output$top10_dam_title <- renderText({
     # Otherwise read from uploaded file
     req(input$file)
     tryCatch({
-      cache_base_dir <- "pedigree_cache"
-      raw_cache_dir <- file.path(cache_base_dir, "raw_data")
-      if (!dir.exists(raw_cache_dir)) {
-        dir.create(raw_cache_dir, showWarnings = FALSE, recursive = TRUE)
-      }
-      file_info <- file.info(input$file$datapath)
-      cache_key <- digest::digest(
-        list(
-          name = input$file$name,
-          size = file_info$size,
-          mtime = as.numeric(file_info$mtime),
-          sep = input$sep
-        ),
-        algo = "xxhash64"
-      )
-      cache_path <- file.path(raw_cache_dir, paste0(cache_key, ".rds"))
-      
-      if (file.exists(cache_path)) {
-        return(readRDS(cache_path))
-      }
-      
-      df <- data.table::fread(
+      cache_key <- digest::digest(list(content = uploaded_file_hash(),
+                                       sep = input$sep, parser_version = 1L),
+                                  algo = "sha256")
+      eb_cached_read(session_workspace, cache_key, function() {
+        data.table::fread(
+
         input$file$datapath,
         header = TRUE,
         sep = input$sep,
@@ -1161,8 +1072,7 @@ output$top10_dam_title <- renderText({
         showProgress = TRUE
       )
       
-      tryCatch(saveRDS(df, cache_path), error = function(e) NULL)
-      df
+      })
     }, error = function(e) {
       showNotification(paste("Error reading file:", e$message), type = "error")
       NULL
@@ -1172,11 +1082,20 @@ output$top10_dam_title <- renderText({
   # Auto-detect columns from data
   auto_detect_columns <- function(cols) {
     lower_cols <- tolower(cols)
-    
+    # Compare without separators / "id" suffix so DadID, sire_id, Father.ID all match
+    key_cols <- sub("id$", "", gsub("[^a-z0-9]", "", lower_cols))
+
+    # First matching column, else the conventional ID/Sire/Dam position
+    pick_col <- function(keys, fallback_pos) {
+      hit <- which(lower_cols %in% keys | key_cols %in% keys)
+      if (length(hit)) return(cols[hit[1]])
+      cols[min(fallback_pos, length(cols))]
+    }
+
     # Detect required columns
-    id_col <- cols[which.max(lower_cols %in% c("id", "animal", "indiv", "individual", "label"))]
-    sire_col <- cols[which.max(lower_cols %in% c("sire", "father", "dad", "male_parent"))]
-    dam_col <- cols[which.max(lower_cols %in% c("dam", "mother", "mom", "female_parent"))]
+    id_col <- pick_col(c("id", "animal", "indiv", "individual", "label", "progeny", "ind"), 1)
+    sire_col <- pick_col(c("sire", "father", "dad", "pa", "fa", "f", "s", "maleparent"), 2)
+    dam_col <- pick_col(c("dam", "mother", "mom", "ma", "mo", "m", "d", "femaleparent"), 3)
     
     # Detect optional sex column - only if it exists and has valid values
     sex_col <- NULL
@@ -2057,7 +1976,7 @@ output$top10_dam_title <- renderText({
     qc_modal_signature(NULL)
   }
   
-  # Observe file upload and auto-detect
+  # Observe file upload and auto-detect (status is shown inline, not as toasts)
   observe({
     if (is.null(raw_data())) return()
     
@@ -2079,16 +1998,11 @@ output$top10_dam_title <- renderText({
       
       if (length(validation_errors) == 0) {
         data_validation_status(list(valid = TRUE, errors = c(), warnings = c()))
-        showNotification("✅ Data format validated successfully! Auto-processing enabled.", type = "message", duration = 5)
       } else {
         data_validation_status(list(valid = FALSE, errors = validation_errors, warnings = c()))
-        showNotification(paste("⚠️ Data format validation failed:", paste(validation_errors, collapse = "; ")), 
-                        type = "warning", duration = 10)
       }
     } else {
       data_validation_status(list(valid = FALSE, errors = c("Could not auto-detect required columns"), warnings = c()))
-      showNotification("⚠️ Could not auto-detect required columns. Please manually select columns.", 
-                      type = "warning", duration = 8)
     }
   })
   
@@ -2109,11 +2023,8 @@ output$top10_dam_title <- renderText({
     
     if (length(validation_errors) == 0) {
       data_validation_status(list(valid = TRUE, errors = c(), warnings = c()))
-      showNotification("✅ Column mapping validated successfully!", type = "message", duration = 3)
     } else {
       data_validation_status(list(valid = FALSE, errors = validation_errors, warnings = c()))
-      showNotification(paste("⚠️ Column mapping validation failed:", paste(validation_errors, collapse = "; ")), 
-                      type = "warning", duration = 8)
     }
   })
   
@@ -2147,42 +2058,18 @@ output$top10_dam_title <- renderText({
       selectInput("sex_col", "Sex (optional):", 
                   choices = c("None" = "", cols),
                     selected = sex_selected),
-        div(
-          style = "background-color: #e7f3ff; padding: 6px; border-radius: 4px; margin-top: 5px; border-left: 3px solid #0066cc;",
-          tags$small(
-            "📝 Format: 1, 2 or M, F",
-            style = "color: #004085; font-size: 0.8rem; font-weight: 500;"
-          )
-        ),
+        div(class = "field-hint", "Format: 1, 2 or M, F"),
         if (is.null(auto_cols$sex) || is.na(auto_cols$sex)) {
-          div(
-            style = "background-color: #fff3cd; padding: 6px; border-radius: 4px; margin-top: 5px; border-left: 3px solid #ffc107;",
-            tags$small(
-              "💡 No sex column detected. You can manually select one if available, or leave as 'None'.",
-              style = "color: #856404; font-size: 0.8rem;"
-            )
-          )
+          div(class = "field-hint", "No sex column detected.")
         }
       ),
       div(
       selectInput("birthdate_col", "Birthdate (optional):", 
                   choices = c("None" = "", cols),
                     selected = birthdate_selected),
-        div(
-          style = "background-color: #e7f3ff; padding: 6px; border-radius: 4px; margin-top: 5px; border-left: 3px solid #0066cc;",
-          tags$small(
-            "📝 Format: YYYY-MM-DD (e.g., 2010-02-05)",
-            style = "color: #004085; font-size: 0.8rem; font-weight: 500;"
-          )
-        ),
+        div(class = "field-hint", "Format: YYYY-MM-DD (e.g., 2010-02-05)"),
         if (is.null(auto_cols$birthdate) || is.na(auto_cols$birthdate)) {
-          div(
-            style = "background-color: #fff3cd; padding: 6px; border-radius: 4px; margin-top: 5px; border-left: 3px solid #ffc107;",
-            tags$small(
-              "💡 No birthdate column detected. You can manually select one if available, or leave as 'None'.",
-              style = "color: #856404; font-size: 0.8rem;"
-            )
-          )
+          div(class = "field-hint", "No birthdate column detected.")
         }
       )
     )
@@ -2291,10 +2178,7 @@ output$top10_dam_title <- renderText({
     selected_individual(NULL)
     highlighted_individuals(character(0))
     
-    cache_base_dir <- "pedigree_cache"
-    if (dir.exists(cache_base_dir)) {
-      unlink(cache_base_dir, recursive = TRUE, force = TRUE)
-    }
+    eb_clear_workspace(session_workspace)
     
     shinyjs::reset("file")
     updateTextInput(session, "individual_search", value = "")
@@ -2961,7 +2845,7 @@ output$top10_dam_title <- renderText({
             tags$div(
               style = "flex: 1;",
               tags$small(
-                paste0("🔄 ", status$message),
+                paste0("", status$message),
                 style = "color: #1976d2; font-weight: 500;"
               )
             ),
@@ -3282,7 +3166,7 @@ output$top10_dam_title <- renderText({
             style = "margin: 10px 0;",
             tags$h5(
               style = "margin-top: 0;",
-              "📅 Birth Date Order Issues: ", detected_issues$birth_date_order$count, " case(s)"
+              "Birth Date Order Issues: ", detected_issues$birth_date_order$count, " case(s)"
             ),
             tags$p(
               "Offspring born before or same date as parents:"
@@ -3327,7 +3211,7 @@ output$top10_dam_title <- renderText({
             style = "margin: 10px 0;",
             tags$h5(
               style = "margin-top: 0;",
-              "🔄 Circular References (Loops): ", detected_issues$loops$count, " loop(s) detected"
+              "Circular References (Loops): ", detected_issues$loops$count, " loop(s) detected"
             ),
             tags$p(
               "Circular ancestry chains found in pedigree:"
@@ -3379,14 +3263,14 @@ output$top10_dam_title <- renderText({
             style = "list-style-type: none; padding-left: 0;",
             tags$li("🛠 ", tags$strong("Auto-Fix:"), " Automatically resolve all issues listed above"),
             tags$li("⚠️ ", tags$strong("Ignore & Continue:"), " Proceed with data as-is (may cause errors)"),
-            tags$li("📥 ", tags$strong("Download Report:"), " Export detailed issue list for manual review"),
+            tags$li("", tags$strong("Download Report:"), " Export detailed issue list for manual review"),
             tags$li("❌ ", tags$strong("Cancel:"), " Return to file upload")
           )
         ),
         size = "l",
         easyClose = FALSE,
         footer = tagList(
-          downloadButton("download_qc_report", "📥 Download Report", class = "btn-info"),
+          downloadButton("download_qc_report", "Download Report", class = "btn-info"),
           actionButton("cancel_qc", "❌ Cancel", class = "btn-secondary"),
           actionButton("ignore_qc", "⚠️ Ignore & Continue", class = "btn-warning"),
           actionButton("fix_qc", "🛠 Auto-Fix", class = "btn-success")
@@ -3576,28 +3460,28 @@ output$top10_dam_title <- renderText({
       target_id <- selected_individual()
       if (is.null(target_id)) {
         return(div(style = "color: #666; font-style: italic; padding: 8px; background: #f8f8f8; border-radius: 4px;",
-                   "💡 Select an individual (via search or by clicking a node) to enable export"))
+                   "Select an individual (via search or by clicking a node) to enable export"))
       }
       
       # Get computed data
       info <- selected_node_info_data()
       if (is.null(info)) {
         return(div(style = "color: #666; font-style: italic; padding: 8px; background: #f8f8f8; border-radius: 4px;",
-                   "💡 Select an individual (via search or by clicking a node) to enable export"))
+                   "Select an individual (via search or by clicking a node) to enable export"))
       }
       
-      div(style = "color: #B89D5D; font-weight: bold; margin-bottom: 10px; padding: 8px; background: linear-gradient(135deg, #FFF9F0 0%, #FFF5E6 100%); border-left: 4px solid #B89D5D; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);",
+      div(style = "color: #8E6F3E; font-weight: bold; margin-bottom: 10px; padding: 8px; background: linear-gradient(135deg, #FFF9F0 0%, #FFF5E6 100%); border-left: 4px solid #8E6F3E; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.1);",
           div(style = "font-size: 1.1em; margin-bottom: 6px;",
               paste0("🎯 Selected Individual: ", info$target_id)),
           div(style = "font-size: 0.95em; color: #666;",
-              paste0("📊 Search Depth: ", info$depth, " generation", ifelse(info$depth > 1, "s", ""))),
+              paste0("Search Depth: ", info$depth, " generation", ifelse(info$depth > 1, "s", ""))),
           div(style = "font-size: 0.95em; color: #666; margin-top: 4px;",
-              paste0("📈 Export Summary: ", info$total_export, " individual", ifelse(info$total_export > 1, "s", ""),
+              paste0("Export Summary: ", info$total_export, " individual", ifelse(info$total_export > 1, "s", ""),
                      " (", info$n_ancestors, " ancestor", ifelse(info$n_ancestors != 1, "s", ""), " + 1 selected)")))
     }, error = function(e) {
       # Return a safe fallback UI on error
       return(div(style = "color: #666; font-style: italic; padding: 8px; background: #f8f8f8; border-radius: 4px;",
-                 "💡 Select an individual (via search or by clicking a node) to enable export"))
+                 "Select an individual (via search or by clicking a node) to enable export"))
     })
   })
   
@@ -3653,19 +3537,19 @@ output$top10_dam_title <- renderText({
       
       if (is.null(info)) {
         return(div(style = "color: #666; font-style: italic; margin-bottom: 10px;",
-                   "💡 Enter an individual ID above to visualize their pedigree network"))
+                   "Enter an individual ID above to visualize their pedigree network"))
       }
       
       f_text <- if (!is.null(info$f_val)) paste0(" (F = ", round(info$f_val, 4), ")") else ""
       highlight_text <- if (info$highlighted_count > 0) paste0(" | ", info$highlighted_count, " highlighted") else ""
       
-      div(style = "color: #B89D5D; font-weight: bold; margin-bottom: 10px; padding: 8px; background: #f8f8f8; border-radius: 4px;",
+      div(style = "color: #8E6F3E; font-weight: bold; margin-bottom: 10px; padding: 8px; background: #f8f8f8; border-radius: 4px;",
           paste0("🎯 Showing pedigree network for: ", info$target_id, f_text, 
                  " (Depth: ", info$search_depth, " generations)", highlight_text))
     }, error = function(e) {
       # Return a safe fallback UI on error
       return(div(style = "color: #666; font-style: italic; margin-bottom: 10px;",
-                 "💡 Enter an individual ID above to visualize their pedigree network"))
+                 "Enter an individual ID above to visualize their pedigree network"))
     })
   })
   
@@ -3935,7 +3819,7 @@ output$top10_dam_title <- renderText({
         display_data,
         caption = htmltools::tags$caption(
           style = 'caption-side: top; text-align: left; color: #666; font-weight: normal; padding: 10px;',
-          paste0("📊 Displaying all ", format(n, big.mark = ","), 
+          paste0("Displaying all ", format(n, big.mark = ","), 
                  " rows. Use filters and search to navigate.")
         ),
         options = list(
@@ -4321,9 +4205,9 @@ output$top10_dam_title <- renderText({
     if (is.null(qc)) {
       return(div(class = "alert alert-warning", "No pedigree data or required columns (ID, Sire, Dam) not found."))
     }
-    section_style <- "margin-bottom: 20px; border: 1px solid #CFB991; border-radius: 8px; overflow: hidden;"
-    header_style <- "background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%); color: #000; padding: 10px 14px; font-weight: 700; font-size: 1rem;"
-    fix_box_style <- "background: #f8f9fa; border-left: 4px solid #CEB888; padding: 12px; margin-top: 10px; font-size: 0.95rem; color: #333;"
+    section_style <- "margin-bottom: 20px; border: 1px solid #b6c9e0; border-radius: 8px; overflow: hidden;"
+    header_style <- "background: rgba(207, 185, 145,0.10); color: #202124; padding: 10px 14px; font-weight: 650; font-size: 1rem;"
+    fix_box_style <- "background: #f8f9fa; border-left: 4px solid #CFB991; padding: 12px; margin-top: 10px; font-size: 0.95rem; color: #333;"
 
     out <- list()
 
@@ -4979,8 +4863,8 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
     if (is.null(tabs)) {
       return(div(class = "alert alert-warning", "No pedigree data or required columns (ID, Sire, Dam) not found."))
     }
-    section_style <- "margin-bottom: 20px; border: 1px solid #CFB991; border-radius: 8px; overflow: hidden;"
-    header_style <- "background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%); color: #000; padding: 10px 14px; font-weight: 700; font-size: 1rem;"
+    section_style <- "margin-bottom: 20px; border: 1px solid #b6c9e0; border-radius: 8px; overflow: hidden;"
+    header_style <- "background: rgba(207, 185, 145,0.10); color: #202124; padding: 10px 14px; font-weight: 650; font-size: 1rem;"
     tagList(
       div(style = section_style,
         div(style = header_style, "Basic statistics"),
@@ -6247,8 +6131,8 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
     validate(need(!is.null(dat) && nrow(dat) > 1, "Not enough data to plot a trend."))
     
     # Purdue gold
-    gold <- "#CEB888"
-    ribbon_fill <- "rgba(206,184,136,0.25)"
+    gold <- "#CFB991"
+    ribbon_fill <- "rgba(207, 185, 145,0.25)"
     
     # SD ribbon bounds (handle sd_F NA for singletons)
     sd_val <- ifelse(is.na(dat$sd_F), 0, dat$sd_F)
@@ -6642,31 +6526,37 @@ Please check your pedigree structure and ensure:
   
   # Function to compute layout using igraph
   compute_layout <- function(nodes, edges, method = "fr", iterations = 1000) {
+    if (is.null(nodes) || nrow(nodes) == 0) {
+      return(data.frame(id = character(), x = numeric(), y = numeric()))
+    }
+
     if (nrow(edges) == 0) {
       # If no edges, return random layout
       return(data.frame(
         id = nodes$id,
-        x = runif(nrow(nodes), -50, 50),
-        y = runif(nrow(nodes), -50, 50)
+        x = stats::runif(nrow(nodes), -50, 50),
+        y = stats::runif(nrow(nodes), -50, 50)
       ))
     }
     
     # Filter edges to only include nodes that exist in the nodes data frame
-    valid_nodes <- nodes$id
+    valid_nodes <- as.character(nodes$id)
     edges_filtered <- edges %>%
+      mutate(from = as.character(from), to = as.character(to)) %>%
       filter(from %in% valid_nodes & to %in% valid_nodes)
     
     if (nrow(edges_filtered) == 0) {
       # If no valid edges, return random layout
       return(data.frame(
         id = nodes$id,
-        x = runif(nrow(nodes), -50, 50),
-        y = runif(nrow(nodes), -50, 50)
+        x = stats::runif(nrow(nodes), -50, 50),
+        y = stats::runif(nrow(nodes), -50, 50)
       ))
     }
     
-    # Create igraph object
-    g <- igraph::graph_from_data_frame(edges_filtered, vertices = nodes)
+    # Create igraph object from a minimal vertex table (avoids column clashes)
+    verts <- data.frame(name = valid_nodes, stringsAsFactors = FALSE)
+    g <- igraph::graph_from_data_frame(edges_filtered, directed = TRUE, vertices = verts)
     
     # Compute layout based on method
     if (method == "fr") {
@@ -6686,9 +6576,10 @@ Please check your pedigree structure and ensure:
     }
     
     data.frame(
-      id = nodes$id,
+      id = igraph::V(g)$name,
       x = layout_coords[, 1],
-      y = layout_coords[, 2]
+      y = layout_coords[, 2],
+      stringsAsFactors = FALSE
     )
   }
   
@@ -7090,22 +6981,26 @@ Please check your pedigree structure and ensure:
     
     # Get search depth from user input (ancestors only)
     search_depth <- input$search_depth %||% 5
+    show_labels <- isTRUE(input$show_labels %||% TRUE)
+    node_size <- suppressWarnings(as.numeric(input$node_size %||% 20))
+    if (!is.finite(node_size) || node_size <= 0) node_size <- 20
     
     # Get related individuals (ancestors only)
     ancestors <- get_ancestors(ped, target_id, max_depth = search_depth)
-    related_ids <- unique(c(target_id, ancestors))
+    related_ids <- unique(as.character(c(target_id, ancestors)))
     
     # Filter pedigree to related individuals
-    related_ped <- ped %>% filter(ID %in% related_ids)
+    related_ped <- ped %>% filter(as.character(ID) %in% related_ids)
     
     if (nrow(related_ped) == 0) return(list(nodes = tibble(), edges = tibble()))
 
+    # Use cached F only — never call f_values() here (its req()/long calc
+    # was silently aborting renderVisNetwork into perpetual "loading").
+    f_vals <- tryCatch(f_values_cache(), error = function(e) NULL)
+
     top_contrib_text <- ""
-    if (exists("fast_top_contrib_cpp", mode = "function")) {
-      f_vals <- f_values_cache()
-      cat("[TopContrib] target=", target_id, " f_cache_rows=", ifelse(is.null(f_vals), 0, nrow(f_vals)), "
-", sep = "")
-      if (!is.null(f_vals) && nrow(f_vals) > 0) {
+    if (exists("fast_top_contrib_cpp", mode = "function") &&
+        !is.null(f_vals) && nrow(f_vals) > 0) {
       f_joined <- ped %>%
         transmute(
           ID = as.character(ID),
@@ -7121,19 +7016,13 @@ Please check your pedigree structure and ensure:
           f_joined$Sire,
           f_joined$Dam,
           f_joined$F,
-          target_id,
+          as.character(target_id),
           max_depth = search_depth,
           top_k = 5
         )
-      }, error = function(e) {
-        cat("[TopContrib] error:", e$message, "
-")
-        NULL
-      })
+      }, error = function(e) NULL)
 
       if (!is.null(top_contrib) && nrow(top_contrib) > 0) {
-        cat("[TopContrib] rows=", nrow(top_contrib), "
-", sep = "")
         lines <- sprintf(
           "%s (C=%.4f, P=%.1f%%)",
           top_contrib$ancestor_id,
@@ -7142,57 +7031,71 @@ Please check your pedigree structure and ensure:
         )
         top_contrib_text <- paste0("<br><br><strong>Top 5 Inbreeding Contributors:</strong><br>",
                                    paste(lines, collapse = "<br>"))
-      } else {
-        cat("[TopContrib] empty result
-")
-      }
       }
     }
-    
+
+    has_sex <- "Sex" %in% names(related_ped)
+    if (!has_sex) {
+      related_ped$Sex <- NA_character_
+    }
+
     # Build nodes
     nodes <- related_ped %>%
+      mutate(
+        .sex_chr = as.character(Sex),
+        .group = dplyr::case_when(
+          is.na(.sex_chr) | .sex_chr == "" ~ "Unknown",
+          .sex_chr %in% c("M", "Male", "m", "1") ~ "M",
+          .sex_chr %in% c("F", "Female", "f", "2") ~ "F",
+          TRUE ~ "Unknown"
+        )
+      ) %>%
       transmute(
-        id = ID,
-        label = if(input$show_labels) ID else "",
-        group = ifelse(!is.na(Sex), as.character(Sex), "Unknown"),
-        title = paste0("ID: ", ID, 
-                       ifelse(!is_missing_parent(Sire), paste0("<br>Sire: ", Sire), ""),
-                       ifelse(!is_missing_parent(Dam), paste0("<br>Dam: ", Dam), ""),
-                       ifelse(!is.na(Sex), paste0("<br>Sex: ", Sex), "")),
-        value = input$node_size,
+        id = as.character(ID),
+        label = if (show_labels) as.character(ID) else "",
+        group = .group,
+        title = paste0(
+          "ID: ", ID,
+          ifelse(!is_missing_parent(Sire), paste0("<br>Sire: ", Sire), ""),
+          ifelse(!is_missing_parent(Dam), paste0("<br>Dam: ", Dam), ""),
+          ifelse(!is.na(.sex_chr) & .sex_chr != "", paste0("<br>Sex: ", .sex_chr), "")
+        ),
+        value = node_size,
         level = "individual",
-        # Set default colors based on sex
-        color = case_when(
-          Sex == "M" | Sex == "Male" | Sex == "m" ~ "#87CEEB",  # Sky blue for males
-          Sex == "F" | Sex == "Female" | Sex == "f" ~ "#FFB6C1",  # Light pink for females
-          TRUE ~ "#D3D3D3"         # Light gray for unknown
+        color = dplyr::case_when(
+          .group == "M" ~ "#87CEEB",
+          .group == "F" ~ "#FFB6C1",
+          TRUE ~ "#D3D3D3"
         ),
         borderWidth = 2
       )
     
-    # Add F values and adjust node size based on inbreeding
-    if (!is.null(f_values()) && nrow(f_values()) > 0) {
+    # Optionally enrich with cached inbreeding values (non-blocking)
+    if (!is.null(f_vals) && nrow(f_vals) > 0) {
       nodes <- nodes %>%
-        left_join(f_values(), by = c("id" = "ID")) %>%
+        left_join(
+          f_vals %>% transmute(id = as.character(ID), F = as.numeric(F)),
+          by = "id"
+        ) %>%
         mutate(
           title = paste0(title, ifelse(!is.na(F), paste0("<br>F: ", round(F, 4)), "")),
-          # Scale node size based on inbreeding coefficient (F)
-          # Base size + F * scaling factor, with minimum size
-          value = ifelse(!is.na(F), 
-                        pmax(input$node_size * 0.5, input$node_size + F * 300), 
-                        input$node_size)
+          value = ifelse(
+            !is.na(F),
+            pmax(node_size * 0.5, node_size + F * 300),
+            node_size
+          )
         )
     }
     
+    target_chr <- as.character(target_id)
     # Highlight target individual
     nodes <- nodes %>%
       mutate(
-        title = ifelse(id == target_id, paste0(title, "<br><br>🎯 Target Individual", top_contrib_text), title),
-        shape = ifelse(id == target_id, "star", "dot"),
-        color = ifelse(id == target_id, "#FF0000", color),
-        borderWidth = ifelse(id == target_id, 4, borderWidth),
-        # Make target individual slightly larger
-        value = ifelse(id == target_id, value * 1.2, value)
+        title = ifelse(id == target_chr, paste0(title, "<br><br>🎯 Target Individual", top_contrib_text), title),
+        shape = ifelse(id == target_chr, "star", "dot"),
+        color = ifelse(id == target_chr, "#FF0000", color),
+        borderWidth = ifelse(id == target_chr, 4, borderWidth),
+        value = ifelse(id == target_chr, value * 1.2, value)
       )
     
     # Build edges
@@ -7200,19 +7103,26 @@ Please check your pedigree structure and ensure:
       related_ped %>% filter(!is_missing_parent(Sire)) %>% transmute(from = as.character(Sire), to = as.character(ID)),
       related_ped %>% filter(!is_missing_parent(Dam)) %>% transmute(from = as.character(Dam), to = as.character(ID))
     ) %>%
-      # Only keep edges where both nodes exist in the related_ped
-      filter(from %in% related_ped$ID & to %in% related_ped$ID)
+      filter(from %in% nodes$id & to %in% nodes$id)
     
-    
-    # Compute layout
-    layout_data <- compute_layout(nodes, edges, method = "fr", iterations = 800)
+    # Compute layout (igraph needs a simple vertex table)
+    layout_data <- tryCatch(
+      compute_layout(nodes, edges, method = "fr", iterations = 200),
+      error = function(e) {
+        data.frame(
+          id = nodes$id,
+          x = stats::runif(nrow(nodes), -100, 100),
+          y = stats::runif(nrow(nodes), -100, 100)
+        )
+      }
+    )
     
     # Add layout coordinates
     nodes <- nodes %>%
       left_join(layout_data, by = "id") %>%
       mutate(
-        x = ifelse(is.na(x), runif(n(), -100, 100), x),
-        y = ifelse(is.na(y), runif(n(), -100, 100), y)
+        x = ifelse(is.na(x), stats::runif(n(), -100, 100), x),
+        y = ifelse(is.na(y), stats::runif(n(), -100, 100), y)
       )
     
     list(nodes = nodes, edges = edges, layout = "precomputed")
@@ -7224,9 +7134,9 @@ Please check your pedigree structure and ensure:
     if (is.null(raw_data())) {
       return(list(nodes = tibble(), edges = tibble(), status = "waiting"))
     }
-    
-    # Check if ped_data is available (e.g. not processed yet)
-    ped <- ped_data()
+
+    # Avoid ped_data()'s req() aborting the whole network into a forever-loading state
+    ped <- tryCatch(ped_data(), error = function(e) NULL)
     if (is.null(ped)) {
       return(list(nodes = tibble(), edges = tibble(), status = "waiting"))
     }
@@ -7240,10 +7150,16 @@ Please check your pedigree structure and ensure:
     # Get target individual
     target_id <- selected_individual()
     
-    if (!is.null(target_id)) {
+    if (!is.null(target_id) && nzchar(as.character(target_id))) {
       # Build individual network
-      result <- build_individual_network(target_id)
-      result$status <- "success"
+      result <- tryCatch(
+        build_individual_network(target_id),
+        error = function(e) {
+          message("[pedigree_network] build failed: ", conditionMessage(e))
+          list(nodes = tibble(), edges = tibble(), status = "error", message = conditionMessage(e))
+        }
+      )
+      if (is.null(result$status)) result$status <- "success"
       return(result)
     } else {
       # Return empty network (data loaded but no individual selected)
@@ -7276,7 +7192,7 @@ Please check your pedigree structure and ensure:
       
       # If no individual selected (data loaded but no selection)
       if (status == "no_selection") {
-        return(visNetwork(data.frame(id = 1, label = "💡 Enter an individual ID above to visualize their pedigree network"), data.frame()) %>%
+        return(visNetwork(data.frame(id = 1, label = "Enter an individual ID above to visualize their pedigree network"), data.frame()) %>%
                  visNodes(shape = "text", color = list(background = "white")) %>%
                  visOptions(manipulation = FALSE))
       }
@@ -7302,7 +7218,7 @@ Please check your pedigree structure and ensure:
         ) %>%
         visEdges(
           arrows = list(to = list(enabled = TRUE, scaleFactor = 1)),
-          color = list(color = "#B89D5D", highlight = "#FFD700"),
+          color = list(color = "#8E6F3E", highlight = "#FFD700"),
           width = 2,
           smooth = TRUE
         ) %>%
@@ -7366,7 +7282,7 @@ Please check your pedigree structure and ensure:
         ) %>%
         visEdges(
           arrows = list(to = list(enabled = TRUE, scaleFactor = 1)),
-          color = list(color = "#B89D5D", highlight = "#FFD700"),
+          color = list(color = "#8E6F3E", highlight = "#FFD700"),
           width = 2,
           smooth = TRUE
         ) %>%
@@ -7434,14 +7350,25 @@ Please check your pedigree structure and ensure:
         ")
       }
     }, error = function(e) {
-      # Check if error is due to missing raw_data
+      # Let Shiny req()/validation aborts stay silent; don't show fake "loading"
+      if (inherits(e, "shiny.silent.error")) stop(e)
+
       if (is.null(raw_data())) {
         return(visNetwork(data.frame(id = 1, label = "Waiting for loading data..."), data.frame()) %>%
                  visNodes(shape = "text", color = list(background = "white")) %>%
                  visOptions(manipulation = FALSE))
       }
-      # Keep network placeholder friendly while widgets initialize.
-      return(visNetwork(data.frame(id = 1, label = "Network is loading, please wait..."), data.frame()) %>%
+
+      msg <- conditionMessage(e)
+      placeholder <- if (!isTRUE(isolate(analysis_started()))) {
+        "Review the column mapping, then click Start Analysis."
+      } else if (!is.null(isolate(selected_individual()))) {
+        paste0("Network failed: ", msg)
+      } else {
+        "Enter an individual ID above to visualize their pedigree network"
+      }
+      message("[pedigree_network] render error: ", msg)
+      return(visNetwork(data.frame(id = 1, label = placeholder), data.frame()) %>%
                visNodes(shape = "text", color = list(background = "white")) %>%
                visOptions(manipulation = FALSE))
     })
@@ -7473,33 +7400,58 @@ Please check your pedigree structure and ensure:
   # Dynamic localized titles for three-panel UI and tabs
   output$left_upload_title <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
-    h4(get_label_local("data_upload", lang), class = "section-title")
+    tip <- if (exists("eb_with_tip", mode = "function")) eb_with_tip else function(label, ...) label
+    h4(class = "section-title",
+       tip(get_label_local("data_upload", lang),
+           tags$div(tags$b("File:"), " CSV / TXT / PED"),
+           tags$div(tags$b("Separator:"), " choose Comma, Tab, or Space to match the file"),
+           tags$div(get_label_local("auto_process_help", lang))))
+  })
+
+  output$column_mapping_title_ui <- renderUI({
+    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
+    tip <- if (exists("eb_with_tip", mode = "function")) eb_with_tip else function(label, ...) label
+    h4(class = "section-title",
+       tip(get_label_local("column_mapping", lang),
+           get_label_local("auto_processing_enabled", lang),
+           get_label_local("start_analysis_help", lang)))
   })
 
   output$quick_stats_title <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
-    h4(get_label_local("quick_stats", lang), class = "section-title")
+    tip <- if (exists("eb_with_tip", mode = "function")) eb_with_tip else function(label, ...) label
+    h4(class = "section-title",
+       tip(get_label_local("quick_stats", lang),
+           "Counts of individuals and known parents after the pedigree is processed."))
   })
 
   output$inbreeding_analysis_title <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
-    h4(get_label_local("inbreeding_analysis", lang), class = "section-title")
+    tip <- if (exists("eb_with_tip", mode = "function")) eb_with_tip else function(label, ...) label
+    h4(class = "section-title",
+       tip(get_label_local("inbreeding_analysis", lang),
+           get_label_local("auto_calculation_enabled", lang),
+           "F coefficients appear here after Start Analysis / Process Data."))
   })
 
   output$calc_f_btn <- renderUI({
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
     actionButton("calc_f", get_label_local("calculate_f_coefficients", lang), class = "btn-primary w-100")
   })
-  output$auto_calc_enabled_msg <- renderUI({
-    lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
-    div(class = "alert alert-success", style = "padding: 8px; font-size: 0.9rem; margin-bottom: 10px;",
-        get_label_local("auto_calculation_enabled", lang))
-  })
+  output$auto_calc_enabled_msg <- renderUI({ NULL })
   output$download_sire_btn <- renderUI({
+    ped <- tryCatch(ped_data(), error = function(e) NULL)
+    if (is.null(ped) || nrow(ped) == 0) return(NULL)
+    df <- tryCatch(sire_descendants(), error = function(e) NULL)
+    if (is.null(df) || nrow(df) == 0) return(NULL)
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
     downloadButton("download_sire_descendants", get_label_local("download_all_sires", lang), class = "btn-sm btn-secondary mt-2 w-100")
   })
   output$download_dam_btn <- renderUI({
+    ped <- tryCatch(ped_data(), error = function(e) NULL)
+    if (is.null(ped) || nrow(ped) == 0) return(NULL)
+    df <- tryCatch(dam_descendants(), error = function(e) NULL)
+    if (is.null(df) || nrow(df) == 0) return(NULL)
     lang <- if (exists("map_suite_lang_for_app", mode = "function")) map_suite_lang_for_app(current_lang(), "pediviewer") else current_lang()
     downloadButton("download_dam_descendants", get_label_local("download_all_dams", lang), class = "btn-sm btn-secondary mt-2 w-100")
   })

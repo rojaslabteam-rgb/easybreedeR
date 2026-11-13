@@ -38,7 +38,7 @@ suite_ui <- function() {
     title = div(
       style = "position: relative; display:flex; align-items:center; justify-content:center; width:100%;",
       div(style="flex:1;"), # 左侧占位
-      span("easybreedeR Studio ", style = "color:#CEB888; font-weight:bold;")
+      span("easybreedeR Studio ", style = "color: var(--accent-deep, #8E6F3E); font-weight:bold;")
     ),
     theme = suite_theme,
     id = "main_nav",
@@ -47,10 +47,21 @@ suite_ui <- function() {
       tags$head(
         tags$link(rel = "icon", type = "image/x-icon", href = "favicon.ico"),
         tags$link(rel = "stylesheet", href = "https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:opsz,wght,FILL,GRAD@20..48,100..700,0..1,-50..200"),
+        if (exists("eb_chrome_css_tag", mode = "function")) eb_chrome_css_tag(),
+        tags$script(HTML("
+          document.addEventListener('click', function (e) {
+            var card = e.target.closest('.app-card--launch');
+            if (!card || e.target.closest('button, a')) return;
+            var btn = card.querySelector('button');
+            if (btn) btn.click();
+          });
+        ")),
         tags$style(HTML('
   .navbar { 
-    border-bottom: 3px solid #CFB991; 
-    box-shadow:none !important; 
+    border-bottom: 1px solid var(--line, rgba(0,0,0,.10)); 
+    box-shadow:none !important;
+    background: color-mix(in srgb, var(--card, #fff) 78%, transparent) !important;
+    backdrop-filter: blur(18px) saturate(160%);
   }
 
   /* Left menu, right-aligned title/menu container */
@@ -59,14 +70,18 @@ suite_ui <- function() {
     align-items: center !important;
     justify-content: space-between !important;
     flex-direction: row !important;
+    flex-wrap: wrap !important;
     width: 100%;
-    padding-right: 4px; /* reduce to bring menu closer to right edge */
-    gap: 64px; /* increase space between brand and menu */
+    max-width: 100%;
+    padding-right: 4px;
+    gap: 12px 24px;
+    box-sizing: border-box;
   }
 
   .navbar-brand {
     order: 1;
     margin-right: auto !important;
+    min-width: 0;
   }
 
   .navbar-nav {
@@ -74,49 +89,49 @@ suite_ui <- function() {
     margin-left: auto !important;
     display: flex !important;
     align-items: center !important;
-    gap: 16px;
+    flex-wrap: wrap !important;
+    gap: 4px 12px;
     background: transparent !important;
+    max-width: 100%;
   }
 
   .navbar .nav-link { 
-    font-weight: 700; 
-    color: #000 !important; 
+    font-weight: 650; 
+    color: var(--ink, #202124) !important; 
     padding: 10px 8px; 
     text-decoration: none !important; 
+    white-space: nowrap;
   }
 
   .navbar .nav-link.active, .navbar .nav-item.show .nav-link { 
-    border-bottom: 3px solid #CEB888; 
+    border-bottom: 2px solid var(--accent, #CFB991); 
     background: transparent !important; 
     box-shadow: none !important; 
   }
 
-  /* Button styles aligned with PedivieweR */
-  .btn-primary, .btn.btn-primary { background-color:#CEB888 !important; border-color:#CEB888 !important; color:#000000 !important; font-weight:600; }
-  .btn-primary:hover, .btn.btn-primary:hover { background-color:#B89D5D !important; border-color:#B89D5D !important; }
-  .btn-secondary { background-color:#95A5A6 !important; border-color:#95A5A6 !important; color:#fff !important; }
-  .btn-secondary:hover { background-color:#7F8C8D !important; border-color:#7F8C8D !important; }
+  /* Buttons come from easybreedeR-chrome.css */
 
-  /* Hero section inspired by Purdue homepage */
+  /* Hero — Xmosome surface */
   .hero {
-    background: linear-gradient(180deg, #ffffff 0%, #f7f3ea 100%);
+    background: var(--surface-solid, #f4f5f7);
     padding: 32px 24px 24px 24px;
-    border-bottom: 3px solid #CFB991;
+    border-bottom: 1px solid var(--line, rgba(0,0,0,.10));
   }
   .hero .kicker {
     letter-spacing: .12em;
-    font-size: 13px;
+    font-size: 11px;
     text-transform: uppercase;
-    color: #6c6c6c;
-    font-weight: 700;
+    color: var(--accent, #CFB991);
+    font-weight: 650;
   }
   .hero h1 {
-    font-family: "Crimson Text", serif;
-    font-weight: 900;
-    line-height: 1.05;
+    font-family: var(--font, -apple-system, BlinkMacSystemFont, "SF Pro Text", sans-serif);
+    font-weight: 650;
+    line-height: 1.15;
     margin: 8px 0 12px 0;
-    color: #000;
-    font-size: 44px;
+    color: var(--ink, #202124);
+    font-size: 32px;
+    letter-spacing: -0.02em;
   }
   .hero .subhead {
     color: #4a4a4a;
@@ -127,27 +142,31 @@ suite_ui <- function() {
 
   /* Container spacing from hero */
   .container {
-    margin-top: 64px !important;
+    margin-top: 40px !important;
     margin-bottom: 48px;
     max-width: 100%;
-    padding-left: 24px;
-    padding-right: 24px;
+    padding-left: clamp(12px, 3vw, 24px);
+    padding-right: clamp(12px, 3vw, 24px);
+    box-sizing: border-box;
   }
 
-  /* Main content wrapper with sidebar - prevent narrowing when language changes (e.g. Chinese) */
+  /* Main content wrapper with sidebar */
   .main-content-wrapper {
     display: flex;
     gap: 24px;
     position: relative;
     width: 100%;
-    min-width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    box-sizing: border-box;
   }
 
-  /* Shiny output wrapper - keep full width when language changes (e.g. Chinese) */
+  /* Shiny output wrapper */
   #home_page_content {
     width: 100% !important;
-    min-width: 100% !important;
+    min-width: 0 !important;
     max-width: 100% !important;
+    box-sizing: border-box;
   }
 
   .cards-container {
@@ -162,10 +181,13 @@ suite_ui <- function() {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    margin-bottom: 24px;
+    margin-bottom: 16px;
   }
+  /* chrome .section-title zeroes margins; restore spacing between home sections */
+  .cards-container .row + .section-title { margin-top: 40px !important; }
+  .cards-container > .section-title { margin-bottom: 16px !important; }
   .section-title h2 {
-    font-size: 28px;
+    font-size: 22px;
     font-weight: 600;
     display: flex;
     align-items: center;
@@ -174,95 +196,90 @@ suite_ui <- function() {
     color: #000;
   }
   .section-title .material-symbols-outlined {
-    color: #CEB888;
+    color: #CFB991;
     font-size: 24px;
   }
 
-  /* App cards styling - larger and more prominent; fixed size so layout does not shift when language changes */
+  /* App cards — responsive; titles wrap instead of clipping */
   .app-card {
     background: white;
     border: 1px solid #e0e0e0;
     border-radius: 12px;
-    padding: 32px 24px;
+    padding: clamp(16px, 2.5vw, 24px);
     margin-bottom: 0;
-    box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-    transition: all 0.3s ease;
-    min-height: 320px;
-    height: 320px;
-    max-height: 320px;
+    box-shadow: 0 1px 2px rgba(20, 32, 55, 0.06);
+    transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
+    min-height: 0;
+    height: 100%;
     width: 100%;
     min-width: 0;
+    max-width: 100%;
     box-sizing: border-box;
     display: flex;
     flex-direction: column;
     justify-content: space-between;
     overflow: hidden;
   }
-  
-  /* Grid alignment for 2x4 layout - fixed column width so cards do not narrow when language changes (e.g. Chinese) */
+
+  /* Module cards: auto-fit grid across aspect ratios */
+  .cards-grid {
+    display: grid;
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    gap: 16px;
+  }
+  .cards-grid--modules {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr));
+  }
+  .cards-grid--deps {
+    grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr));
+  }
+
+  /* Legacy Bootstrap rows (dependency fallback / older markup) */
   .cards-container .row {
     margin-left: 0 !important;
     margin-right: 0 !important;
     width: 100% !important;
     max-width: 100% !important;
-    flex-wrap: nowrap !important;
+    flex-wrap: wrap !important;
     display: flex !important;
+    gap: 0;
   }
-  .cards-container .row > [class*="col-3"] {
+  .cards-container .row > [class*="col-"] {
     padding-left: 12px;
     padding-right: 12px;
-    flex: 0 0 25% !important;
-    width: 25% !important;
-    max-width: 25% !important;
-    min-width: 25% !important;
+    flex: 1 1 240px !important;
+    width: auto !important;
+    max-width: 100% !important;
+    min-width: 0 !important;
     box-sizing: border-box;
     overflow: hidden;
-  }
-  .cards-container .row > [class*="col-6"] {
-    flex: 0 0 50% !important;
-    width: 50% !important;
-    max-width: 50% !important;
-    min-width: 50% !important;
-    box-sizing: border-box;
-    overflow: hidden;
-  }
-  
-  /* First column in each row: no left padding */
-  .cards-container .row > [class*="col-3"]:first-child {
-    padding-left: 0;
-  }
-  
-  /* Last column in each row: no right padding */
-  .cards-container .row > [class*="col-3"]:last-child {
-    padding-right: 0;
-  }
-  
-  /* Ensure cards fill column height and align */
-  .cards-container .row > [class*="col-3"] {
     display: flex;
     flex-direction: column;
+    margin-bottom: 16px;
   }
-  
-  .cards-container .row > [class*="col-3"] > .app-card {
-    flex: 0 0 auto;
+  .cards-container .row > [class*="col-"] > .app-card {
+    flex: 1 1 auto;
     display: flex;
     flex-direction: column;
-    align-self: flex-start;
+    align-self: stretch;
   }
-  
-  /* Row spacing */
   .cards-container .row + .row {
-    margin-top: 24px;
+    margin-top: 8px;
   }
   .app-card:hover {
-    box-shadow: 0 8px 16px rgba(0,0,0,0.15);
+    box-shadow: 0 6px 16px rgba(20, 32, 55, 0.10);
     transform: translateY(-2px);
   }
+  .app-card--launch { cursor: pointer; }
+  .app-card--launch:hover { border-color: var(--accent, #CFB991); }
   .app-card-header {
     display: flex;
     align-items: flex-start;
     gap: 16px;
     margin-bottom: 20px;
+    min-width: 0;
   }
   .app-card-icon {
     width: 56px;
@@ -280,6 +297,7 @@ suite_ui <- function() {
   .app-card-icon.orange { background-color: #FFF3E0; }
   .app-card-icon.purple { background-color: #F3E5F5; }
   .app-card-icon.teal { background-color: #E0F2F1; }
+  .app-card-icon.gold { background-color: rgba(207, 185, 145, 0.28); }
   .material-symbols-outlined {
     font-family: "Material Symbols Outlined";
     font-weight: normal;
@@ -302,69 +320,116 @@ suite_ui <- function() {
   .material-symbols-outlined.orange { color: #F57C00; }
   .material-symbols-outlined.purple { color: #7B1FA2; }
   .material-symbols-outlined.teal { color: #00796B; }
+  .material-symbols-outlined.gold { color: #8E6F3E; }
   .app-card-title-wrapper {
     flex: 1;
+    min-width: 0;
     display: flex;
     flex-direction: column;
   }
   .app-card h3 {
     color: #000;
-    font-size: 22px;
+    font-size: clamp(16px, 2.2vw, 22px);
     font-weight: 700;
     margin-top: 0;
     margin-bottom: 8px;
-    line-height: 1.2;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+    word-break: break-word;
   }
   .app-card-header p {
     color: #4a4a4a;
     font-size: 14px;
     line-height: 1.5;
     margin: 0;
-    min-height: 4.5em;
-    max-height: 4.5em;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    line-clamp: 3;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
+    display: block;
+    -webkit-line-clamp: unset;
+    line-clamp: unset;
   }
-  .app-card p {
+  .app-card > p {
     color: #4a4a4a;
     font-size: 16px;
     line-height: 1.6;
     margin-bottom: 24px;
-    min-height: 4.5em;
-    max-height: 4.5em;
-    overflow: hidden;
-    display: -webkit-box;
-    -webkit-line-clamp: 3;
-    -webkit-box-orient: vertical;
-    line-clamp: 3;
+    min-height: 0;
+    max-height: none;
+    overflow: visible;
   }
-  .app-card .btn-primary {
+  .app-card .btn {
     margin-top: auto;
     width: 100%;
-    padding: 14px 24px;
-    font-size: 16px;
-    font-weight: 600;
-    border-radius: 6px;
+    min-height: 36px !important;
+    padding: 8px 16px !important;
+    font-size: 13px !important;
+    border-radius: 8px !important;
+    text-decoration: none;
+    text-align: center;
   }
-  
-  /* Dependency cards styling - fixed height so layout does not shift when language changes */
+
+  /* Dependency cards */
   .dependency-card {
     margin-top: 0;
-    min-height: 280px;
-    height: 280px;
-    max-height: 280px;
     overflow: hidden;
   }
   .dependency-card .app-card-header p {
-    min-height: 5em;
-    max-height: 5em;
-    -webkit-line-clamp: 4;
-    line-clamp: 4;
+    min-height: 0;
+    max-height: none;
+  }
+
+  @media (max-width: 900px) {
+    .hero { padding: 24px 16px 20px; }
+    .hero h1 { font-size: 24px; }
+    .navbar .nav-link { padding: 8px 6px; font-size: 13px; }
+    .app-card-icon { width: 48px; height: 48px; }
+    .material-symbols-outlined { font-size: 28px; }
+  }
+  @media (max-width: 600px) {
+    .cards-grid--modules,
+    .cards-grid--deps {
+      grid-template-columns: 1fr;
+    }
+    .navbar-nav { margin-left: 0 !important; width: 100%; }
   }
   
+  /* Package lists — collapsed by default; they are reference, not a task */
+  .deps-disclosure {
+    margin-top: 40px;
+    border-top: 1px solid var(--line, rgba(0,0,0,.10));
+    padding-top: 16px;
+  }
+  .deps-disclosure > summary {
+    cursor: pointer;
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--muted, #6e7178);
+  }
+  .deps-disclosure > summary:hover { color: var(--ink, #202124); }
+  .deps-group { margin-top: 16px; }
+  .deps-group h4 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    font-weight: 650;
+    color: var(--muted, #6e7178);
+  }
+  .deps-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+  .deps-chip {
+    padding: 3px 10px;
+    border: 1px solid var(--line, rgba(0,0,0,.10));
+    border-radius: 999px;
+    background: var(--card, #fff);
+    color: var(--ink, #202124);
+    font-size: 12.5px;
+    text-decoration: none;
+  }
+  a.deps-chip:hover {
+    border-color: var(--accent, #CFB991);
+    color: var(--accent-deep, #8E6F3E);
+    text-decoration: none;
+  }
+
   /* Required Dependencies styling */
   .dependency-item {
     padding: 12px 0;
@@ -386,9 +451,9 @@ suite_ui <- function() {
   }
   
   .dependency-link:hover {
-    background: #CEB888;
+    background: #CFB991;
     color: #000;
-    border-color: #CEB888;
+    border-color: #CFB991;
     text-decoration: none;
     transform: translateY(-1px);
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
@@ -435,7 +500,7 @@ suite_ui <- function() {
     font-size: 14px;
   }
   .dropdown-item:hover {
-    background-color: #CEB888 !important;
+    background-color: #CFB991 !important;
     color: black !important;
   }
 
@@ -506,19 +571,19 @@ suite_ui <- function() {
   }
 
   .readme-sidebar-header {
-    padding: 20px;
-    border-bottom: 2px solid #CFB991;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--line, rgba(0,0,0,.10));
     display: flex;
     justify-content: space-between;
     align-items: center;
-    background: linear-gradient(135deg, #CEB888 0%, #B89D5D 100%);
+    background: var(--accent-soft, rgba(207, 185, 145,.10));
   }
 
   .readme-sidebar-header h3 {
     margin: 0;
-    color: #000;
-    font-size: 20px;
-    font-weight: 700;
+    color: var(--ink, #202124);
+    font-size: 14px;
+    font-weight: 650;
   }
 
   .readme-toggle-btn {
@@ -526,7 +591,7 @@ suite_ui <- function() {
     border: none;
     cursor: pointer;
     padding: 4px;
-    color: #000;
+    color: var(--muted, #6e7178);
     display: flex;
     align-items: center;
     justify-content: center;
@@ -549,7 +614,7 @@ suite_ui <- function() {
     margin-top: 0;
     margin-bottom: 16px;
     color: #000;
-    border-bottom: 2px solid #CEB888;
+    border-bottom: 2px solid #CFB991;
     padding-bottom: 8px;
   }
 
@@ -580,7 +645,7 @@ suite_ui <- function() {
     padding: 12px;
     border-radius: 6px;
     overflow-x: auto;
-    border-left: 3px solid #CEB888;
+    border-left: 3px solid #CFB991;
   }
 
   .readme-sidebar-content pre code {
@@ -598,7 +663,7 @@ suite_ui <- function() {
   }
 
   .readme-sidebar-content a {
-    color: #CEB888;
+    color: #CFB991;
     text-decoration: none;
   }
 
@@ -611,7 +676,7 @@ suite_ui <- function() {
   }
 
   .readme-sidebar-content blockquote {
-    border-left: 3px solid #CEB888;
+    border-left: 3px solid #CFB991;
     padding-left: 16px;
     margin-left: 0;
     color: #666;
@@ -648,7 +713,7 @@ suite_ui <- function() {
     right: 24px;
     bottom: 24px;
     padding: 12px 20px;
-    background: #CEB888;
+    background: #CFB991;
     color: #000;
     border: none;
     border-radius: 24px;
@@ -664,7 +729,7 @@ suite_ui <- function() {
   }
 
   .show-readme-btn:hover {
-    background: #B89D5D;
+    background: #8E6F3E;
     transform: translateY(-2px);
     box-shadow: 0 6px 16px rgba(0,0,0,0.2);
   }
@@ -672,7 +737,22 @@ suite_ui <- function() {
   .show-readme-btn.hidden {
     display: none;
   }
-'))
+')),
+        if (exists("easybreedeR_a4_layout_css", mode = "function")) {
+          tags$style(HTML(easybreedeR_a4_layout_css()))
+        },
+        tags$style(HTML("
+          .suite-iframe-wrap { height: calc(100vh - 52px) !important; }
+          @media print {
+            .navbar-right-group, .github-star-btn, #settingsDropdownTop,
+            #dropdownMenuLangTop, .show-readme-btn, .readme-sidebar { display: none !important; }
+            .navbar { border-bottom: 2px solid #b6c9e0 !important; }
+            .suite-iframe-wrap, .suite-iframe-wrap iframe {
+              height: 175mm !important; max-height: 175mm !important;
+              border: 1px solid #E6D9B8 !important; border-radius: 3px !important;
+            }
+          }
+        "))
       ),
       # Top-right GitHub star and language selector
       tags$div(
@@ -778,6 +858,7 @@ suite_ui <- function() {
     tabPanel(uiOutput("tab_pediviewer"), uiOutput("frame_pediviewer"), value = "pediviewer"),
     tabPanel(uiOutput("tab_genoviewer"), uiOutput("frame_genoviewer"), value = "genoviewer"),
     tabPanel(uiOutput("tab_easyblup"), uiOutput("frame_easyblup"), value = "easyblup"),
+    tabPanel(uiOutput("tab_xmosome"), uiOutput("frame_xmosome"), value = "xmosome"),
     # (Removed bottom-right gear; using top-right gear aligned with title)
   )
 }

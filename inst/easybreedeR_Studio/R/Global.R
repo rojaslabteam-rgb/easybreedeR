@@ -22,24 +22,16 @@ suppressPackageStartupMessages({
   }
 })
 
-# Theme (Purdue gold + Crimson Text) - only if bslib is available and loaded
+# Theme — stock BS5 (precompiled); brand chrome via easybreedeR-chrome.css
 suite_theme <- NULL
 if (requireNamespace("bslib", quietly = TRUE)) {
-  # Ensure bslib is actually loaded (not just available)
   if (!("package:bslib" %in% search())) {
     try(library(bslib), silent = TRUE)
   }
-  # Check if bs_theme function exists and callable
-  if (exists("bs_theme", envir = asNamespace("bslib"), inherits = FALSE) || 
+  if (exists("bs_theme", envir = asNamespace("bslib"), inherits = FALSE) ||
       exists("bs_theme", envir = globalenv())) {
     suite_theme <- tryCatch({
-      bslib::bs_theme(
-        version = 5,
-        bg = "#ffffff",
-        fg = "#333333",
-        primary = "#CEB888",
-        base_font = bslib::font_google("Crimson Text")
-      )
+      bslib::bs_theme(version = 5)
     }, error = function(e) {
       warning("Failed to create bs_theme: ", e$message, ". Running without theme.")
       NULL
@@ -48,6 +40,19 @@ if (requireNamespace("bslib", quietly = TRUE)) {
 }
 if (is.null(suite_theme)) {
   cat("Note: bslib theme not available. App will run with default theme.\n")
+}
+
+# Shared runtime helpers (quiet devmode + chrome CSS tag)
+.runtime_candidates <- c(
+  file.path("..", "Runtime.R"),
+  file.path("inst", "Runtime.R"),
+  "Runtime.R",
+  system.file("Runtime.R", package = "easybreedeR")
+)
+.runtime_file <- .runtime_candidates[nzchar(.runtime_candidates) & file.exists(.runtime_candidates)][1L]
+if (length(.runtime_file) && !is.na(.runtime_file)) {
+  try(source(.runtime_file, local = FALSE), silent = TRUE)
+  if (exists("eb_quiet_devmode", mode = "function")) eb_quiet_devmode()
 }
 
 # ===== Load Language.R if available =====
@@ -85,11 +90,7 @@ if (!nzchar(shared_language_file)) {
   warning("Shared Language.R was not found. UI may show translation keys.")
 }
 
-# ===== Global Language State =====
-# Shared across the whole Suite; values: "English", "中文", "Português"
-suite_language <- shiny::reactiveVal("English")
-# Timestamp to force iframe refresh when language changes
-suite_lang_timestamp <- shiny::reactiveVal(as.numeric(Sys.time()))
+# Mutable language state is created inside each Studio server session.
 
 # Helper: map display name to URL code
 language_code <- function(name) {
@@ -194,6 +195,7 @@ language_code <- function(name) {
 .detect_deploy_mode <- function() {
   override <- tolower(trimws(Sys.getenv("EASYBREEDER_DEPLOY_MODE", "")))
   if (override %in% c("local", "hosted")) return(override)
+  if (identical(Sys.getenv("R_CONFIG_ACTIVE", ""), "shinyapps")) return("hosted")
   hosted_markers <- c("RSTUDIO_CONTENT_GUID", "RS_CONNECT_START_TIME", "RSC_VERSION", "RSC_INSTANCE")
   if (any(vapply(hosted_markers, function(var) nzchar(Sys.getenv(var, "")), logical(1)))) {
     return("hosted")
@@ -219,7 +221,8 @@ child_specs <- list(
   dataviewer = list(label = "dataviewR", port = 8001L, env_var = "EASYBREEDER_DATAVIEWER_URL"),
   pediviewer = list(label = "PedivieweR", port = 8002L, env_var = "EASYBREEDER_PEDIVIEWER_URL"),
   genoviewer = list(label = "genovieweR", port = 8005L, env_var = "EASYBREEDER_GENOVIEWER_URL"),
-  easyblupf90 = list(label = "easyBLUP", port = 8003L, env_var = "EASYBREEDER_EASYBLUP_URL")
+  easyblupf90 = list(label = "easyBLUP", port = 8003L, env_var = "EASYBREEDER_EASYBLUP_URL"),
+  xmosome = list(label = "Xmosome_blupf90kit", port = 8006L, env_var = "EASYBREEDER_XMOSOME_URL")
 )
 
 # Resolve app directory from the calling context (works when sourced by app.R)
@@ -246,20 +249,22 @@ child_specs <- list(
 # Child app folders relative to the Suite app directory
 suite_dir <- .resolve_suite_dir()
 apps_base_dir <- normalizePath(file.path(suite_dir, ".."), winslash = "/", mustWork = FALSE)
-suite_log_path <- normalizePath(file.path(suite_dir, "suite_diagnostics.log"), winslash = "/", mustWork = FALSE)
+suite_log_path <- file.path(tempdir(), "easybreeder-suite-diagnostics.log")
 
 child_paths <- list(
   dataviewer = normalizePath(file.path(apps_base_dir, "datavieweR"), winslash = "/", mustWork = FALSE),
   pediviewer = normalizePath(file.path(apps_base_dir, "pedivieweR"), winslash = "/", mustWork = FALSE),
   genoviewer = normalizePath(file.path(apps_base_dir, "genovieweR"), winslash = "/", mustWork = FALSE),
-  easyblupf90 = normalizePath(file.path(apps_base_dir, "easyblup"), winslash = "/", mustWork = FALSE)
+  easyblupf90 = normalizePath(file.path(apps_base_dir, "easyblup"), winslash = "/", mustWork = FALSE),
+  xmosome = normalizePath(file.path(apps_base_dir, "Xmosome_blupf90kit"), winslash = "/", mustWork = FALSE)
 )
 
 child_source_specs <- list(
   dataviewer = list(app_file = file.path(child_paths$dataviewer, "app.R"), run_fn = "run_dataviewer_app"),
   pediviewer = list(app_file = file.path(child_paths$pediviewer, "app.R"), run_fn = "run_pediviewer_app"),
   genoviewer = list(app_file = file.path(child_paths$genoviewer, "app.R"), run_fn = "run_genoviewer_app"),
-  easyblupf90 = list(app_file = file.path(child_paths$easyblupf90, "app.R"), run_fn = "run_easyblup_app")
+  easyblupf90 = list(app_file = file.path(child_paths$easyblupf90, "app.R"), run_fn = "run_easyblup_app"),
+  xmosome = list(app_file = file.path(child_paths$xmosome, "app.R"), run_fn = "run_Xmosome_blupf90kit_app")
 )
 
 child_runtime_config <- lapply(names(child_specs), function(name) {
@@ -268,7 +273,7 @@ child_runtime_config <- lapply(names(child_specs), function(name) {
   mode <- if (nzchar(remote_url)) {
     "remote"
   } else if (identical(suite_deploy_mode, "hosted")) {
-    "disabled"
+    "embedded"
   } else {
     "local"
   }
@@ -299,6 +304,7 @@ child_apps <- lapply(child_runtime_config, function(cfg) {
   if (candidate %in% c("pediviewer")) return("pediviewer")
   if (candidate %in% c("genoviewer")) return("genoviewer")
   if (candidate %in% c("easyblup", "easyblupf90")) return("easyblupf90")
+  if (candidate %in% c("xmosome", "xmosome_blupf90kit", "blupf90kit", "xmosome-blupf90kit")) return("xmosome")
   ""
 }
 
@@ -378,6 +384,13 @@ load_child_runner <- function(app_name) {
 
   Sys.setenv(EASYBREEDER_SOURCE_ONLY = "1")
   setwd(dirname(spec$app_file))
+  # Ensure child www/ is reachable when Studio hosts the UI (shinyapps single-process).
+  child_www <- file.path(dirname(spec$app_file), "www")
+  if (dir.exists(child_www)) {
+    prefix <- paste0(child, "-assets")
+    if (identical(child, "xmosome")) prefix <- "xmosome-assets"
+    try(shiny::addResourcePath(prefix, normalizePath(child_www, winslash = "/", mustWork = FALSE)), silent = TRUE)
+  }
   source(spec$app_file, local = child_env)
 
   if (exists(spec$run_fn, envir = child_env, mode = "function", inherits = FALSE)) {
@@ -448,10 +461,11 @@ start_child <- function(path, port) {
   pid
 }
 
-# Small helper to create a responsive iframe panel
+# Small helper to create a responsive iframe panel (fits under navbar within viewport / A4 print)
 iframe_panel <- function(url) {
   tags$div(
-    style = "position:relative; height:95vh; width:100%; overflow:hidden;",
+    class = "suite-iframe-wrap",
+    style = "position:relative; height:calc(100vh - 52px); width:100%; overflow:hidden;",
     tags$iframe(
       src = url,
       width = "100%",
@@ -482,15 +496,17 @@ diagnose_suite <- function(verbose = FALSE) {
 
   child_modes <- vapply(child_runtime_config, function(cfg) cfg$mode, character(1))
   child_dirs_exist <- vapply(names(child_paths), function(nm) {
-    if (!identical(child_modes[[nm]], "local")) TRUE else dir.exists(child_paths[[nm]])
+    if (identical(child_modes[[nm]], "remote")) TRUE else dir.exists(child_paths[[nm]])
   }, logical(1))
   child_appR_exist <- vapply(names(child_paths), function(nm) {
-    if (!identical(child_modes[[nm]], "local")) TRUE else file.exists(file.path(child_paths[[nm]], "app.R"))
+    if (identical(child_modes[[nm]], "remote")) TRUE else file.exists(file.path(child_paths[[nm]], "app.R"))
   }, logical(1))
 
   ports <- vapply(child_runtime_config, function(cfg) cfg$port, integer(1))
   ports_in_use <- setNames(rep(FALSE, length(ports)), ports)
-  local_names <- names(child_runtime_config)[child_modes == "local"]
+  # The unified suite routes child sessions through this same Shiny endpoint.
+  # It does not spawn or probe separate local servers.
+  local_names <- character(0)
   if (length(local_names) > 0) {
     check_ip <- tryCatch(.get_local_ip(), error = function(e) "127.0.0.1")
     for (nm in local_names) {
