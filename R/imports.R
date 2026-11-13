@@ -19,6 +19,9 @@
 #' @useDynLib easybreedeR, .registration = TRUE
 #' @importFrom Rcpp evalCpp
 #' @importFrom htmltools tags
+#' @importFrom jsonlite fromJSON toJSON
+#' @importFrom httr2 request req_perform
+#' @importFrom curl curl_fetch_memory
 NULL
 
 # Export all Rcpp functions

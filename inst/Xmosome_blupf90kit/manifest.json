@@ -4,7 +4,7 @@
   "name": "Xmosome_blupf90kit",
   "version": "0.1.0",
   "description": "BLUPF90 / renumf90 parameter-card builder with progressive OPTIONS, Auto/Manual editing, and header-only phenotype mapping. Hosted as an embedded Shiny GUI inside easybreedeR (plugin-compatible layout and tokens).",
-  "license": "MIT",
+  "license": "GPL-3.0-only",
   "api_version": "1",
   "command": "blupf90kit",
   "icon": "icon.svg",

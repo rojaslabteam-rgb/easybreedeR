@@ -135,11 +135,8 @@ if (!file.exists(.global_r)) {
   )
 }
 
-# Ensure LAN access is enabled by default
-# This ensures the app listens on 0.0.0.0 even if .Rprofile is not loaded
-if (is.null(getOption("shiny.host"))) {
-  options(shiny.host = "0.0.0.0")
-}
+# Listen on this computer only unless the caller asks otherwise, e.g.
+# run_easybreedeR(host = "0.0.0.0") or options(shiny.host = "0.0.0.0").
 
 # Source all scripts in global environment (packages load globally anyway)
 # But ensure suite_language reactiveVal is accessible everywhere

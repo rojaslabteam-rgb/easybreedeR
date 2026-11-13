@@ -55,21 +55,55 @@ ai_quota_dir <- function() {
   dir
 }
 
-ai_client_ip <- function(session) {
+# Number of reverse proxies between the internet and this R process.
+# 0 (direct/local): forwarded headers are client-controlled and are ignored.
+# n >= 1: only the n right-most X-Forwarded-For entries were written by
+# infrastructure we trust; everything to their left is supplied by the client.
+ai_trusted_proxy_hops <- function() {
+  raw <- Sys.getenv("XMOSOME_AI_TRUSTED_PROXIES", unset = "")
+  if (nzchar(raw)) {
+    n <- suppressWarnings(as.integer(raw))
+    if (!is.na(n) && n >= 0L) return(n)
+  }
+  hosted <- identical(Sys.getenv("R_CONFIG_ACTIVE", ""), "shinyapps") ||
+    any(nzchar(Sys.getenv(c("RSTUDIO_CONTENT_GUID", "RS_CONNECT_START_TIME", "RSC_VERSION", "RSC_INSTANCE"), "")))
+  if (hosted) 1L else 0L
+}
+
+.ai_clean_ip <- function(x) {
+  x <- trimws(as.character(x %||% ""))
+  if (length(x) != 1L || is.na(x) || !nzchar(x)) return("")
+  x <- sub("^\\[([0-9A-Fa-f:.]+)\\](:[0-9]+)?$", "\\1", x)          # [v6]:port
+  if (grepl("^[0-9.]+:[0-9]+$", x)) x <- sub(":[0-9]+$", "", x)      # v4:port
+  if (grepl("^[0-9]{1,3}(\\.[0-9]{1,3}){3}$", x) || (grepl(":", x, fixed = TRUE) && grepl("^[0-9A-Fa-f:.]+$", x))) {
+    tolower(x)
+  } else {
+    ""
+  }
+}
+
+ai_client_ip <- function(session, trusted_hops = ai_trusted_proxy_hops()) {
   if (is.null(session) || is.null(session$request)) return("unknown")
   req <- session$request
   headers <- req$HEADERS
   if (is.null(headers)) headers <- list()
   names(headers) <- tolower(names(headers))
-  xff <- req$HTTP_X_FORWARDED_FOR %||% headers[["x-forwarded-for"]] %||% ""
-  if (nzchar(as.character(xff))) {
-    return(trimws(strsplit(as.character(xff), ",", fixed = TRUE)[[1]][1]))
+  remote <- .ai_clean_ip(req$REMOTE_ADDR %||% headers[["remote_addr"]] %||% "")
+  trusted_hops <- suppressWarnings(as.integer(trusted_hops)[1])
+  if (is.na(trusted_hops) || trusted_hops < 1L) {
+    return(if (nzchar(remote)) remote else "unknown")
   }
-  xr <- req$HTTP_X_REAL_IP %||% headers[["x-real-ip"]] %||% ""
-  if (nzchar(as.character(xr))) return(trimws(as.character(xr)))
-  rem <- req$REMOTE_ADDR %||% headers[["remote_addr"]] %||% ""
-  if (nzchar(as.character(rem))) return(trimws(as.character(rem)))
-  "unknown"
+  xff <- as.character(req$HTTP_X_FORWARDED_FOR %||% headers[["x-forwarded-for"]] %||% "")
+  parts <- trimws(strsplit(paste(xff, collapse = ","), ",", fixed = TRUE)[[1]])
+  parts <- parts[nzchar(parts)]
+  if (length(parts)) {
+    # Count from the right: the left-most entries can be forged by the client.
+    ip <- .ai_clean_ip(parts[max(1L, length(parts) - trusted_hops + 1L)])
+    if (nzchar(ip)) return(ip)
+  }
+  xr <- .ai_clean_ip(req$HTTP_X_REAL_IP %||% headers[["x-real-ip"]] %||% "")
+  if (nzchar(xr)) return(xr)
+  if (nzchar(remote)) remote else "unknown"
 }
 
 ai_quota_key <- function(ip, day = format(as.POSIXlt(Sys.time(), tz = "UTC"), "%Y-%m-%d")) {

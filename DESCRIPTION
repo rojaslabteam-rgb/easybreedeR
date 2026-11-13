@@ -10,11 +10,11 @@ Authors@R:
 Description: Provides a modular R-Shiny application for rapid quality
     control, visualization, and preparation of breeding data across
     phenotypes, pedigrees, and genotypes.
-License: GPL-3 + file LICENSE
+License: GPL-3
 Encoding: UTF-8
 LazyData: true
 Depends: 
-    R (>= 4.1.0),
+    R (>= 4.1.0)
 Imports:
     shiny (>= 1.7.0),
     data.table,
@@ -43,6 +43,8 @@ Suggests:
     shinyFiles,
     fs,
     plinkR,
+    linkbreedeR,
+    SNPRelate,
     snpStats,
     gdata,
     pedigreeTools,

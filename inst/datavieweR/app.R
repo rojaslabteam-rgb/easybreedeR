@@ -641,6 +641,7 @@ ui <- page_fillable(
 # SERVER
 # ============================================================================
 server <- function(input, output, session) {
+  eb_track_session(session, "dataviewer")
   # Upload limit is configured once when the app is loaded.
   
   # Color reactive values

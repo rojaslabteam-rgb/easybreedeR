@@ -77,11 +77,13 @@
 }
 
 .announce_urls <- function(host, port, local_ip) {
-  effective_host <- if (is.null(host) || !nzchar(host)) "0.0.0.0" else host
+  effective_host <- if (is.null(host) || !nzchar(host)) "127.0.0.1" else host
   effective_port <- as.integer(port)
-  host_url <- sprintf("http://%s:%d", effective_host, effective_port)
+  lan <- identical(effective_host, "0.0.0.0")
+  # 0.0.0.0 is a bind address, not something a browser can open.
+  host_url <- sprintf("http://%s:%d", if (lan) "127.0.0.1" else effective_host, effective_port)
   message("App running at: ", host_url)
-  if (!is.null(local_ip) && nzchar(local_ip)) {
+  if (lan && !is.null(local_ip) && nzchar(local_ip)) {
     local_url <- sprintf("http://%s:%d", trimws(local_ip), effective_port)
     if (!identical(local_url, host_url)) {
       message("Local network: ", local_url)
@@ -94,7 +96,7 @@
 #' Main entry point for the easybreedeR Shiny application suite. Provides
 #' access to all sub-applications (easyblup, pedivieweR, datavieweR, genovieweR).
 #'
-#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
+#' @param host The IPv4 address that the application should listen on. Defaults to "127.0.0.1" (this computer only). Use "0.0.0.0" to allow access from other devices on the network.
 #' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
 #' @export
 #' @return A Shiny app object (invisibly returned by `shiny::runApp`).
@@ -102,7 +104,7 @@
 #' \dontrun{
 #'   run_easybreedeR()            # launch suite
 #' }
-run_easybreedeR <- function(host = "0.0.0.0", port = NULL) {
+run_easybreedeR <- function(host = "127.0.0.1", port = NULL) {
   # Try to find app in installed package first
   app_dir <- system.file("easybreedeR_Studio", package = "easybreedeR")
   # Fallback to development location
@@ -115,7 +117,7 @@ run_easybreedeR <- function(host = "0.0.0.0", port = NULL) {
     }
   }
   resolved_port <- .resolve_port(port)
-  .announce_urls(host, resolved_port, .get_local_ip())
+  .announce_urls(host, resolved_port, if (identical(host, "0.0.0.0")) .get_local_ip() else NULL)
   shiny::runApp(app_dir, host = host, port = resolved_port, launch.browser = TRUE)
 }
 
@@ -125,14 +127,14 @@ run_easybreedeR <- function(host = "0.0.0.0", port = NULL) {
 #' Launches the easyblup application for BLUP/REML parameter generation
 #' with AI assistant features.
 #'
-#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
+#' @param host The IPv4 address that the application should listen on. Defaults to "127.0.0.1" (this computer only). Use "0.0.0.0" to allow access from other devices on the network.
 #' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
 #' @export
 #' @examples
 #' \dontrun{
 #'   run_easyblup()
 #' }
-run_easyblup <- function(host = "0.0.0.0", port = NULL) {
+run_easyblup <- function(host = "127.0.0.1", port = NULL) {
   app_dir <- system.file("easyblup", package = "easybreedeR")
   if (app_dir == "") {
     dev_dir <- file.path(getwd(), "inst", "easyblup")
@@ -143,7 +145,7 @@ run_easyblup <- function(host = "0.0.0.0", port = NULL) {
     }
   }
   resolved_port <- .resolve_port(port)
-  .announce_urls(host, resolved_port, .get_local_ip())
+  .announce_urls(host, resolved_port, if (identical(host, "0.0.0.0")) .get_local_ip() else NULL)
   shiny::runApp(app_dir, host = host, port = resolved_port, launch.browser = TRUE)
 }
 
@@ -153,14 +155,14 @@ run_easyblup <- function(host = "0.0.0.0", port = NULL) {
 #' Launches the pedivieweR application for pedigree visualization
 #' and quality control.
 #'
-#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
+#' @param host The IPv4 address that the application should listen on. Defaults to "127.0.0.1" (this computer only). Use "0.0.0.0" to allow access from other devices on the network.
 #' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
 #' @export
 #' @examples
 #' \dontrun{
 #'   run_pedivieweR()
 #' }
-run_pedivieweR <- function(host = "0.0.0.0", port = NULL) {
+run_pedivieweR <- function(host = "127.0.0.1", port = NULL) {
   app_dir <- system.file("pedivieweR", package = "easybreedeR")
   if (app_dir == "") {
     dev_dir <- file.path(getwd(), "inst", "pedivieweR")
@@ -171,7 +173,7 @@ run_pedivieweR <- function(host = "0.0.0.0", port = NULL) {
     }
   }
   resolved_port <- .resolve_port(port)
-  .announce_urls(host, resolved_port, .get_local_ip())
+  .announce_urls(host, resolved_port, if (identical(host, "0.0.0.0")) .get_local_ip() else NULL)
   shiny::runApp(app_dir, host = host, port = resolved_port, launch.browser = TRUE)
 }
 
@@ -180,14 +182,14 @@ run_pedivieweR <- function(host = "0.0.0.0", port = NULL) {
 #' @description
 #' Launches the genovieweR application for genotype visualization and analysis.
 #'
-#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
+#' @param host The IPv4 address that the application should listen on. Defaults to "127.0.0.1" (this computer only). Use "0.0.0.0" to allow access from other devices on the network.
 #' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
 #' @export
 #' @examples
 #' \dontrun{
 #'   run_genovieweR()
 #' }
-run_genovieweR <- function(host = "0.0.0.0", port = NULL) {
+run_genovieweR <- function(host = "127.0.0.1", port = NULL) {
   app_dir <- system.file("genovieweR", package = "easybreedeR")
   if (app_dir == "") {
     dev_dir <- file.path(getwd(), "inst", "genovieweR")
@@ -198,7 +200,7 @@ run_genovieweR <- function(host = "0.0.0.0", port = NULL) {
     }
   }
   resolved_port <- .resolve_port(port)
-  .announce_urls(host, resolved_port, .get_local_ip())
+  .announce_urls(host, resolved_port, if (identical(host, "0.0.0.0")) .get_local_ip() else NULL)
   shiny::runApp(app_dir, host = host, port = resolved_port, launch.browser = TRUE)
 }
 
@@ -207,14 +209,14 @@ run_genovieweR <- function(host = "0.0.0.0", port = NULL) {
 #' @description
 #' Launches the datavieweR application for data preview and exploration.
 #'
-#' @param host The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.
+#' @param host The IPv4 address that the application should listen on. Defaults to "127.0.0.1" (this computer only). Use "0.0.0.0" to allow access from other devices on the network.
 #' @param port The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.
 #' @export
 #' @examples
 #' \dontrun{
 #'   run_datavieweR()
 #' }
-run_datavieweR <- function(host = "0.0.0.0", port = NULL) {
+run_datavieweR <- function(host = "127.0.0.1", port = NULL) {
   app_dir <- system.file("datavieweR", package = "easybreedeR")
   if (app_dir == "") {
     dev_dir <- file.path(getwd(), "inst", "datavieweR")
@@ -225,6 +227,6 @@ run_datavieweR <- function(host = "0.0.0.0", port = NULL) {
     }
   }
   resolved_port <- .resolve_port(port)
-  .announce_urls(host, resolved_port, .get_local_ip())
+  .announce_urls(host, resolved_port, if (identical(host, "0.0.0.0")) .get_local_ip() else NULL)
   shiny::runApp(app_dir, host = host, port = resolved_port, launch.browser = TRUE)
 }

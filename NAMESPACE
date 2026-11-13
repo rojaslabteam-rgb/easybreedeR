@@ -39,6 +39,7 @@ importFrom(bslib,
   bs_theme,
   font_google
 )
+importFrom(curl,curl_fetch_memory)
 importFrom(data.table,fread)
 importFrom(digest,digest)
 importFrom(dplyr,
@@ -55,6 +56,10 @@ importFrom(dplyr,
 )
 importFrom(ggplot2,ggplot)
 importFrom(htmltools,tags)
+importFrom(httr2,
+  req_perform,
+  request
+)
 importFrom(igraph,
   cluster_louvain,
   cluster_walktrap,
@@ -66,6 +71,10 @@ importFrom(igraph,
   layout_with_lgl,
   membership,
   vcount
+)
+importFrom(jsonlite,
+  fromJSON,
+  toJSON
 )
 importFrom(magrittr,"%>%")
 importFrom(plotly,plotlyOutput)

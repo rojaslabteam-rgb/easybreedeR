@@ -38,3 +38,9 @@
 # Exclude deployment metadata from package tarball
 ^inst/.*/rsconnect$
 ^inst/.*/rsconnect/.*$
+
+# Local author AI secrets must never reach a tarball or installed library
+^inst/.*/ai_author_env\.local\.R$
+# Full GPL text is referenced by "License: GPL-3"; not shipped in the tarball
+^LICENSE$
+^src/.*\.(o|so|dll)$

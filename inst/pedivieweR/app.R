@@ -52,16 +52,13 @@ use_linkbreedeR <- FALSE
 tryCatch({
   if (requireNamespace("linkbreedeR", quietly = TRUE)) {
     use_linkbreedeR <- TRUE
-    cat("✓ linkbreedeR available - will use fast inbupgf90 for inbreeding calculation
-")
+    eb_log("✓ linkbreedeR available - will use fast inbupgf90 for inbreeding calculation", level = "debug")
   }
 }, error = function(e) {
   if (pedigreeTools_available) {
-    cat("Note: linkbreedeR not available, will use pedigreeTools for inbreeding calculation
-")
+    eb_log("linkbreedeR not available, will use pedigreeTools for inbreeding calculation", level = "debug")
   } else {
-    cat("Note: linkbreedeR and pedigreeTools not available; inbreeding fallback is limited
-")
+    eb_log("linkbreedeR and pedigreeTools not available; inbreeding fallback is limited", level = "debug")
   }
   use_linkbreedeR <- FALSE
 })
@@ -136,47 +133,16 @@ load_rcpp_backend <- function() {
 }
 
 loaded <- tryCatch(load_rcpp_backend(), error = function(e) {
-  message("Compiled backend unavailable: ", e$message)
+  eb_log("Compiled backend unavailable: ", e$message, level = "warn")
   character(0)
 })
 
 use_rcpp <- all(core_fns %in% loaded)
-if (use_rcpp) {
-  message("Rcpp QC functions loaded")
-} else {
-  message("Required compiled QC functions are unavailable; falling back to R methods")
-}
-
-if ("fast_find_deepest_ancestor" %in% loaded) {
-  message("fast_find_deepest_ancestor available")
-} else {
-  message("fast_find_deepest_ancestor not found, will use R version")
-}
-if ("fast_lap_distribution" %in% loaded) {
-  message("fast_lap_distribution available")
-} else {
-  message("fast_lap_distribution not found, will use R version")
-}
-if ("fast_lap_depths" %in% loaded) {
-  message("fast_lap_depths available")
-} else {
-  message("fast_lap_depths not found, will use R version")
-}
-
 use_fast_inbreeding_cpp <- "fast_inbreeding_cpp" %in% loaded
-if (use_fast_inbreeding_cpp) {
-  message("fast inbreeding C++ available - will use Rcpp method")
-} else if (pedigreeTools_available) {
-  message("fast_inbreeding_cpp not found, will use inbupgf90/pedigreeTools")
-} else {
-  message("fast_inbreeding_cpp not found, will use inbupgf90 if available")
+if (!use_rcpp) {
+  eb_log("Compiled pedigree QC functions unavailable; using slower R methods", level = "warn")
 }
-
-if ("fast_top_contrib_cpp" %in% loaded) {
-  message("fast_top_contrib_cpp available - will show Top 5 contributors")
-} else {
-  message("fast_top_contrib_cpp not found - Top 5 contributors disabled")
-}
+eb_log("Compiled backend functions loaded:", if (length(loaded)) paste(loaded, collapse = ", ") else "none", level = "debug")
 
 purdue_theme <- NULL  # legacy name; chrome via shared CSS + stock BS5
 
@@ -807,6 +773,7 @@ ui <- page_fillable(
 
 # --------------- SERVER ----------------
 server <- function(input, output, session) {
+  eb_track_session(session, "pediviewer")
   # Resolve language passed by Suite (via ?lang=) or default
   current_lang <- reactive({
     if (exists("resolve_suite_lang", mode = "function")) {
@@ -1446,15 +1413,13 @@ output$top10_dam_title <- renderText({
               }
             }
           }, error = function(e) {
-            cat("Birth date order check failed:", e$message, "
-")
+            eb_log("Birth date order check failed:", e$message, level = "warn")
           })
         }
         
         return(issues)
       }, error = function(e) {
-        cat("Rcpp QC failed, falling back to R version:", e$message, "
-")
+        eb_log("Rcpp QC failed, falling back to R version:", e$message, level = "warn")
         # Fall through to R version below
       })
     }
@@ -1587,8 +1552,7 @@ output$top10_dam_title <- renderText({
           issues$has_errors <- TRUE
         }
       }, error = function(e) {
-        cat("Loop detection skipped due to error:", e$message, "
-")
+        eb_log("Loop detection skipped due to error:", e$message, level = "warn")
       })
     }
     
@@ -1696,8 +1660,7 @@ output$top10_dam_title <- renderText({
             }
           }
         }, error = function(e) {
-          cat("Birth date order check failed:", e$message, "
-")
+          eb_log("Birth date order check failed:", e$message, level = "warn")
         })
       }
     
@@ -5281,8 +5244,7 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
       return(result)
     }, error = function(e) {
       error_msg <- paste("Error in C++ inbreeding calculation:", e$message)
-      cat(error_msg, "
-")
+      eb_log(error_msg, level = "warn")
       return(NULL)
     })
   }
@@ -5304,8 +5266,7 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
           file.remove(temp_files)
         }
       }, error = function(e) {
-        cat("Warning: Could not clean up all temporary files:", e$message, "
-")
+        eb_log("Could not clean up all temporary files:", e$message, level = "warn")
       })
     }, add = TRUE)
     
@@ -5370,8 +5331,7 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
           # Non-empty error file - fall back to pedigreeTools
           warning_msg <- paste("inbupgf90 reported errors, falling back to pedigreeTools. Errors:", 
                               paste(error_content, collapse = "; "))
-          cat(warning_msg, "
-")
+          eb_log(warning_msg, level = "warn")
           return(NULL)  # Signal to use fallback
         }
       }
@@ -5379,8 +5339,7 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
       # Check exit code
       if (!is.null(exit_code) && exit_code != 0) {
         warning_msg <- paste("inbupgf90 exited with code", exit_code, ", falling back to pedigreeTools")
-        cat(warning_msg, "
-")
+        eb_log(warning_msg, level = "warn")
         return(NULL)  # Signal to use fallback
       }
       
@@ -5400,8 +5359,7 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
       solinb_file <- file.path(temp_dir, "pedigree.txt.solinb")
       if (!file.exists(solinb_file)) {
         warning_msg <- "inbupgf90 output file (.solinb) not found, falling back to pedigreeTools"
-        cat(warning_msg, "
-")
+        eb_log(warning_msg, level = "warn")
         return(NULL)  # Signal to use fallback
       }
       
@@ -5440,8 +5398,7 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
         solinb_data
       }, error = function(e) {
         warning_msg <- paste("Error parsing .solinb file:", e$message, ", falling back to pedigreeTools")
-        cat(warning_msg, "
-")
+        eb_log(warning_msg, level = "warn")
         return(NULL)
       })
       
@@ -5474,8 +5431,7 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
       
     }, error = function(e) {
       error_msg <- paste("Error in inbupgf90 calculation:", e$message, ", falling back to pedigreeTools")
-      cat(error_msg, "
-")
+      eb_log(error_msg, level = "warn")
       return(NULL)  # Signal to use fallback
     })
   }
@@ -5588,8 +5544,7 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
         if (use_fast_inbreeding_cpp) {
           # C++ method treats missing parents as founders
           if (length(missing_sires) > 0 || length(missing_dams) > 0) {
-            cat("Note: Some parent references not found in ID column. C++ method will treat them as founders.
-")
+            eb_log("Some parent references not found in ID column. C++ method will treat them as founders.", level = "info")
           }
           incProgress(0.4, detail = "Computing inbreeding coefficients (using fast C++ method)...")
           
@@ -5630,8 +5585,7 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
               stop("pedigreeTools is not installed; cannot fall back from fast method. Please install pedigreeTools or enable inbupgf90.")
             }
             # Fall back to pedigreeTools - need to do editPed and create ped_obj
-            cat("Falling back to pedigreeTools method...
-")
+            eb_log("Falling back to pedigreeTools method...", level = "info")
             
             # Use editPed() to complete and sort pedigree (ensures ancestors precede progeny)
             incProgress(0.25, detail = "Completing and sorting pedigree...")
@@ -5714,8 +5668,7 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
           if (length(missing_sires) > 0 || length(missing_dams) > 0) {
             # For inbupgf90, missing parents are allowed (they will be treated as founders)
             # So we just log a warning but continue
-            cat("Note: Some parent references not found in ID column. inbupgf90 will treat them as founders.
-")
+            eb_log("Some parent references not found in ID column. inbupgf90 will treat them as founders.", level = "info")
           }
           incProgress(0.4, detail = "Computing inbreeding coefficients (using fast inbupgf90 method)...")
           
@@ -5756,8 +5709,7 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
               stop("pedigreeTools is not installed; cannot fall back from inbupgf90. Please install pedigreeTools.")
             }
             # Fall back to pedigreeTools - need to do editPed and create ped_obj
-            cat("Falling back to pedigreeTools method...
-")
+            eb_log("Falling back to pedigreeTools method...", level = "info")
             
             # Use editPed() to complete and sort pedigree (ensures ancestors precede progeny)
             incProgress(0.25, detail = "Completing and sorting pedigree...")
@@ -5953,8 +5905,7 @@ Mean generation depth:", format(mean_generation_depth, digits = 4), "
         
         error_msg <- paste("⚠️ Error calculating F:", e$message)
         showNotification(error_msg, type = "error", duration = 8)
-        cat("Inbreeding calculation error:", e$message, "
-")
+        eb_log("Inbreeding calculation error:", e$message, level = "warn")
         tibble(ID = character(), F = numeric())
       })
     })
@@ -7155,7 +7106,7 @@ Please check your pedigree structure and ensure:
       result <- tryCatch(
         build_individual_network(target_id),
         error = function(e) {
-          message("[pedigree_network] build failed: ", conditionMessage(e))
+          eb_log("[pedigree_network] build failed: ", conditionMessage(e), level = "warn")
           list(nodes = tibble(), edges = tibble(), status = "error", message = conditionMessage(e))
         }
       )
@@ -7367,7 +7318,7 @@ Please check your pedigree structure and ensure:
       } else {
         "Enter an individual ID above to visualize their pedigree network"
       }
-      message("[pedigree_network] render error: ", msg)
+      eb_log("[pedigree_network] render error: ", msg, level = "warn")
       return(visNetwork(data.frame(id = 1, label = placeholder), data.frame()) %>%
                visNodes(shape = "text", color = list(background = "white")) %>%
                visOptions(manipulation = FALSE))

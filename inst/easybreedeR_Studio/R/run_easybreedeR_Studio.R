@@ -43,6 +43,9 @@ run_easybreedeR_Studio <- function() {
       return(invisible(NULL))
     }
 
+    # Top-level Studio visit (embedded tools record their own sessions).
+    if (exists("eb_track_session", mode = "function")) eb_track_session(session, "studio")
+
     # diagnostics on startup
     diag <- diagnose_suite()
     issues <- character(0)

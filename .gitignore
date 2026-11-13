@@ -6,6 +6,9 @@
 *.Rproj.user
 
 # Package build
+src/*.o
+src/*.so
+src/*.dll
 *.tar.gz
 *.zip
 .Rcheck/
@@ -43,3 +46,9 @@ Thumbs.db
 ai_author_env.local.R
 **/ai_author_env.local.R
 inst/Xmosome_blupf90kit/ai_author_env.local.R
+
+# Local-only test suite (kept on disk, not recorded in git)
+tests/
+
+# Local usage statistics archive (scripts/usage_report.R)
+usage_archive.jsonl

@@ -12,6 +12,7 @@ commit real keys or put them in `www/` or client-side configuration.
 | `XMOSOME_AI_MODEL` | Default model id | `gpt-4o-mini` (OpenRouter: `openai/gpt-4o-mini`) |
 | `XMOSOME_AI_ALLOWED_BASE_URLS` | Additional administrator-approved public HTTPS base URLs, comma separated | `https://YOUR-RESOURCE.openai.azure.com/openai/v1` |
 | `XMOSOME_AI_DAILY_LIMIT` | Author-funded questions allowed per client IP per UTC day | `10` (default) |
+| `XMOSOME_AI_TRUSTED_PROXIES` | Number of reverse proxies in front of the app, used to find the real client IP for the quota | `1` on shinyapps.io / Posit Connect (auto-detected), `0` locally |
 | `XMOSOME_AI_QUOTA_DIR` | Optional persistent directory for quota counters | `/var/lib/xmosome/ai_quota` |
 
 shinyapps.io note: `deployApp(envVars=...)` is not supported there. For author defaults on shinyapps, use a gitignored `inst/Xmosome_blupf90kit/ai_author_env.local.R` that calls `Sys.setenv(...)`, and force-include that file in the deploy bundle. Never commit real keys.
@@ -31,7 +32,8 @@ In the floating AI panel (⚙):
 Quota notes:
 - Counters are stored as hashed IP + UTC-date files under `XMOSOME_AI_QUOTA_DIR` (or a temp directory).
 - On multi-instance hosts without a shared quota directory, each instance enforces its own local counter.
-- Behind proxies, the first `X-Forwarded-For` / `X-Real-IP` value is used when present.
+- The client IP is taken from `X-Forwarded-For` counting **from the right** by `XMOSOME_AI_TRUSTED_PROXIES` hops. Entries further left are written by the client and are ignored, so the quota cannot be reset by sending a forged header. With `0` trusted proxies the header is ignored entirely and the socket address is used.
+- If the host has more proxy layers than configured, all users share one quota bucket (safe but too strict); raise `XMOSOME_AI_TRUSTED_PROXIES` after checking the header on the test deployment.
 
 Administrators must approve only trusted public provider endpoints, not domains
 controlled by untrusted users or resolving to private networks. This is an

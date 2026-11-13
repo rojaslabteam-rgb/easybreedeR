@@ -45,12 +45,10 @@ use_linkbreedeR <- FALSE
 tryCatch({
   if (requireNamespace("linkbreedeR", quietly = TRUE)) {
     use_linkbreedeR <- TRUE
-    cat("✓ linkbreedeR available - will use for extended genotype analysis
-")
+    eb_log("✓ linkbreedeR available - will use for extended genotype analysis", level = "debug")
   }
 }, error = function(e) {
-  cat("Note: linkbreedeR not available, extended analysis features will be limited
-")
+  eb_log("linkbreedeR not available, extended analysis features will be limited", level = "debug")
   use_linkbreedeR <- FALSE
 })
 
@@ -59,12 +57,10 @@ use_plinkR <- FALSE
 tryCatch({
   if (requireNamespace("plinkR", quietly = TRUE)) {
     use_plinkR <- TRUE
-    cat("✓ plinkR available - will prefer PLINK for statistics/QC
-")
+    eb_log("✓ plinkR available - will prefer PLINK for statistics/QC", level = "debug")
   }
 }, error = function(e) {
-  cat("Note: plinkR not available, using local fallback calculations
-")
+  eb_log("plinkR not available, using local fallback calculations", level = "debug")
   use_plinkR <- FALSE
 })
 
@@ -74,12 +70,10 @@ tryCatch({
   if (requireNamespace("data.table", quietly = TRUE)) {
     library(data.table)
     use_data_table <- TRUE
-    cat("✓ data.table available - will use for faster file reading
-")
+    eb_log("✓ data.table available - will use for faster file reading", level = "debug")
   }
 }, error = function(e) {
-  cat("Note: data.table not available, using base R read.table
-")
+  eb_log("data.table not available, using base R read.table", level = "debug")
   use_data_table <- FALSE
 })
 
@@ -89,12 +83,10 @@ tryCatch({
   if (requireNamespace("plotly", quietly = TRUE)) {
     library(plotly)
     use_plotly <- TRUE
-    cat("✓ plotly available - will use for interactive plots
-")
+    eb_log("✓ plotly available - will use for interactive plots", level = "debug")
   }
 }, error = function(e) {
-  cat("Note: plotly not available, using static ggplot2 plots
-")
+  eb_log("plotly not available, using static ggplot2 plots", level = "debug")
   use_plotly <- FALSE
 })
 
@@ -200,9 +192,9 @@ load_rcpp_backend <- function() {
 
 use_rcpp_stats <- isTRUE(load_rcpp_backend())
 if (use_rcpp_stats) {
-  message("Rcpp backend available - PLINK-compatible fallback stats enabled")
+  eb_log("Rcpp backend available - PLINK-compatible fallback stats enabled", level = "debug")
 } else {
-  message("Rcpp backend unavailable; local non-PLINK statistics are disabled")
+  eb_log("Rcpp backend unavailable; local non-PLINK statistics are disabled", level = "warn")
 }
 
 # Shiny renderPlot manages its own graphics devices. Opening pdf(NULL) here
@@ -707,6 +699,7 @@ ui <- page_fillable(
 # SERVER
 # ============================================================================
 server <- function(input, output, session) {
+  eb_track_session(session, "genoviewer")
   # Upload limit is configured once when the app is loaded.
   
   # Reactive values
@@ -1266,7 +1259,7 @@ server <- function(input, output, session) {
 
           chr_args <- get_plink_chr_args(data)
           base_prefix <- paste0(prefix, "_base")
-          base_result <- system2(
+          base_result <- eb_system2(
             plink_path,
             args = c(source_args, "--allow-extra-chr", "--nonfounders", chr_args, "--make-bed", "--out", base_prefix),
             stdout = FALSE, stderr = FALSE
@@ -1294,7 +1287,7 @@ server <- function(input, output, session) {
           
           if (!is.null(input$geno_threshold) && input$geno_threshold < 1) {
             geno_output <- paste0(prefix, "_geno_step")
-            geno_result <- system2(
+            geno_result <- eb_system2(
               plink_path,
               args = c("--bfile", current_prefix, "--allow-extra-chr", "--nonfounders", "--geno",
                       as.character(input$geno_threshold), "--make-bed", "--out", geno_output),
@@ -1311,7 +1304,7 @@ server <- function(input, output, session) {
           
           if (!is.null(input$mind_threshold) && input$mind_threshold < 1) {
             mind_output <- paste0(prefix, "_mind_step")
-            mind_result <- system2(
+            mind_result <- eb_system2(
               plink_path,
               args = c("--bfile", current_prefix, "--allow-extra-chr", "--nonfounders", "--mind",
                       as.character(input$mind_threshold), "--make-bed", "--out", mind_output),
@@ -1330,7 +1323,7 @@ server <- function(input, output, session) {
           }
           if (!is.null(input$maf_threshold) && input$maf_threshold > 0) {
             maf_output <- paste0(prefix, "_maf_step")
-            maf_result <- system2(
+            maf_result <- eb_system2(
               plink_path,
               args = c("--bfile", current_prefix, "--allow-extra-chr", "--nonfounders", "--maf",
                       as.character(input$maf_threshold), "--make-bed", "--out", maf_output),
@@ -1352,7 +1345,7 @@ server <- function(input, output, session) {
           }
           if (!is.null(input$hwe_threshold) && input$hwe_threshold > 0) {
             hwe_output <- paste0(prefix, "_hwe_step")
-            hwe_result <- system2(
+            hwe_result <- eb_system2(
               plink_path,
               args = c("--bfile", current_prefix, "--allow-extra-chr", "--nonfounders", "--hwe",
                       as.character(input$hwe_threshold), "--make-bed", "--out", hwe_output),
@@ -2379,8 +2372,7 @@ Please run Summary or QC first", size = 4) +
           ))
         }
       }, error = function(e) {
-        cat("Error reading PCA from summary_stats:", e$message, "
-")
+        eb_log("Error reading PCA from summary_stats:", e$message, level = "warn")
       })
     }
     
@@ -2534,8 +2526,7 @@ Please run Summary or QC first", size = 4) +
         n_components = n_keep
       )
     }, error = function(e) {
-      cat("Error computing PCA fallback:", e$message, "
-")
+      eb_log("Error computing PCA fallback:", e$message, level = "warn")
       NULL
     })
   }
@@ -2603,12 +2594,10 @@ Please run Summary or QC first", size = 4) +
     pca <- compute_pca(pca_data, summary_stats = stats)
     if (!is.null(pca) && !is.null(pca$scores) && nrow(pca$scores) > 0) {
       pca_result(pca)
-      cat("PCA computed successfully:", nrow(pca$scores), "samples,", ncol(pca$scores), "components
-")
+      eb_log("PCA computed successfully:", nrow(pca$scores), "samples,", ncol(pca$scores), "components", level = "debug")
     } else {
       pca_result(NULL)
-      cat("PCA unavailable: no usable PCA result from PLINK output or local fallback
-")
+      eb_log("PCA unavailable: no usable PCA result from PLINK output or local fallback", level = "info")
     }
   })
 
@@ -3653,7 +3642,7 @@ Please run Summary or QC first", size = 4) +
         bed_dir <- dirname(bed_file)
         ped_output <- file.path(temp_dir, paste0(bed_base, "_filtered"))
         
-        convert_result <- system2(
+        convert_result <- eb_system2(
           plink_path,
           args = c(
             "--bfile", file.path(bed_dir, bed_base),
@@ -4040,7 +4029,7 @@ write_blupf90_txt_as_plink_files <- function(prefix, txt_path, map_path, target_
   blup_data <- tryCatch({
     read_blupf90_txt(txt_path, map_path)
   }, error = function(e) {
-    cat("Warning: failed to parse BLUPF90 input for PLINK conversion:", e$message, "\n")
+    eb_log("failed to parse BLUPF90 input for PLINK conversion:", e$message, level = "warn")
     NULL
   })
   if (is.null(blup_data) || !is.list(blup_data) ||
@@ -4676,37 +4665,14 @@ calculate_all_stats_plink <- function(data, include_relatedness = FALSE, include
       core_args <- c(core_args, "--pca")
     }
     core_args <- c(core_args, "--out", stats_output)
-    if (requireNamespace("R.utils", quietly = TRUE)) {
-      tryCatch({
-        R.utils::withTimeout({
-          result <- system2(
-            plink_path,
-            args = core_args,
-            stdout = FALSE,
-            stderr = FALSE
-          )
-          plink_success <- (result == 0)
-        }, timeout = 300)  # 5 minute timeout for PLINK commands
-      }, TimeoutException = function(e) {
-        cat("PLINK command timed out after 5 minutes
-")
-        plink_success <- FALSE
-      })
-    } else {
-      # Fallback without timeout
-      result <- system2(
-        plink_path,
-        args = core_args,
-        stdout = FALSE,
-        stderr = FALSE
-      )
-      plink_success <- (result == 0)
-      elapsed <- as.numeric(difftime(Sys.time(), plink_start_time, units = "secs"))
-      if (elapsed > 300) {
-        cat("PLINK command took longer than 5 minutes
-")
-        plink_success <- FALSE
-      }
+    # system2's own timeout terminates PLINK; R-level time limits cannot.
+    result <- tryCatch(
+      suppressWarnings(eb_system2(plink_path, args = core_args, stdout = FALSE, stderr = FALSE, timeout = 300)),
+      error = function(e) NA_integer_
+    )
+    plink_success <- isTRUE(result == 0)
+    if (identical(as.integer(result), 124L)) {
+      eb_log("PLINK command timed out after 5 minutes", level = "warn")
     }
     
     # Check if PLINK output files were created.
@@ -4716,8 +4682,7 @@ calculate_all_stats_plink <- function(data, include_relatedness = FALSE, include
         !file.exists(paste0(stats_output, ".frq")) ||
         !file.exists(paste0(stats_output, ".hwe")) ||
         !file.exists(paste0(stats_output, ".het"))) {
-      cat("PLINK command failed or output files missing
-")
+      eb_log("PLINK command failed or output files missing", level = "warn")
       unlink(tmp_dir, recursive = TRUE, force = TRUE)
       if (!is.null(data$genotypes)) {
         return(calculate_all_stats_r(data, include_relatedness = include_relatedness))
@@ -4754,8 +4719,7 @@ calculate_all_stats_plink <- function(data, include_relatedness = FALSE, include
           }
         }
       }, error = function(e) {
-        cat("Error reading PCA files:", e$message, "
-")
+        eb_log("Error reading PCA files:", e$message, level = "warn")
         pca_scores <- NULL
         pca_variance <- NULL
         pca_eigenvalues <- NULL
@@ -4770,46 +4734,16 @@ calculate_all_stats_plink <- function(data, include_relatedness = FALSE, include
     if (isTRUE(include_relatedness)) {
       # Run PLINK IBD/relatedness (--genome) only when user explicitly enables it.
       genome_output <- paste0(stats_output, "_genome")
-      if (requireNamespace("R.utils", quietly = TRUE)) {
-        tryCatch({
-          R.utils::withTimeout({
-            system2(
-              plink_path,
-              args = c(
-                input_args,
-                "--allow-extra-chr",
-                "--nonfounders",
-                chr_args,
-                "--genome",
-                "--out", genome_output
-              ),
-              stdout = FALSE,
-              stderr = FALSE
-            )
-          }, timeout = 180)
-        }, error = function(e) {
-          cat("Warning: PLINK --genome did not complete:", e$message, "
-")
-        })
-      } else {
-        tryCatch({
-          system2(
-            plink_path,
-            args = c(
-              input_args,
-              "--allow-extra-chr",
-              "--nonfounders",
-              chr_args,
-              "--genome",
-              "--out", genome_output
-            ),
-            stdout = FALSE,
-            stderr = FALSE
-          )
-        }, error = function(e) {
-          cat("Warning: PLINK --genome failed:", e$message, "
-")
-        })
+      genome_status <- tryCatch(
+        suppressWarnings(eb_system2(
+          plink_path,
+          args = c(input_args, "--allow-extra-chr", "--nonfounders", chr_args, "--genome", "--out", genome_output),
+          stdout = FALSE, stderr = FALSE, timeout = 180
+        )),
+        error = function(e) NA_integer_
+      )
+      if (!isTRUE(genome_status == 0)) {
+        eb_log("PLINK --genome did not complete (status ", genome_status, ")", level = "warn")
       }
     }
     
@@ -4927,8 +4861,7 @@ calculate_all_stats_plink <- function(data, include_relatedness = FALSE, include
           tryCatch({
             hwe_data <<- read.table(hwe_file, header = TRUE, stringsAsFactors = FALSE, fill = TRUE, comment.char = "")
           }, error = function(e3) {
-            cat("Error reading HWE file:", e3$message, "
-")
+            eb_log("Error reading HWE file:", e3$message, level = "warn")
           })
         })
       })
@@ -4963,24 +4896,19 @@ calculate_all_stats_plink <- function(data, include_relatedness = FALSE, include
             hwe_pvalues[idx_map[valid_match]] <- p_col[valid_p_idx][valid_match]
             results$hwe_pvalues <- hwe_pvalues
           } else {
-            cat("Warning: No valid HWE p-values found in file
-")
+            eb_log("No valid HWE p-values found in file", level = "warn")
             results$hwe_pvalues <- rep(NA, nrow(data$map))
           }
         } else {
-          cat("Warning: HWE file has insufficient columns or rows
-")
-          cat("  Rows:", nrow(hwe_all), "Columns:", ncol(hwe_all), "
-")
+          eb_log("HWE file has insufficient columns or rows", level = "warn")
+          eb_log("Rows:", nrow(hwe_all), "Columns:", ncol(hwe_all), level = "debug")
           if (ncol(hwe_all) > 0) {
-            cat("  Column names:", paste(names(hwe_all)[1:min(10, ncol(hwe_all))], collapse = ", "), "
-")
+            eb_log("Column names:", paste(names(hwe_all)[1:min(10, ncol(hwe_all))], collapse = ", "), level = "debug")
           }
           results$hwe_pvalues <- rep(NA, nrow(data$map))
         }
       } else {
-        cat("Warning: Could not read HWE file or file is empty
-")
+        eb_log("Could not read HWE file or file is empty", level = "warn")
         results$hwe_pvalues <- rep(NA, nrow(data$map))
       }
     }
@@ -4995,8 +4923,7 @@ calculate_all_stats_plink <- function(data, include_relatedness = FALSE, include
             results$individual_relatedness <- genome_data
           }
         }, error = function(e) {
-          cat("Warning: failed to read .genome file:", e$message, "
-")
+          eb_log("failed to read .genome file:", e$message, level = "warn")
         })
       }
     }
@@ -5049,8 +4976,7 @@ calculate_all_stats_plink <- function(data, include_relatedness = FALSE, include
     
   }, error = function(e) {
     # On error, log and return NULL (will trigger error message in UI)
-    cat("Error in calculate_all_stats_plink:", e$message, "
-")
+    eb_log("Error in calculate_all_stats_plink:", e$message, level = "warn")
     if (!is.null(data$genotypes)) return(calculate_all_stats_r(data, include_relatedness = include_relatedness))
     return(NULL)
   })
@@ -5063,7 +4989,7 @@ calculate_all_stats_r <- function(data, include_relatedness = FALSE) {
     return(NULL)
   }
   tryCatch({
-    cat("Starting statistical calculations (Rcpp backend)...\n")
+    eb_log("Starting statistical calculations (Rcpp backend)...", level = "debug")
     
     data <- prepare_numeric_genotypes(data)
     geno_num <- data$genotypes_numeric
@@ -5075,7 +5001,7 @@ calculate_all_stats_r <- function(data, include_relatedness = FALSE) {
     het_values <- get_plink_aligned_individual_het(data)
     results <- list()
     
-    cat("  [1/7] Computing individual call rates...\n")
+    eb_log("[1/7] Computing individual call rates...", level = "debug")
     results$individual_call_rate <- calculate_individual_call_rate(
       data,
       geno_matrix = if (is.null(call_rate_pair)) geno_num else NULL,
@@ -5085,14 +5011,14 @@ calculate_all_stats_r <- function(data, include_relatedness = FALSE) {
       results$individual_missing_rate <- 1 - results$individual_call_rate
     }
     
-    cat("  [2/7] Computing individual heterozygosity...\n")
+    eb_log("[2/7] Computing individual heterozygosity...", level = "debug")
     results$individual_heterozygosity <- calculate_individual_heterozygosity(
       data,
       geno_matrix = if (is.null(het_values)) geno_num else NULL,
       het_values = het_values
     )
     
-    cat("  [3/7] Computing marker call rates...\n")
+    eb_log("[3/7] Computing marker call rates...", level = "debug")
     results$marker_call_rate <- calculate_call_rate(
       data,
       geno_matrix = if (is.null(call_rate_pair)) geno_num else NULL,
@@ -5102,14 +5028,14 @@ calculate_all_stats_r <- function(data, include_relatedness = FALSE) {
       results$marker_missing_rate <- 1 - results$marker_call_rate
     }
     
-    cat("  [4/7] Computing minor allele frequencies (MAF)...\n")
+    eb_log("[4/7] Computing minor allele frequencies (MAF)...", level = "debug")
     results$maf <- calculate_maf(
       data,
       geno_matrix = if (is.null(maf_values)) geno_num else NULL,
       maf_values = maf_values
     )
     
-    cat("  [5/7] Computing Hardy-Weinberg equilibrium test (chi-square)...\n")
+    eb_log("[5/7] Computing Hardy-Weinberg equilibrium test (chi-square)...", level = "debug")
     results$hwe_pvalues <- calculate_hwe(
       data,
       geno_matrix = if (is.null(hwe_values)) geno_num else NULL,
@@ -5117,18 +5043,18 @@ calculate_all_stats_r <- function(data, include_relatedness = FALSE) {
     )
     
     if (isTRUE(include_relatedness)) {
-      cat("  [6/7] Computing sample relatedness (this may take a while)...\n")
+      eb_log("[6/7] Computing sample relatedness (this may take a while)...", level = "debug")
       results$individual_relatedness <- calculate_sample_relatedness(data, geno_num = geno_num)
     } else {
-      cat("  [6/7] Skipping sample relatedness (--genome disabled).\n")
+      eb_log("[6/7] Skipping sample relatedness (--genome disabled).", level = "debug")
       results$individual_relatedness <- NULL
     }
     
-    cat("  [7/7] Statistical calculations completed!\n")
+    eb_log("[7/7] Statistical calculations completed!", level = "debug")
     
     results
   }, error = function(e) {
-    cat("Error in calculate_all_stats_r:", e$message, "\n")
+    eb_log("Error in calculate_all_stats_r:", e$message, level = "warn")
     NULL
   })
 }
@@ -5157,7 +5083,7 @@ calculate_sample_relatedness <- function(data, geno_num = NULL) {
       }
       chr_args <- get_plink_chr_args(data)
       out_prefix <- paste0(prefix, "_genome")
-      system2(
+      eb_system2(
         plink_path,
         args = c(input_args, "--allow-extra-chr", "--nonfounders", chr_args, "--genome", "--out", out_prefix),
         stdout = FALSE, stderr = FALSE
@@ -5218,7 +5144,7 @@ calculate_sample_relatedness <- function(data, geno_num = NULL) {
   
   # Show message for long-running relatedness calculation
   if (n_pairs > 1000) {
-    cat(sprintf("Computing relatedness for %d sample pairs (Method-of-Moments)...\n", n_pairs))
+    eb_log(sprintf("Computing relatedness for %d sample pairs (Method-of-Moments)...", n_pairs), level = "debug")
   }
   
   rel <- gvr_relatedness_pairs(
@@ -5268,7 +5194,7 @@ calculate_hwe_plink <- function(data) {
     
     # Run plink --hardy
     hwe_output <- paste0(prefix, "_hwe")
-    system2(
+    eb_system2(
       plink_path,
       args = c(
         input_args,

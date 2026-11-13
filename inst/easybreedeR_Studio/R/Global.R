@@ -449,11 +449,11 @@ start_child <- function(path, port) {
     candidate <- paste0(rscript, ".exe")
     if (file.exists(candidate)) rscript <- candidate
   }
-  # Use host = "0.0.0.0" to allow LAN access
-  cmd <- sprintf("shiny::runApp('%s', port=%d, host='0.0.0.0', launch.browser=FALSE)", path, as.integer(port))
+  # The Studio embeds this child through http://127.0.0.1:<port>, so loopback is enough.
+  cmd <- sprintf("shiny::runApp('%s', port=%d, host='127.0.0.1', launch.browser=FALSE)", path, as.integer(port))
   stdout <- tempfile(pattern = sprintf("child_%d_out_", as.integer(port)), fileext = ".log")
   stderr <- tempfile(pattern = sprintf("child_%d_err_", as.integer(port)), fileext = ".log")
-  log_suite("spawning child", path, "port", port, "host=0.0.0.0", "stdout", stdout, "stderr", stderr)
+  log_suite("spawning child", path, "port", port, "host=127.0.0.1", "stdout", stdout, "stderr", stderr)
   pid <- tryCatch({
     system2(rscript, c("-e", shQuote(cmd)), wait = FALSE, stdout = stdout, stderr = stderr)
   }, error = function(e) NA_integer_)

@@ -384,9 +384,9 @@ load_rcpp_blup_backend <- function() {
 eb_ped_to_blup_codes_cpp_fn <- load_rcpp_blup_backend()
 use_rcpp_blup_convert <- is.function(eb_ped_to_blup_codes_cpp_fn)
 if (use_rcpp_blup_convert) {
-  message("Rcpp backend available - PLINK-compatible fallback conversion enabled")
+  eb_log("Rcpp backend available - PLINK-compatible fallback conversion enabled", level = "debug")
 } else {
-  message("Rcpp backend unavailable; fallback converter is disabled")
+  eb_log("Rcpp backend unavailable; fallback converter is disabled", level = "warn")
 }
 
 convert_plink_to_blupf90_rcpp <- function(ped_path, map_path, out_prefix) {
@@ -906,7 +906,7 @@ convert_plink_to_blupf90_plink_cli_bfile <- function(bed_path, bim_path, fam_pat
 
   run_plink <- function(args) {
     out <- tryCatch(
-      suppressWarnings(system2(plink_exe, args = args, stdout = TRUE, stderr = TRUE)),
+      suppressWarnings(eb_system2(plink_exe, args = args, stdout = TRUE, stderr = TRUE)),
       error = function(e) e
     )
     status <- attr(out, "status")
@@ -1064,7 +1064,7 @@ convert_plink_to_blupf90_plink_cli <- function(ped_path, map_path, out_prefix, p
 
   run_plink <- function(args) {
     out <- tryCatch(
-      suppressWarnings(system2(plink_exe, args = args, stdout = TRUE, stderr = TRUE)),
+      suppressWarnings(eb_system2(plink_exe, args = args, stdout = TRUE, stderr = TRUE)),
       error = function(e) e
     )
     status <- attr(out, "status")
@@ -2093,6 +2093,7 @@ ui <- page_fillable(
 
 # ====== Server Logic ======
 server <- function(input, output, session) {
+  eb_track_session(session, "xmosome")
   
   # English UI copy; AI replies independently follow the user message language.
   lang <- reactiveVal("en")
@@ -2868,13 +2869,13 @@ server <- function(input, output, session) {
     user_rand_idx <- if (n_user_random > 0) (seq_len(n_user_random) + n_fixed) else integer(0)
     idx$random_indices <- sort(c(user_rand_idx, unlist(idx)))
     
-    message(sprintf(
+    eb_log(sprintf(
       "Effect index mapping → fixed=%d, random=%d, animal=%d, mat=%s, pe=%s, mpe=%s",
       n_fixed, n_user_random, idx$a,
       ifelse(is.null(idx$m), "NA", idx$m),
       ifelse(is.null(idx$p), "NA", idx$p),
       ifelse(is.null(idx$mp), "NA", idx$mp)
-    ))
+    ), level = "debug")
     
     return(idx)
   }
@@ -4205,7 +4206,7 @@ OPTION out_se_covar_function
 
   observeEvent(input$ai_user_message, {
     ai_fail <- function(err) {
-      message("[xmosome-ai] error: ", err)
+      eb_log("[xmosome-ai] error: ", err, level = "warn")
       try(session$sendCustomMessage("ai_chat_error", list(error = as.character(err))), silent = TRUE)
     }
     tryCatch({
@@ -4213,7 +4214,7 @@ OPTION out_se_covar_function
       text <- if (is.list(msg)) msg$text else msg
       text <- trimws(as.character(text %||% ""))
       if (!nzchar(text)) return()
-      message("[xmosome-ai] request len=", nchar(text))
+      eb_log("[xmosome-ai] request len=", nchar(text), level = "debug")
 
       if (!exists("ai_chat_request", mode = "function")) {
         ai_fail("AI backend not loaded (ai_backend.R).")
@@ -4302,7 +4303,7 @@ OPTION out_se_covar_function
         role = "assistant", content = result$content
       )
 
-      message("[xmosome-ai] reply ok, chars=", nchar(parsed$reply %||% ""))
+      eb_log("[xmosome-ai] reply ok, chars=", nchar(parsed$reply %||% ""), level = "debug")
       session$sendCustomMessage("ai_chat_reply", list(
         reply = parsed$reply,
         proposal_id = proposal_id,

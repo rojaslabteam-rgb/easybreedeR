@@ -4,10 +4,10 @@
 \alias{run_easybreedeR}
 \title{Launch the easybreedeR Studio (suite launcher)}
 \usage{
-run_easybreedeR(host = "0.0.0.0", port = NULL)
+run_easybreedeR(host = "127.0.0.1", port = NULL)
 }
 \arguments{
-\item{host}{The IPv4 address that the application should listen on. Defaults to "0.0.0.0" to allow access from other devices on the network.}
+\item{host}{The IPv4 address that the application should listen on. Defaults to "127.0.0.1" (this computer only). Use "0.0.0.0" to allow access from other devices on the network.}
 
 \item{port}{The TCP port that the application should listen on. Defaults to NULL, which will use a random available port.}
 }

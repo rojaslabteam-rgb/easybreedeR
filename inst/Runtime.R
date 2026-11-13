@@ -122,3 +122,94 @@ eb_check_pca_budget <- function(n, m) {
   }
   invisible(estimated_mb)
 }
+
+# Run an external tool (PLINK). system2() pastes args into one command line
+# without quoting, so paths containing spaces (common in Windows temp dirs)
+# would be split. `timeout` (seconds, 0 = none) kills the process itself,
+# which R-level time limits cannot do.
+eb_system2 <- function(command, args = character(), ..., timeout = 0) {
+  system2(command, args = shQuote(as.character(args)), ..., timeout = timeout)
+}
+
+# ---- Logging ---------------------------------------------------------------
+# One line per event on stderr. EASYBREEDER_LOG_LEVEL = debug | info (default)
+# | warn | error | off. Startup capability checks and progress steps are
+# "debug" so deployed logs only carry fallbacks and failures.
+eb_log <- function(..., level = "info") {
+  ranks <- c(debug = 1L, info = 2L, warn = 3L, error = 4L, off = 5L)
+  threshold <- ranks[tolower(Sys.getenv("EASYBREEDER_LOG_LEVEL", "info"))]
+  if (is.na(threshold)) threshold <- 2L
+  rank <- ranks[level]
+  if (is.na(rank) || rank < threshold) return(invisible(FALSE))
+  msg <- gsub("[\r\n]+", " | ", trimws(paste(...)))
+  try(cat(sprintf("[easybreedeR] %-5s %s\n", toupper(level), msg), file = stderr()), silent = TRUE)
+  invisible(TRUE)
+}
+
+# ---- Usage tracking --------------------------------------------------------
+eb_is_hosted <- function() {
+  identical(Sys.getenv("R_CONFIG_ACTIVE", ""), "shinyapps") ||
+    any(nzchar(Sys.getenv(c("RSTUDIO_CONTENT_GUID", "RS_CONNECT_START_TIME", "RSC_VERSION", "RSC_INSTANCE"), "")))
+}
+
+# On by default only when deployed; EASYBREEDER_USAGE=1/0 forces it on/off.
+eb_usage_enabled <- function() {
+  flag <- tolower(trimws(Sys.getenv("EASYBREEDER_USAGE", "")))
+  if (flag %in% c("1", "true", "on", "yes")) return(TRUE)
+  if (flag %in% c("0", "false", "off", "no")) return(FALSE)
+  eb_is_hosted()
+}
+
+# Anonymous visitor id: a salted hash of the client address, never the address
+# itself. Forwarded headers are read from the right by the number of trusted
+# proxies (EASYBREEDER_TRUSTED_PROXIES; 1 when hosted, 0 otherwise).
+eb_visitor_id <- function(session) {
+  req <- tryCatch(suppressWarnings(session$request), error = function(e) NULL)
+  if (is.null(req) || !requireNamespace("digest", quietly = TRUE)) return("unknown")
+  hops <- suppressWarnings(as.integer(Sys.getenv("EASYBREEDER_TRUSTED_PROXIES", "")))
+  if (is.na(hops) || hops < 0L) hops <- if (eb_is_hosted()) 1L else 0L
+  ip <- ""
+  if (hops >= 1L) {
+    xff <- req$HTTP_X_FORWARDED_FOR
+    parts <- if (is.null(xff)) character() else trimws(strsplit(paste(xff, collapse = ","), ",", fixed = TRUE)[[1]])
+    parts <- parts[nzchar(parts)]
+    if (length(parts)) ip <- parts[max(1L, length(parts) - hops + 1L)]
+  }
+  if (!nzchar(ip)) ip <- as.character(if (is.null(req$REMOTE_ADDR)) "" else req$REMOTE_ADDR)
+  if (!nzchar(ip)) return("unknown")
+  substr(digest::digest(paste0("easybreedeR-usage|", ip), algo = "sha256", serialize = FALSE), 1L, 12L)
+}
+
+eb_usage_write <- function(fields) {
+  quote_json <- function(x) if (is.numeric(x)) format(x, scientific = FALSE, trim = TRUE) else
+    paste0('"', gsub('(["\\\\])', "\\\\\\1", gsub("[[:cntrl:]]", " ", as.character(x))), '"')
+  line <- paste0("{", paste0('"', names(fields), '":', vapply(fields, quote_json, ""), collapse = ","), "}")
+  # stderr reaches the hosting platform's application log.
+  try(cat("EB_USAGE ", line, "\n", sep = "", file = stderr()), silent = TRUE)
+  # Optional durable copy for servers with a persistent disk.
+  dir <- Sys.getenv("EASYBREEDER_USAGE_DIR", "")
+  if (nzchar(dir)) try({
+    dir.create(dir, recursive = TRUE, showWarnings = FALSE)
+    cat(line, "\n", sep = "", append = TRUE,
+        file = file.path(dir, paste0("usage-", format(Sys.time(), "%Y-%m", tz = "UTC"), ".jsonl")))
+  }, silent = TRUE)
+  invisible(line)
+}
+
+# Call once at the top of a server function. Records who (anonymous id), which
+# app, when, and for how long. Never touches uploaded data or inputs.
+eb_track_session <- function(session, app) {
+  if (!eb_usage_enabled()) return(invisible(FALSE))
+  tryCatch({
+    started <- Sys.time()
+    stamp <- function(t) format(t, "%Y-%m-%dT%H:%M:%SZ", tz = "UTC")
+    base <- list(app = app, sid = substr(as.character(session$token), 1L, 10L), visitor = eb_visitor_id(session))
+    eb_usage_write(c(list(event = "start", ts = stamp(started)), base))
+    session$onSessionEnded(function() {
+      ended <- Sys.time()
+      eb_usage_write(c(list(event = "end", ts = stamp(ended)), base,
+                       list(duration_sec = round(as.numeric(difftime(ended, started, units = "secs"))))))
+    })
+    invisible(TRUE)
+  }, error = function(e) invisible(FALSE))  # tracking must never break the app
+}
